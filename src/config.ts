@@ -1,7 +1,8 @@
 /**
  * pi-shift-router — Configuration loader
  *
- * Reads pi-agent's models-store.json and auth.json, resolves Judge endpoint,
+ * Reads pi-agent's models-store.json (built-in catalog), models.json (custom providers),
+ * and auth.json, resolves Judge endpoint,
  * and manages the pi-shift-router.json config file (user-level + project-level).
  */
 
@@ -12,6 +13,7 @@ import {
   type ShiftRouterConfig,
   type ModelsStore,
   type AuthStore,
+  type ProviderEntry,
   type StoredModel,
   type ProviderEndpoint,
   DEFAULT_CONFIG,
@@ -55,17 +57,61 @@ async function fileExists(path: string): Promise<boolean> {
 
 // ─── Pi-agent shared stores ───────────────────────────────────────
 
-/** Load models-store.json */
+const ENV_LITERALS: Record<string, string> = { "$$": "$", "$!": "!" };
+
+/**
+ * Expand `$VAR` / `${VAR}` / `$$` / `$!` (pi models.json escape rules). Empty expansion → undefined.
+ * Shell commands (`!cmd`) are resolved by pi at request time — unsupported here, so the value
+ * stays unresolvable and the provider falls back to auth.json or is skipped.
+ */
+export function expandEnv(value: string | undefined, env: Record<string, string | undefined> = process.env): string | undefined {
+  if (value === undefined) return undefined;
+  if (value.startsWith("!")) return undefined;
+  const expanded = value.replace(/\$\$|\$!|\$\{(\w+)\}|\$(\w+)/g, (m, braced, plain) =>
+    ENV_LITERALS[m] ?? (env[braced ?? plain ?? ""] ?? ""),
+  );
+  return expanded || undefined;
+}
+
+/**
+ * Merge custom providers (models.json `{ providers: { name: {...} } }` shape) over the
+ * built-in catalog. Provider fields merge per key; custom models are upserted by `id`
+ * (pi semantics: built-in models kept, same-id custom model replaces).
+ */
+export function mergeCustomProviders(builtin: ModelsStore, custom: { providers?: Record<string, ProviderEntry> }): ModelsStore {
+  const store: ModelsStore = { ...builtin };
+  for (const [provider, entry] of Object.entries(custom.providers ?? {})) {
+    if (!entry || typeof entry !== "object") continue;
+    const { models, ...providerFields } = entry;
+    const base = store[provider] ?? { models: [] as StoredModel[] };
+    const merged: ProviderEntry = { ...base, ...providerFields };
+    if (Array.isArray(models)) {
+      const byId = new Map(merged.models.map((m) => [m.id, m]));
+      for (const m of models) if (m && typeof m.id === "string") byId.set(m.id, m);
+      merged.models = [...byId.values()];
+    }
+    store[provider] = merged;
+  }
+  return store;
+}
+
+/** Load models-store.json (built-in catalog), merged with custom providers from models.json. */
 export async function loadModelsStore(): Promise<ModelsStore> {
   if (_modelsStore) return _modelsStore;
-  const storePath = join(PI_AGENT_DIR, "models-store.json");
+  let builtin: ModelsStore = {};
   try {
-    const raw = await readFile(storePath, "utf-8");
-    _modelsStore = JSON.parse(raw) as ModelsStore;
-    return _modelsStore;
+    builtin = JSON.parse(await readFile(join(PI_AGENT_DIR, "models-store.json"), "utf-8")) as ModelsStore;
   } catch {
-    return {};
+    // missing/malformed built-in catalog is not fatal
   }
+  let custom: { providers?: Record<string, ProviderEntry> } = {};
+  try {
+    custom = JSON.parse(await readFile(join(PI_AGENT_DIR, "models.json"), "utf-8")) as { providers?: Record<string, ProviderEntry> };
+  } catch {
+    // missing custom models file is fine
+  }
+  _modelsStore = mergeCustomProviders(builtin, custom);
+  return _modelsStore;
 }
 
 /** Load auth.json */
@@ -137,6 +183,7 @@ export async function resolveFastEndpoints(
   config: ShiftRouterConfig,
   storeOverride?: ModelsStore,
   authOverride?: AuthStore,
+  env: Record<string, string | undefined> = process.env,
 ): Promise<ProviderEndpoint[]> {
   const store = storeOverride ?? (await loadModelsStore());
   const auth = authOverride ?? (await loadAuthStore());
@@ -146,12 +193,13 @@ export async function resolveFastEndpoints(
     if (!provEntry) return null;
     const modelInfo = provEntry.models.find((m) => m.id === modelId);
     if (!modelInfo) return null;
-    const apiKey = auth[provider]?.key;
+    // auth.json (raw key, verbatim) first, then provider-level inline apiKey from models.json (env-var expandable).
+    const apiKey = auth[provider]?.key ?? expandEnv(provEntry.apiKey, env);
     if (!apiKey) return null;
     return {
       provider,
-      baseUrl: (modelInfo.baseUrl ?? "").replace(/\/+$/, ""),
-      apiType: modelInfo.api ?? "openai-completions",
+      baseUrl: (modelInfo.baseUrl ?? provEntry.baseUrl ?? "").replace(/\/+$/, ""),
+      apiType: modelInfo.api ?? provEntry.api ?? "openai-completions",
       apiKey,
       modelId,
     };
@@ -173,7 +221,7 @@ export async function resolveFastEndpoints(
   // 2. Fallback: cheapest model with auth.
   const candidates: Array<{ provider: string; modelId: string; cost: number }> = [];
   for (const [prov, entry] of Object.entries(store)) {
-    if (!auth[prov]?.key) continue;
+    if (!(auth[prov]?.key ?? expandEnv(entry.apiKey, env))) continue;
     for (const m of entry.models) {
       const cost = m.cost?.input ?? Number.MAX_SAFE_INTEGER;
       if (cost >= 0) candidates.push({ provider: prov, modelId: m.id, cost });

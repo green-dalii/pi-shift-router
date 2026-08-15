@@ -199,11 +199,18 @@ export interface StoredModel {
   maxTokens?: number;
 }
 
-/** models-store.json shape */
+/** One provider's entry in the merged model store. */
+export interface ProviderEntry {
+  models: StoredModel[];
+  /** Provider-level fields — custom providers in models.json put baseUrl/api/apiKey here. */
+  baseUrl?: string;
+  api?: string;
+  apiKey?: string;
+}
+
+/** Merged model store: built-in catalog (models-store.json) + custom providers (models.json). */
 export interface ModelsStore {
-  [provider: string]: {
-    models: StoredModel[];
-  };
+  [provider: string]: ProviderEntry;
 }
 
 /** Window entry — one Judge result */
@@ -226,7 +233,7 @@ export interface AuthStore {
 export interface ProviderEndpoint {
   provider: string;
   baseUrl: string;
-  apiType: string;       // "openai-completions" | "anthropic-messages"
+  apiType: string;       // "openai-completions" | "openai-responses" | "anthropic-messages"
   apiKey: string;
   modelId: string;
 }

@@ -244,6 +244,17 @@ interface ShiftRouterConfig {
 | Model missing in provider | Warning |
 | Both tiers identical | Warning (routing becomes a no-op) |
 
+### 5.4 Model Store Sources
+
+The router resolves models from two pi-agent files, merged in `loadModelsStore()`:
+
+| File | Role |
+|------|------|
+| `~/.pi/agent/models-store.json` | Built-in catalog |
+| `~/.pi/agent/models.json` | Custom providers (`{ "providers": { ... } }`), merged over the catalog |
+
+Custom provider entries may set provider-level `baseUrl`, `api`, and `apiKey`; custom models are upserted by `id`. `apiKey` supports pi env-var expansion (`$VAR` / `${VAR}`, `$$` → `$`, `$!` → `!`). Shell commands (`!cmd`) are resolved by pi at request time and are not available to the router, so such providers are skipped unless `auth.json` has a key — which always wins over an inline `apiKey`.
+
 ---
 
 ## 6. Commands

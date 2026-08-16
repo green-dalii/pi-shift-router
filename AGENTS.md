@@ -39,8 +39,32 @@ This document is the developer handbook for pi-shift-router. It defines the phil
 - **Commit messages use module prefix:** `feat:` / `fix:` / `refactor:` / `docs:` / `test:` / `chore:`.
 - **Principle changes update SPEC first.** Any change to philosophy, architecture, or user-facing contract must land in `SPEC.md` (or `AGENTS.md` for developer-policy changes) before code.
 - **PRs stay focused.** One logical change per PR. Split large changes into smaller reviewable pieces.
-- **Hard Stop before `git push` and `npm publish` — explicit user approval required.** The agent must NOT run `git push origin ...` or `npm publish` (or `NPM_CONFIG_CACHE=... npm publish`) without the user first saying "push" / "发布" / "go" / "ship it" in the same turn. The reasoning is that "commit" is local and reversible, but push (and especially publish) are public, irreversible, and visible to every downstream user — silently pushing has shipped broken or unwanted state more than once. Bumping the version in `package.json` is also part of the release workflow and must be coordinated with the user, not done implicitly.
+- **Hard Stop before `git push`, `npm publish`, `gh pr create`, and `gh pr merge` — explicit user approval required.** The agent must NOT run `git push origin ...`, `npm publish` (or `NPM_CONFIG_CACHE=... npm publish`), `gh pr create`, or `gh pr merge` without the user first saying "push" / "发布` / "go" / "ship it" in the same turn. The reasoning is that "commit" is local and reversible, but push / PR creation / merge / publish are public, irreversible, and visible to every downstream user — silently pushing has shipped broken or unwanted state more than once. Branch protection on `main` (see next section) provides a second layer of defense, but the agent still needs explicit user approval **before** opening the PR or pushing the branch. Bumping the version in `package.json` is also part of the release workflow and must be coordinated with the user, not done implicitly.
 - **Version bump on every release.** Every push that is meant to be `npm publish`-able must bump `package.json` from `X.Y.Z` to the next semver (use `npm version patch` / `minor` / `major` based on the change kind, or edit the file directly) and update `CHANGELOG.md` with a new top entry. The repo version in `package.json` must always match the latest published npm version — a stale `package.json` version is a release-process bug.
+
+### Branch Protection
+
+GitHub branch protection is enabled on `main` with at least one required review approval. **All commits to `main` must flow through a pull request with review.** Direct `git push origin main` is blocked by GitHub and is no longer a valid workflow — even for the agent.
+
+**Standard flow for any change (including release bumps and hotfixes):**
+
+1. **Branch off `main`.** Create a descriptive branch (e.g., `fix/orchestrate-trigger`, `docs/pr-1-followup`, `chore/release-v1.1.0`, `hotfix/v1.0.1-cache-leak`).
+2. **Commit locally on the branch.** Multiple commits are fine; the agent squashes on merge via `gh pr merge --squash`.
+3. **Push the branch** — requires explicit user approval per the Hard Stop rule above (`push` / `发布` / `go` / `ship it`).
+4. **Open a PR** with `gh pr create` against `main`. The PR body must summarize the change, link any related issues (`Closes #N` / `Refs #N`), and note any breaking changes or follow-up work. Requires explicit user approval.
+5. **Wait for review.** The agent must NOT self-approve or auto-merge. Wait for the user (or another reviewer) to leave a review. The agent may post a review comment summarizing its own audit findings (e.g., via `gh pr comment`) so the human reviewer has full context.
+6. **Merge via GitHub** using `gh pr merge --squash --delete-branch` after the user explicitly approves the merge. Squash keeps history linear and the PR title becomes the commit subject.
+7. **Verify on `main`.** `git pull`, run `shazam_verify`, confirm working tree is clean. The `src/index.ts` (or any other) uncommitted changes that existed before the PR flow must NOT survive onto `main` — they live on the branch.
+
+**Edge cases:**
+
+- **Hotfixes** (e.g., v1.0.0 has a critical bug): same flow, branch name `hotfix/vX.Y.Z`. Still PR + review, still needs a version bump + CHANGELOG entry. No "fast path" bypasses review.
+- **Version bumps** for releases are also a PR (e.g., `chore: bump v1.1.0`). The agent never edits `package.json` on `main` directly.
+- **Tag pushes** (`v1.0.0`, etc.) happen *after* the release commit is on `main` via PR. Tag creation/push is separate from the PR flow but still subject to Hard Stop approval.
+- **Working-tree-only fixes** (e.g., debug logs that never get committed) do not need a PR — but anything that gets committed must follow the flow above.
+- **Reverts** are also PRs, not force-pushes to `main`. Use `gh pr create` with a body like `Reverts #N because <reason>`.
+
+**Why two layers (Hard Stop + branch protection):** Branch protection prevents *any* push to `main`, including from the agent acting without the user in the loop. The Hard Stop rule is the agent's own discipline: even when branch protection allows a push to a feature branch, the agent must wait for the user to say "go". The two layers are complementary, not redundant.
 
 ### Release Workflow
 

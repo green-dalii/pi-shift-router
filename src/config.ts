@@ -60,14 +60,25 @@ async function fileExists(path: string): Promise<boolean> {
 const ENV_LITERALS: Record<string, string> = { "$$": "$", "$!": "!" };
 
 /**
- * Expand `$VAR` / `${VAR}` / `$$` / `$!` (pi models.json escape rules). Empty expansion → undefined.
+ * Expand `$VAR` / `${VAR}` / `$$` / `$!` (pi models.json escape rules).
+ *
+ * Variable names must start with a letter or underscore (POSIX env-var
+ * convention). Patterns like `$1` or `$5` (digit-prefixed) are preserved
+ * literally, avoiding silent API-key truncation for any value that happens
+ * to contain such patterns.
+ *
+ * Note: letter-prefixed `$VAR` patterns (e.g., `"key$REAL"`) are still
+ * consumed and expanded if the env defines `VAR`. Users who want a literal
+ * `$VAR` substring inside an apiKey should use the `$$` escape (e.g.,
+ * `"key$$VAR"` → `"key$VAR"`).
+ *
  * Shell commands (`!cmd`) are resolved by pi at request time — unsupported here, so the value
  * stays unresolvable and the provider falls back to auth.json or is skipped.
  */
 export function expandEnv(value: string | undefined, env: Record<string, string | undefined> = process.env): string | undefined {
   if (value === undefined) return undefined;
   if (value.startsWith("!")) return undefined;
-  const expanded = value.replace(/\$\$|\$!|\$\{(\w+)\}|\$(\w+)/g, (m, braced, plain) =>
+  const expanded = value.replace(/\$\$|\$!|\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)/g, (m, braced, plain) =>
     ENV_LITERALS[m] ?? (env[braced ?? plain ?? ""] ?? ""),
   );
   return expanded || undefined;

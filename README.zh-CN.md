@@ -261,6 +261,7 @@ Smart 档负责规划与审核，Fast 档负责实现——worker 用 `fresh` �
 
 ## 关联项目
 
+- **[dsh-shift-router](https://github.com/green-dalii/dsh-shift-router)** —— 姊妹项目：同样的双层路由架构（LLM Judge、多模型 fallback chain、指数退避 failover、任务级编排）移植到 **DeepSeek Harness** 而不是 pi-coding-agent。使用 `dsh plugin` 安装，通过 `cordis.patch.yml` profile 层挂载。同作者作品。
 - **[obsidian-llm-wiki](https://github.com/green-dalii/obsidian-llm-wiki)** —— 一款 Obsidian 插件，把笔记变成可关联、可查询的知识库：Karpathy LLM Wiki 理念，直接内建在你写笔记的编辑器里。图检索无需 embedding、界面支持十种语言、适配各类 LLM provider。本地优先、无后端服务、GDPR-friendly。同作者作品。
 
 ---

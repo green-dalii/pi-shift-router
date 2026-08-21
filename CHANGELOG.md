@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.0.1] — Custom-provider support, branch protection policy, expandEnv fix
+
+### Added
+
+- **Custom providers via `~/.pi/agent/models.json`** (#1) — merge user-supplied providers over the built-in catalog with env-expandable inline `apiKey`. Built-in models survive; same-id custom models replace per pi semantics. Provider-level fields (`baseUrl`, `api`, `apiKey`) supported; custom models are upserted by `id`. Backward-compatible: a missing or empty `models.json` is non-fatal.
+- **Branch protection workflow documented** (#3) — `AGENTS.md` now describes the 7-step standard flow for any change (branch off `main`, commit, push, open PR, wait for review, squash-merge, verify), plus five edge cases (hotfixes, version bumps, tag pushes, working-tree-only fixes, reverts) and the rationale for layering Hard Stop on top of GitHub-enforced branch protection.
+
+### Fixed
+
+- **`expandEnv` regex silently consumed `$<digit>` patterns** (#4) — a user pasting an API key with literal `$1`, `$5`, or `$KEY_SUFFIX`-style substrings lost those characters silently; the provider then got a truncated key with no router-side error pointing to the cause. Tightened the regex to require a letter or underscore prefix (`[A-Za-z_]\w*`, POSIX env-var convention). `$1` and `$5` are now preserved literally. Letter-prefixed `$VAR` patterns are still expanded by design (the `$$` escape is recommended for literal substrings). 13 new `expandEnv` test cases document both the fix and the remaining known limitation.
+- **Orchestration never triggered in v1.0.0** — the `(event as any).systemPrompt = ...` mutation was dead code (pi only reads `handlerResult.systemPrompt`); `pi.tools?.subagent` was always undefined (pi.tools is an internal Map on Extension, not ExtensionAPI). Switched to `pi.getAllTools()` / `pi.getActiveTools()` with try/catch fallback, plus a Judge `orchestrate` signal that decouples complexity from scale. Shipped pre-v1.0.1 (commit `eac87b0`) but not yet released; will land in v1.1.0 with the verbose-logging work.
+
+### Changed
+
+- **SPEC.md §5.4** — documented `apiKey` resolution order (auth.json → inline apiKey → skip), `baseUrl` fallback chain (modelInfo → provEntry → `""`), cheapest-fallback eligibility (custom providers with env-set apiKey ARE eligible; `defaultModel` is NOT consulted), and the `_modelsStore` cache-invalidation limitation (editing `models.json` requires a pi restart).
+- **Hard Stop rule extended** (#3) — `gh pr create` and `gh pr merge` now require explicit user approval, on par with `git push` and `npm publish`.
+
+### Notes
+
+- 320 tests pass (15 files; +15 since v1.0.0).
+- No breaking changes; default behavior for existing configs is unchanged.
+
 ## [1.0.0] — Task-level orchestration: the CTO delegates to Fast subagents
 
 ### Added

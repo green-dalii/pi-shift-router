@@ -6,9 +6,23 @@
  * they require filesystem mocks which are out of scope for unit tests.
  */
 
-import { describe, it, expect } from "vitest";
-import { expandEnv, validateConfig, flattenModels, mergeCustomProviders, resolveFastEndpoints } from "../src/config.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdir, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  expandEnv,
+  validateConfig,
+  flattenModels,
+  mergeCustomProviders,
+  resolveFastEndpoints,
+  loadModelsStore,
+  invalidateModelsStoreCache,
+  invalidateConfigCache,
+} from "../src/config.js";
 import { DEFAULT_CONFIG, type ModelsStore, type ShiftRouterConfig, type StoredModel } from "../src/types.js";
+
+const TMP_DIR = "/tmp/pi-shift-router-stale-test";
+const TMP_CUSTOM = join(TMP_DIR, "models.json");
 
 function makeStore(): ModelsStore {
   return {
@@ -406,5 +420,91 @@ describe("validateConfig", () => {
     };
     const warnings = validateConfig(cfg, makeStore());
     expect(warnings.length).toBeGreaterThanOrEqual(2);
+  });
+});
+// ─── invalidateModelsStoreCache (stale-list bug fix) ──────────────────
+//
+// Issue: /router config showed a stale model list because _modelsStore
+// was cached for the lifetime of the pi session. After this fix, the
+// wizard always re-reads models-store.json + models.json from disk.
+//
+// Tests use /tmp paths via the override parameter on loadModelsStore(),
+// so they don't touch the user's real ~/.pi/agent/models.json.
+describe("invalidateModelsStoreCache (stale-list fix)", () => {
+  beforeEach(async () => {
+    await rm(TMP_DIR, { recursive: true, force: true });
+    await mkdir(TMP_DIR, { recursive: true });
+    invalidateModelsStoreCache();
+  });
+
+  afterEach(async () => {
+    await rm(TMP_DIR, { recursive: true, force: true });
+    invalidateModelsStoreCache();
+  });
+
+  it("WITHOUT invalidateModelsStoreCache: cached view persists across disk mutations", async () => {
+    await writeFile(TMP_CUSTOM, JSON.stringify({
+      providers: { "_stale_test_a": { models: [{ id: "m-a" }], baseUrl: "https://a" } },
+    }), "utf-8");
+    invalidateModelsStoreCache();
+    const first = await loadModelsStore({ custom: TMP_CUSTOM });
+    expect(Object.keys(first)).toContain("_stale_test_a");
+    expect(Object.keys(first)).not.toContain("_stale_test_b");
+
+    await writeFile(TMP_CUSTOM, JSON.stringify({
+      providers: {
+        "_stale_test_a": { models: [{ id: "m-a" }], baseUrl: "https://a" },
+        "_stale_test_b": { models: [{ id: "m-b" }], baseUrl: "https://b" },
+      },
+    }), "utf-8");
+
+    const cached = await loadModelsStore({ custom: TMP_CUSTOM });
+    expect(Object.keys(cached)).toContain("_stale_test_a");
+    expect(Object.keys(cached)).not.toContain("_stale_test_b");
+  });
+
+  it("WITH invalidateModelsStoreCache: re-read reflects current disk state", async () => {
+    await writeFile(TMP_CUSTOM, JSON.stringify({
+      providers: { "_stale_test_a": { models: [{ id: "m-a" }], baseUrl: "https://a" } },
+    }), "utf-8");
+    invalidateModelsStoreCache();
+    await loadModelsStore({ custom: TMP_CUSTOM });
+
+    await writeFile(TMP_CUSTOM, JSON.stringify({
+      providers: {
+        "_stale_test_b": { models: [{ id: "m-b" }], baseUrl: "https://b" },
+      },
+    }), "utf-8");
+
+    invalidateModelsStoreCache();
+    const fresh = await loadModelsStore({ custom: TMP_CUSTOM });
+    expect(Object.keys(fresh)).toContain("_stale_test_b");
+    expect(Object.keys(fresh)).not.toContain("_stale_test_a");
+  });
+
+  it("invalidateConfigCache() also clears _modelsStore (defensive: config save implies possible catalog change)", async () => {
+    await writeFile(TMP_CUSTOM, JSON.stringify({
+      providers: { "_stale_test_a": { models: [{ id: "m-a" }], baseUrl: "https://a" } },
+    }), "utf-8");
+    invalidateModelsStoreCache();
+    await loadModelsStore({ custom: TMP_CUSTOM });
+
+    await writeFile(TMP_CUSTOM, JSON.stringify({
+      providers: { "_stale_test_b": { models: [{ id: "m-b" }], baseUrl: "https://b" } },
+    }), "utf-8");
+
+    invalidateConfigCache();
+    const after = await loadModelsStore({ custom: TMP_CUSTOM });
+    expect(Object.keys(after)).toContain("_stale_test_b");
+    expect(Object.keys(after)).not.toContain("_stale_test_a");
+  });
+
+  it("loadModelsStore accepts builtin + custom path overrides; missing builtin returns custom only", async () => {
+    await writeFile(TMP_CUSTOM, JSON.stringify({
+      providers: { "_only_custom": { models: [{ id: "x" }], baseUrl: "u" } },
+    }), "utf-8");
+    invalidateModelsStoreCache();
+    const store = await loadModelsStore({ builtin: join(TMP_DIR, "nonexistent.json"), custom: TMP_CUSTOM });
+    expect(Object.keys(store)).toContain("_only_custom");
   });
 });

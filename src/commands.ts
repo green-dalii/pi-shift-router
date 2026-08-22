@@ -376,6 +376,7 @@ export function registerCommands(
       if (arg === "orchestrate off") {
         config.orchestration.mode = "off";
         resetOrchestration(state);
+        updateStatus(ctx.ui);
         onConfigChanged();
         ctx.ui.notify("pi-shift-router: 🪄 Orchestration OFF — back to plain tier routing", "info");
         return;

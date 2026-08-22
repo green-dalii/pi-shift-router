@@ -29,6 +29,7 @@ import {
   loadModelsStore,
   flattenModels,
   saveConfig,
+  invalidateModelsStoreCache,
 } from "./config.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -97,6 +98,10 @@ async function routeConfigWizard(
   cwd: string,
   ctx: ExtensionCommandContext,
 ): Promise<boolean> {
+  // Force a fresh read of the merged models store: pi's catalog and the user's
+  // models.json may have been updated since pi started, and the picker must
+  // reflect current disk state (Issue: stale model list in /router config).
+  invalidateModelsStoreCache();
   const store = await loadModelsStore();
   const allModels = flattenModels(store);
 
@@ -371,6 +376,7 @@ export function registerCommands(
       if (arg === "orchestrate off") {
         config.orchestration.mode = "off";
         resetOrchestration(state);
+        updateStatus(ctx.ui);
         onConfigChanged();
         ctx.ui.notify("pi-shift-router: 🪄 Orchestration OFF — back to plain tier routing", "info");
         return;

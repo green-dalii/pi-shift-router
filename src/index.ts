@@ -46,6 +46,27 @@ function allTiersIdentical(config: ShiftRouterConfig): boolean {
   return modelsJson(fast) === modelsJson(smart);
 }
 
+/**
+ * Compute the status-bar label for the current router state.
+ * Pure function (no I/O) so it's directly testable.
+ *
+ * Returns undefined when the status bar is disabled (the caller should
+ * pass undefined to `ui.setStatus` to clear it).
+ */
+export function formatStatusBarLabel(cfg: ShiftRouterConfig, s: RouterState): string | undefined {
+  if (!cfg.ux.statusBar) return undefined;
+  if (s.orchestration.active) {
+    const o = s.orchestration;
+    return o.spawned === 0
+      ? "🪄 orchestrating"
+      : `🪄 ${o.done}/${o.spawned} workers`;
+  }
+  const speed = s.recentSpeeds.length > 0 ? s.recentSpeeds[s.recentSpeeds.length - 1] : 0;
+  return cfg.enabled
+    ? formatTierDisplayWithSpeed(s.currentTier, s.currentModelId, speed)
+    : "⛔";
+}
+
 export default function slimRouterExtension(pi: ExtensionAPI) {
   let config: ShiftRouterConfig;
   let state: RouterState;
@@ -97,22 +118,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
   // ── Status bar ──────────────────────────────────────────────
 
   function updateBar(ui: any, cfg: ShiftRouterConfig, s: RouterState) {
-    if (!cfg.ux.statusBar) { ui.setStatus("shift-router", undefined); return; }
-    if (s.orchestration.active) {
-      // Orchestration runs on the Smart tier — show what the CTO is doing:
-      // how many Fast subagents spawned / completed so far.
-      const o = s.orchestration;
-      const label = o.spawned === 0
-        ? "🪄 orchestrating"
-        : `🪄 ${o.done}/${o.spawned} workers`;
-      ui.setStatus("shift-router", label);
-      return;
-    }
-    const speed = s.recentSpeeds.length > 0 ? s.recentSpeeds[s.recentSpeeds.length - 1] : 0;
-    const badge = cfg.enabled
-      ? formatTierDisplayWithSpeed(s.currentTier, s.currentModelId, speed)
-      : "⛔";
-    ui.setStatus("shift-router", badge);
+    ui.setStatus("shift-router", formatStatusBarLabel(cfg, s));
   }
 
   // ── Session start ───────────────────────────────────────────
@@ -346,6 +352,11 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         );
       }
       exitOrchestration(state);
+      // Refresh the status bar: the previous frame may have shown
+      // "🪄 orchestrating…" or "🪄 X/Y workers", but state.orchestration
+      // is now inactive. Without this refresh the stale label persists
+      // until the next event that calls updateBar (next turn, etc.).
+      if (config.ux.statusBar) updateBar(ctx.ui, config, state);
     }
 
     if (!plan) {

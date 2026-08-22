@@ -273,7 +273,14 @@ Trailing slashes are trimmed.
 
 The cheapest-fallback pool includes **all providers** that have a valid API key — whether from `auth.json` or from an env-expanded inline `apiKey` in `models.json`. Cost is measured by `cost.input` (USD per 1M tokens). The cheapest model wins; **`defaultModel` from `settings.json` is NOT consulted in this path** — users who want to protect their default-model preference must configure the fast tier explicitly rather than leaving it empty.
 
-**Cache invalidation**: `loadModelsStore()` caches the merged store in module-local state. `invalidateConfigCache()` clears the user/project config cache but **not** the models-store cache, because `models-store.json` is owned by pi-agent. Editing `models.json` (which the router *does* partially own) also requires a pi restart to take effect. This is a known limitation; users should restart pi after editing either file.
+**Cache invalidation**: `loadModelsStore()` caches the merged store in module-local state. The cache is invalidated in two places:
+
+- **At the entry of `/router config`** — the wizard always re-reads `models-store.json` and `models.json` from disk so the picker shows the current catalog, not a startup snapshot (avoids the stale-list bug: providers may have been added or removed since pi started).
+- **In `invalidateConfigCache()`** — when the user saves config via `/router config` or `saveConfig()`, the merged-store cache is also cleared so the next read reflects current disk state.
+
+`models-store.json` is owned by pi-agent; the router's invalidation only affects what *our* `/router config` picker shows, not what pi-agent itself uses for inference. Editing `models-store.json` will still require a pi restart to take effect in pi's actual model picker (out of our control).
+
+`_authStore` is never invalidated by the router — it reflects pi-agent's own auth state.
 
 ---
 

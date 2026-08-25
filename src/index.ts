@@ -46,6 +46,27 @@ function allTiersIdentical(config: ShiftRouterConfig): boolean {
   return modelsJson(fast) === modelsJson(smart);
 }
 
+/**
+ * Compute the status-bar label for the current router state.
+ * Pure function (no I/O) so it's directly testable.
+ *
+ * Returns undefined when the status bar is disabled (the caller should
+ * pass undefined to `ui.setStatus` to clear it).
+ */
+export function formatStatusBarLabel(cfg: ShiftRouterConfig, s: RouterState): string | undefined {
+  if (!cfg.ux.statusBar) return undefined;
+  if (s.orchestration.active) {
+    const o = s.orchestration;
+    return o.spawned === 0
+      ? "🪄 orchestrating"
+      : `🪄 ${o.done}/${o.spawned} workers`;
+  }
+  const speed = s.recentSpeeds.length > 0 ? s.recentSpeeds[s.recentSpeeds.length - 1] : 0;
+  return cfg.enabled
+    ? formatTierDisplayWithSpeed(s.currentTier, s.currentModelId, speed)
+    : "⛔";
+}
+
 export default function slimRouterExtension(pi: ExtensionAPI) {
   let config: ShiftRouterConfig;
   let state: RouterState;
@@ -97,22 +118,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
   // ── Status bar ──────────────────────────────────────────────
 
   function updateBar(ui: any, cfg: ShiftRouterConfig, s: RouterState) {
-    if (!cfg.ux.statusBar) { ui.setStatus("shift-router", undefined); return; }
-    if (s.orchestration.active) {
-      // Orchestration runs on the Smart tier — show what the CTO is doing:
-      // how many Fast subagents spawned / completed so far.
-      const o = s.orchestration;
-      const label = o.spawned === 0
-        ? "🪄 orchestrating"
-        : `🪄 ${o.done}/${o.spawned} workers`;
-      ui.setStatus("shift-router", label);
-      return;
-    }
-    const speed = s.recentSpeeds.length > 0 ? s.recentSpeeds[s.recentSpeeds.length - 1] : 0;
-    const badge = cfg.enabled
-      ? formatTierDisplayWithSpeed(s.currentTier, s.currentModelId, speed)
-      : "⛔";
-    ui.setStatus("shift-router", badge);
+    ui.setStatus("shift-router", formatStatusBarLabel(cfg, s));
   }
 
   // ── Session start ───────────────────────────────────────────
@@ -123,6 +129,10 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     await init(ctx);
+    // Defensive: a new session should never inherit orchestration state
+    // from a previous one (e.g. after an abort that skipped agent_end).
+    // Cheap no-op when inactive; refreshes the bar to a sane label.
+    if (state.orchestration.active) resetOrchestration(state);
     updateBar(ctx.ui, config, state);
 
     // Hint when tiers are identically configured
@@ -242,65 +252,94 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         return false;
       }
     })();
-    if (shouldOrchestrate(config, judgeResult.tier, judgeResult.orchestrate, smartResolvable, subagentAvailable)) {
-      enterOrchestration(state);
-      const orchPrompt = buildOrchestratorPrompt(config, cooldownPredicate(state.modelCooldowns, Date.now()));
-      if (config.ux.routerLogVerbose) {
-        console.log(
-          `[ShiftRouter] 🪄 orchestrating: judge=${judgeResult.tier}` +
-            (judgeResult.orchestrate !== undefined ? ` orchestrate=${judgeResult.orchestrate}` : "") +
-            `, injecting orchestrator prompt (${orchPrompt.length} chars)`,
-        );
-      }
-      // Animate the orchestration badge in the status bar while the Smart
-      // agent plans/delegates. updateBar() paints the live worker count;
-      // the dots animation keeps it visibly alive between spawn events.
+    // Manual override means the user explicitly forced plain routing for
+    // this turn — never inject the orchestrator prompt or enter the
+    // orchestration state. Without this guard, a `/router smart` + complex
+    // task would enter orchestration and then agent_end's manualOverride
+    // guard would skip the failover path while orchestration state (and its
+    // status-bar label) lingered.
+    const orchestrationAllowed = !state.manualOverride.active;
+    let orchestratorSystemPrompt: string | undefined;
+    try {
+      if (
+        orchestrationAllowed &&
+        shouldOrchestrate(config, judgeResult.tier, judgeResult.orchestrate, smartResolvable, subagentAvailable)
+      ) {
+        enterOrchestration(state);
+        const orchPrompt = buildOrchestratorPrompt(config, cooldownPredicate(state.modelCooldowns, Date.now()));
+        if (config.ux.routerLogVerbose) {
+          console.log(
+            `[ShiftRouter] 🪄 orchestrating: judge=${judgeResult.tier}` +
+              (judgeResult.orchestrate !== undefined ? ` orchestrate=${judgeResult.orchestrate}` : "") +
+              `, injecting orchestrator prompt (${orchPrompt.length} chars)`,
+          );
+        }
+        // Animate the orchestration badge in the status bar while the Smart
+        // agent plans/delegates. updateBar() paints the live worker count;
+        // the dots animation keeps it visibly alive between spawn events.
       if (config.ux.statusBar) startLoading(ctx.ui, "🪄 orchestrating");
-      // Inject the orchestrator instruction into this turn's system prompt
-      // by returning it — pi's before_agent_start handler chain reads
-      // `result.systemPrompt` from the handler return value (NOT
-      // `event.systemPrompt`), so we must use this contract. Earlier
-      // versions mutated `event.systemPrompt` in place, which was dead
-      // code: the mutation never reached the LLM.
-      const baseSystemPrompt = (event as any).systemPrompt;
-      if (typeof baseSystemPrompt !== "string") {
-        // No system prompt at all (shouldn't happen — BeforeAgentStartEvent
-        // types it as string). Fallback: inject as a hidden custom message
-        // so the instruction still reaches the LLM this turn.
-        return {
-          message: {
-            customType: "shift-router-orchestrator",
-            content: orchPrompt,
-            display: false,
-          },
-        };
+        // Inject the orchestrator instruction into this turn's system prompt
+        // by returning it — pi's before_agent_start handler chain reads
+        // `result.systemPrompt` from the handler return value (NOT
+        // `event.systemPrompt`), so we must use this contract. Earlier
+        // versions mutated `event.systemPrompt` in place, which was dead
+        // code: the mutation never reached the LLM.
+        const baseSystemPrompt = (event as any).systemPrompt;
+        if (typeof baseSystemPrompt !== "string") {
+          // No system prompt at all (shouldn't happen — BeforeAgentStartEvent
+          // types it as string). Fallback: inject as a hidden custom message
+          // so the instruction still reaches the LLM this turn.
+          return {
+            message: {
+              customType: "shift-router-orchestrator",
+              content: orchPrompt,
+              display: false,
+            },
+          };
+        }
+        const chainedSystemPrompt = baseSystemPrompt + "\n\n" + orchPrompt;
+        if (config.ux.routerLogVerbose) {
+          console.log(
+            `[ShiftRouter] 🪄 system prompt chained: ${baseSystemPrompt.length} → ${chainedSystemPrompt.length} chars (+${orchPrompt.length} orchestrator)`,
+          );
+        }
+        // Defer the handler return to the end of this function so the
+        // model-switch logic below still runs on orchestration turns (the
+        // Judge said "smart" — switchTo points at the smart chain, and
+        // returning early here would leave the previous turn's model active,
+        // potentially a Fast model running the CTO loop).
+        orchestratorSystemPrompt = chainedSystemPrompt;
       }
-      const chainedSystemPrompt = baseSystemPrompt + "\n\n" + orchPrompt;
-      if (config.ux.routerLogVerbose) {
-        console.log(
-          `[ShiftRouter] 🪄 system prompt chained: ${baseSystemPrompt.length} → ${chainedSystemPrompt.length} chars (+${orchPrompt.length} orchestrator)`,
-        );
-      }
-      return { systemPrompt: chainedSystemPrompt };
-    }
 
-    if (result.switchTo) {
-      const ok = await applyModelSwitch(
-        result.switchTo, state,
-        ctx.modelRegistry as any,
-        (m) => pi.setModel(m as any),
-      );
-      if (verbose) console.log(`[ShiftRouter] model switch ${ok ? "ok" : "FAILED"}`);
-      if (ok && !config.ux.quietMode && config.ux.inlineToast) {
-        ctx.ui.notify(`${formatTierDisplay(state.currentTier, state.currentModelId)}`, "info");
+      if (result.switchTo) {
+        const ok = await applyModelSwitch(
+          result.switchTo, state,
+          ctx.modelRegistry as any,
+          (m) => pi.setModel(m as any),
+        );
+        if (verbose) console.log(`[ShiftRouter] model switch ${ok ? "ok" : "FAILED"}`);
+        if (ok && !config.ux.quietMode && config.ux.inlineToast) {
+          ctx.ui.notify(`${formatTierDisplay(state.currentTier, state.currentModelId)}`, "info");
+        }
+      } else if (!state.currentModelId && state.currentTier) {
+        // First turn with no model yet — resolve one for current tier,
+        // skipping models in cooldown.
+        const m = findBestModelForTier(state.currentTier, config, ctx.modelRegistry as any, cooldownPredicate(state.modelCooldowns, Date.now()));
+        if (m) {
+          await applyModelSwitch(m, state, ctx.modelRegistry as any, (model) => pi.setModel(model as any));
+        }
       }
-    } else if (!state.currentModelId && state.currentTier) {
-      // First turn with no model yet — resolve one for current tier,
-      // skipping models in cooldown.
-      const m = findBestModelForTier(state.currentTier, config, ctx.modelRegistry as any, cooldownPredicate(state.modelCooldowns, Date.now()));
-      if (m) {
-        await applyModelSwitch(m, state, ctx.modelRegistry as any, (model) => pi.setModel(model as any));
-      }
+    } catch (err) {
+      // Error containment: if anything after the Judge call throws
+      // (processRoute / prompt build / model switch), the turn would die
+      // before agent_end ever fires — leaving the dots animation spinning
+      // and state.orchestration.active stuck true (status bar frozen on
+      // "🪄 orchestrating…"). Clean up here and let the turn proceed on the
+      // current model; per AGENTS.md errors are logged, never crash host.
+      console.error("[ShiftRouter] before_agent_start error — recovering:", err);
+      stopLoading();
+      if (state.orchestration.active) exitOrchestration(state);
+      if (config.ux.statusBar) updateBar(ctx.ui, config, state);
     }
 
     if (config.ux.routerLogVerbose) {
@@ -311,6 +350,13 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
 
     updateBar(ctx.ui, config, state);
     if (state.manualOverride.active) clearManualOverride(state);
+
+    // Deliver the orchestrator system prompt via the handler RESULT — pi's
+    // before_agent_start chain reads `result.systemPrompt` from the return
+    // value, NOT `event.systemPrompt` (in-place mutation is dead code).
+    if (orchestratorSystemPrompt !== undefined) {
+      return { systemPrompt: orchestratorSystemPrompt };
+    }
   });
 
   // ── Runtime failover (SPEC §8.5) ──────────────────────────────
@@ -330,6 +376,37 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     // the UI from clearing it, this guarantees it goes away.
     try { ctx.ui.setWorkingVisible(false); } catch { /* ignore */ }
     if (!initialized) await init(ctx);
+
+    // ── Orchestration lifecycle (SPEC §9.3) ────────────────────
+    // MVP is single-turn orchestration: the Smart turn that got the
+    // orchestrator prompt is the whole loop (plan + delegate + review inside
+    // that turn). On agent_end that turn is done → exit orchestration so the
+    // next turn routes normally.
+    //
+    // MUST run BEFORE any early return (enabled / manualOverride): those
+    // guards are about failover policy, not about orchestration state. If we
+    // returned early with an active orchestration, the status bar would stay
+    // stuck on "🪄 orchestrating…" until the next successful exit path.
+    // (Placed also before the `!plan` early return below so a healthy
+    // orchestration turn still releases its state. Cross-turn lifecycle is
+    // Phase 3.)
+    if (state.orchestration.active) {
+      stopLoading();
+      const o = state.orchestration;
+      if (config.ux.routerLogVerbose) {
+        console.log(
+          `[ShiftRouter] 🪄 orchestration turn ended — exited orchestrator state ` +
+            `(workers ${o.done}/${o.spawned}, spend $${o.spend.toFixed(4)})`,
+        );
+      }
+      exitOrchestration(state);
+      // Refresh the status bar: the previous frame may have shown
+      // "🪄 orchestrating…" or "🪄 X/Y workers", but state.orchestration
+      // is now inactive. Without this refresh the stale label persists
+      // until the next event that calls updateBar (next turn, etc.).
+      if (config.ux.statusBar) updateBar(ctx.ui, config, state);
+    }
+
     if (!config?.enabled) return;
     if (state.manualOverride.active) return; // user forced a model — don't override
 
@@ -400,24 +477,6 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       }
     }
 
-    // ── Orchestration lifecycle (SPEC §9.3) ────────────────────────
-    // MVP is single-turn orchestration: the Smart turn that got the
-    // orchestrator prompt is the whole loop (plan + delegate + review inside
-    // that turn). On agent_end that turn is done → exit orchestration so the
-    // next turn routes normally. Placed BEFORE the `!plan` early return so a
-    // healthy orchestration turn still releases its state. (Cross-turn
-    // lifecycle is Phase 3.)
-    if (state.orchestration.active) {
-      stopLoading();
-      const o = state.orchestration;
-      if (config.ux.routerLogVerbose) {
-        console.log(
-          `[ShiftRouter] 🪄 orchestration turn ended — exited orchestrator state ` +
-            `(workers ${o.done}/${o.spawned}, spend $${o.spend.toFixed(4)})`,
-        );
-      }
-      exitOrchestration(state);
-    }
 
     if (!plan) {
       if (config.ux.routerLogVerbose) {

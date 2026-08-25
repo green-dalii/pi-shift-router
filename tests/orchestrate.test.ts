@@ -267,3 +267,81 @@ describe("orchestration lifecycle", () => {
     expect(capHit(state, cfg)).toBe(false);
   });
 });
+
+// ─── Status bar label — orchestrating-state bug fix ─────────────────
+//
+// Bug: after `exitOrchestration` / `resetOrchestration`, the status bar
+// kept showing "🪄 orchestrating…" because the bar was not refreshed.
+// `formatStatusBarLabel` is a pure function extracted from updateBar so
+// we can verify the label transitions correctly through the orchestration
+// lifecycle.
+import { formatStatusBarLabel } from "../src/index.js";
+
+describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
+  function makeState(): RouterState {
+    return createRouterState();
+  }
+
+  function makeConfig(overrides: Partial<ShiftRouterConfig> = {}): ShiftRouterConfig {
+    return {
+      ...DEFAULT_CONFIG,
+      tiers: {
+        fast: { ...DEFAULT_CONFIG.tiers.fast, models: [{ provider: "p", model: "m", priority: 1 }] },
+        smart: { ...DEFAULT_CONFIG.tiers.smart, models: [{ provider: "p", model: "m", priority: 1 }] },
+      },
+      ...overrides,
+    } as ShiftRouterConfig;
+  }
+
+  it("returns undefined when statusBar is disabled", () => {
+    const cfg = makeConfig({ ux: { ...DEFAULT_CONFIG.ux, statusBar: false } });
+    const s = makeState();
+    enterOrchestration(s);
+    expect(formatStatusBarLabel(cfg, s)).toBeUndefined();
+  });
+
+  it("returns '🪄 orchestrating' when orchestration active and no workers spawned", () => {
+    const s = makeState();
+    enterOrchestration(s);
+    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 orchestrating");
+  });
+
+  it("returns '🪄 X/Y workers' when workers have been spawned", () => {
+    const s = makeState();
+    enterOrchestration(s);
+    s.orchestration.spawned = 3;
+    s.orchestration.done = 1;
+    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 1/3 workers");
+  });
+
+  it("returns tier badge after exitOrchestration (the bug fix)", () => {
+    const s = makeState();
+    enterOrchestration(s);
+    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 orchestrating");
+    exitOrchestration(s);
+    // After exit, the orchestration state is inactive → label falls through to tier badge.
+    const label = formatStatusBarLabel(makeConfig(), s);
+    expect(label).not.toMatch(/🪄 orchestrating/);
+    expect(label).not.toMatch(/workers/);
+  });
+
+  it("returns tier badge after resetOrchestration (the bug fix)", () => {
+    const s = makeState();
+    enterOrchestration(s);
+    s.orchestration.spawned = 2;
+    resetOrchestration(s);
+    expect(formatStatusBarLabel(makeConfig(), s)).not.toMatch(/🪄/);
+  });
+
+  it("orchestration label wins over ⛔ when both router disabled and orchestration active", () => {
+    const cfg = makeConfig({ enabled: false });
+    const s = makeState();
+    enterOrchestration(s);
+    // Precedence: statusBar-disabled > orchestration.active > disabled(⛔).
+    // An active orchestration turn is informative even if the router was
+    // toggled off mid-flight — the label reflects what's actually running.
+    expect(formatStatusBarLabel(cfg, s)).toBe("🪄 orchestrating");
+    exitOrchestration(s);
+    expect(formatStatusBarLabel(cfg, s)).toBe("⛔");
+  });
+});

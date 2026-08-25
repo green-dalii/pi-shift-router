@@ -253,7 +253,34 @@ The router resolves models from two pi-agent files, merged in `loadModelsStore()
 | `~/.pi/agent/models-store.json` | Built-in catalog |
 | `~/.pi/agent/models.json` | Custom providers (`{ "providers": { ... } }`), merged over the catalog |
 
-Custom provider entries may set provider-level `baseUrl`, `api`, and `apiKey`; custom models are upserted by `id`. `apiKey` supports pi env-var expansion (`$VAR` / `${VAR}`, `$$` → `$`, `$!` → `!`). Shell commands (`!cmd`) are resolved by pi at request time and are not available to the router, so such providers are skipped unless `auth.json` has a key — which always wins over an inline `apiKey`.
+Custom provider entries may set provider-level `baseUrl`, `api`, and `apiKey`; custom models are upserted by `id`. `apiKey` supports pi env-var expansion (`$VAR` / `${VAR}`, `$$` → `$`, `$!` → `!`). Variable names must start with a letter or underscore (POSIX env-var convention); patterns like `$1` or `$5` are preserved literally to avoid silent API-key truncation. Shell commands (`!cmd`) are resolved by pi at request time and are not available to the router, so such providers are skipped unless `auth.json` has a key — which always wins over an inline `apiKey`.
+
+**Resolution order for `apiKey`** (see `resolveFastEndpoints` in `src/config.ts`):
+
+1. `auth.json[<provider>].key` (raw, verbatim) — always wins.
+2. Inline `apiKey` from `models.json` after env expansion — used only if `auth.json` has no entry.
+3. If neither resolves, the provider is skipped.
+
+**`baseUrl` resolution order** (for `ProviderEndpoint.baseUrl`):
+
+1. `modelInfo.baseUrl` (per-model, from `models-store.json` or `models.json`)
+2. `provEntry.baseUrl` (per-provider)
+3. `""` (empty string — caller must reject)
+
+Trailing slashes are trimmed.
+
+**Cheapest-fallback eligibility** (used when the user's fast tier is empty or all models fail auth — see §4.3 step 2):
+
+The cheapest-fallback pool includes **all providers** that have a valid API key — whether from `auth.json` or from an env-expanded inline `apiKey` in `models.json`. Cost is measured by `cost.input` (USD per 1M tokens). The cheapest model wins; **`defaultModel` from `settings.json` is NOT consulted in this path** — users who want to protect their default-model preference must configure the fast tier explicitly rather than leaving it empty.
+
+**Cache invalidation**: `loadModelsStore()` caches the merged store in module-local state. The cache is invalidated in two places:
+
+- **At the entry of `/router config`** — the wizard always re-reads `models-store.json` and `models.json` from disk so the picker shows the current catalog, not a startup snapshot (avoids the stale-list bug: providers may have been added or removed since pi started).
+- **In `invalidateConfigCache()`** — when the user saves config via `/router config` or `saveConfig()`, the merged-store cache is also cleared so the next read reflects current disk state.
+
+`models-store.json` is owned by pi-agent; the router's invalidation only affects what *our* `/router config` picker shows, not what pi-agent itself uses for inference. Editing `models-store.json` will still require a pi restart to take effect in pi's actual model picker (out of our control).
+
+`_authStore` is never invalidated by the router — it reflects pi-agent's own auth state.
 
 ---
 

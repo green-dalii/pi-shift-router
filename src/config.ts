@@ -28,6 +28,12 @@ let _modelsStore: ModelsStore | null = null;
 let _authStore: AuthStore | null = null;
 let _configPath: string | null = null;
 
+/** Default paths for pi-agent's model catalog. Overridable for testing. */
+export const DEFAULT_MODELS_PATHS = {
+  builtin: join(PI_AGENT_DIR, "models-store.json"),
+  custom: join(PI_AGENT_DIR, "models.json"),
+};
+
 // ─── Paths ────────────────────────────────────────────────────────
 
 /** User-level config: ~/.pi/agent/pi-shift-router.json (personal preferences) */
@@ -60,14 +66,25 @@ async function fileExists(path: string): Promise<boolean> {
 const ENV_LITERALS: Record<string, string> = { "$$": "$", "$!": "!" };
 
 /**
- * Expand `$VAR` / `${VAR}` / `$$` / `$!` (pi models.json escape rules). Empty expansion → undefined.
+ * Expand `$VAR` / `${VAR}` / `$$` / `$!` (pi models.json escape rules).
+ *
+ * Variable names must start with a letter or underscore (POSIX env-var
+ * convention). Patterns like `$1` or `$5` (digit-prefixed) are preserved
+ * literally, avoiding silent API-key truncation for any value that happens
+ * to contain such patterns.
+ *
+ * Note: letter-prefixed `$VAR` patterns (e.g., `"key$REAL"`) are still
+ * consumed and expanded if the env defines `VAR`. Users who want a literal
+ * `$VAR` substring inside an apiKey should use the `$$` escape (e.g.,
+ * `"key$$VAR"` → `"key$VAR"`).
+ *
  * Shell commands (`!cmd`) are resolved by pi at request time — unsupported here, so the value
  * stays unresolvable and the provider falls back to auth.json or is skipped.
  */
 export function expandEnv(value: string | undefined, env: Record<string, string | undefined> = process.env): string | undefined {
   if (value === undefined) return undefined;
   if (value.startsWith("!")) return undefined;
-  const expanded = value.replace(/\$\$|\$!|\$\{(\w+)\}|\$(\w+)/g, (m, braced, plain) =>
+  const expanded = value.replace(/\$\$|\$!|\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)/g, (m, braced, plain) =>
     ENV_LITERALS[m] ?? (env[braced ?? plain ?? ""] ?? ""),
   );
   return expanded || undefined;
@@ -95,18 +112,25 @@ export function mergeCustomProviders(builtin: ModelsStore, custom: { providers?:
   return store;
 }
 
-/** Load models-store.json (built-in catalog), merged with custom providers from models.json. */
-export async function loadModelsStore(): Promise<ModelsStore> {
+/**
+ * Load models-store.json (built-in catalog), merged with custom providers from models.json.
+ * Accepts optional path overrides for testing; production callers omit these.
+ */
+export async function loadModelsStore(
+  paths: { builtin?: string; custom?: string } = {},
+): Promise<ModelsStore> {
   if (_modelsStore) return _modelsStore;
+  const builtinPath = paths.builtin ?? DEFAULT_MODELS_PATHS.builtin;
+  const customPath = paths.custom ?? DEFAULT_MODELS_PATHS.custom;
   let builtin: ModelsStore = {};
   try {
-    builtin = JSON.parse(await readFile(join(PI_AGENT_DIR, "models-store.json"), "utf-8")) as ModelsStore;
+    builtin = JSON.parse(await readFile(builtinPath, "utf-8")) as ModelsStore;
   } catch {
     // missing/malformed built-in catalog is not fatal
   }
   let custom: { providers?: Record<string, ProviderEntry> } = {};
   try {
-    custom = JSON.parse(await readFile(join(PI_AGENT_DIR, "models.json"), "utf-8")) as { providers?: Record<string, ProviderEntry> };
+    custom = JSON.parse(await readFile(customPath, "utf-8")) as { providers?: Record<string, ProviderEntry> };
   } catch {
     // missing custom models file is fine
   }
@@ -164,8 +188,20 @@ export function getModelPricing(
 export function invalidateConfigCache(): void {
   _config = null;
   _configPath = null;
-  // Note: _modelsStore and _authStore are not invalidated — they reflect
-  // pi-agent's own state, which we don't own.
+  // Also clear the models-store cache: a config save is a "something changed"
+  // signal — the user may also have edited models.json, and the next read should
+  // reflect current disk state. _authStore is intentionally NOT cleared (owned by pi-agent).
+  _modelsStore = null;
+}
+
+/**
+ * Invalidate the merged models-store cache. Call before any user-facing picker
+ * (e.g., `/router config`) so the wizard shows the current state of
+ * `models-store.json` and `models.json` from disk, not a stale startup snapshot.
+ * `_authStore` is owned by pi-agent and is not cleared here.
+ */
+export function invalidateModelsStoreCache(): void {
+  _modelsStore = null;
 }
 
 // ─── Fast endpoint resolution ────────────────────────────────────

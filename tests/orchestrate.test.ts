@@ -333,12 +333,13 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
     expect(formatStatusBarLabel(makeConfig(), s)).not.toMatch(/🪄/);
   });
 
-  it("returns '⛔' when router disabled (orchestration state irrelevant)", () => {
+  it("orchestration label wins over ⛔ when both router disabled and orchestration active", () => {
     const cfg = makeConfig({ enabled: false });
     const s = makeState();
     enterOrchestration(s);
-    // Even with orchestration active, disabled takes precedence? No — orchestration wins.
-    // Verify: when orchestration.active AND !enabled, label shows orchestration state.
+    // Precedence: statusBar-disabled > orchestration.active > disabled(⛔).
+    // An active orchestration turn is informative even if the router was
+    // toggled off mid-flight — the label reflects what's actually running.
     expect(formatStatusBarLabel(cfg, s)).toBe("🪄 orchestrating");
     exitOrchestration(s);
     expect(formatStatusBarLabel(cfg, s)).toBe("⛔");

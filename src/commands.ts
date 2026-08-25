@@ -370,6 +370,7 @@ export function registerCommands(
       if (arg === "orchestrate auto") {
         config.orchestration.mode = "auto";
         onConfigChanged();
+        updateStatus(ctx.ui);
         ctx.ui.notify("pi-shift-router: 🪄 Orchestration AUTO — complex tasks will run as Smart-orchestrated loops, simple tasks stay on the plain router", "info");
         return;
       }

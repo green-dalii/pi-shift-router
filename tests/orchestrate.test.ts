@@ -300,10 +300,23 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
     expect(formatStatusBarLabel(cfg, s)).toBeUndefined();
   });
 
-  it("returns '🪄 orchestrating' when orchestration active and no workers spawned", () => {
+  it("appends 🪄 pending marker to tier badge when active and no workers spawned (keeps tok/s visible)", () => {
     const s = makeState();
     enterOrchestration(s);
-    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 orchestrating");
+    const label = formatStatusBarLabel(makeConfig(), s);
+    // Planning phase: badge + throughput stay visible, wand marks pending.
+    // Default state = fast tier, no model resolved yet → "[🦾 …]".
+    expect(label).toMatch(/\[🦾 …\]/);
+    expect(label).toMatch(/🪄$/);
+  });
+
+  it("planning-phase label includes tok/s when speed telemetry exists", () => {
+    const s = makeState();
+    enterOrchestration(s);
+    s.recentSpeeds.push(42);
+    s.currentTier = "smart";
+    s.currentModelId = "opencode/deepseek";
+    expect(formatStatusBarLabel(makeConfig(), s)).toBe("[🧠 deepseek] • 42 tok/s 🪄");
   });
 
   it("returns '🪄 X/Y workers' when workers have been spawned", () => {
@@ -317,12 +330,11 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
   it("returns tier badge after exitOrchestration (the bug fix)", () => {
     const s = makeState();
     enterOrchestration(s);
-    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 orchestrating");
+    expect(formatStatusBarLabel(makeConfig(), s)).toMatch(/🪄$/);
     exitOrchestration(s);
-    // After exit, the orchestration state is inactive → label falls through to tier badge.
+    // After exit, the orchestration state is inactive → plain tier badge.
     const label = formatStatusBarLabel(makeConfig(), s);
-    expect(label).not.toMatch(/🪄 orchestrating/);
-    expect(label).not.toMatch(/workers/);
+    expect(label).toBe("[🦾 …]");
   });
 
   it("returns tier badge after resetOrchestration (the bug fix)", () => {
@@ -333,14 +345,12 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
     expect(formatStatusBarLabel(makeConfig(), s)).not.toMatch(/🪄/);
   });
 
-  it("orchestration label wins over ⛔ when both router disabled and orchestration active", () => {
+  it("⛔ + pending marker wins over pure ⛔ when router disabled and orchestration planning", () => {
     const cfg = makeConfig({ enabled: false });
     const s = makeState();
     enterOrchestration(s);
-    // Precedence: statusBar-disabled > orchestration.active > disabled(⛔).
-    // An active orchestration turn is informative even if the router was
-    // toggled off mid-flight — the label reflects what's actually running.
-    expect(formatStatusBarLabel(cfg, s)).toBe("🪄 orchestrating");
+    // Planning phase keeps whatever base applies, plus the wand marker.
+    expect(formatStatusBarLabel(cfg, s)).toBe("⛔ 🪄");
     exitOrchestration(s);
     expect(formatStatusBarLabel(cfg, s)).toBe("⛔");
   });

@@ -55,16 +55,21 @@ function allTiersIdentical(config: ShiftRouterConfig): boolean {
  */
 export function formatStatusBarLabel(cfg: ShiftRouterConfig, s: RouterState): string | undefined {
   if (!cfg.ux.statusBar) return undefined;
-  if (s.orchestration.active) {
-    const o = s.orchestration;
-    return o.spawned === 0
-      ? "🪄 orchestrating"
-      : `🪄 ${o.done}/${o.spawned} workers`;
-  }
   const speed = s.recentSpeeds.length > 0 ? s.recentSpeeds[s.recentSpeeds.length - 1] : 0;
-  return cfg.enabled
+  const badge = cfg.enabled
     ? formatTierDisplayWithSpeed(s.currentTier, s.currentModelId, speed)
     : "⛔";
+  if (s.orchestration.active) {
+    const o = s.orchestration;
+    // Workers in flight → dedicated orchestration label.
+    if (o.spawned > 0) return `🪄 ${o.done}/${o.spawned} workers`;
+    // Planning phase (no workers yet) → keep the live tier badge — incl.
+    // tok/s throughput — and append a pending marker. Long CTO planning
+    // phases must not hide throughput telemetry (regression from #7:
+    // orchestration now genuinely triggers, so this path is hot).
+    return `${badge} 🪄`;
+  }
+  return badge;
 }
 
 export default function slimRouterExtension(pi: ExtensionAPI) {
@@ -274,10 +279,15 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
               `, injecting orchestrator prompt (${orchPrompt.length} chars)`,
           );
         }
-        // Animate the orchestration badge in the status bar while the Smart
-        // agent plans/delegates. updateBar() paints the live worker count;
-        // the dots animation keeps it visibly alive between spawn events.
-      if (config.ux.statusBar) startLoading(ctx.ui, "🪄 orchestrating");
+        // Animate the status badge while the Smart agent plans/delegates.
+        // Base = current label (tier badge + tok/s + 🪄 pending marker), so
+        // throughput telemetry stays visible during long planning phases;
+        // tool_call paints the live worker count once workers spawn and
+        // stopLoading() freezes on the last frame.
+        if (config.ux.statusBar) {
+          const animBase = formatStatusBarLabel(config, state) ?? "🪄 orchestrating";
+          startLoading(ctx.ui, animBase);
+        }
         // Inject the orchestrator instruction into this turn's system prompt
         // by returning it — pi's before_agent_start handler chain reads
         // `result.systemPrompt` from the handler return value (NOT

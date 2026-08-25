@@ -129,6 +129,10 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     await init(ctx);
+    // Defensive: a new session should never inherit orchestration state
+    // from a previous one (e.g. after an abort that skipped agent_end).
+    // Cheap no-op when inactive; refreshes the bar to a sane label.
+    if (state.orchestration.active) resetOrchestration(state);
     updateBar(ctx.ui, config, state);
 
     // Hint when tiers are identically configured
@@ -247,55 +251,78 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         return false;
       }
     })();
-    if (shouldOrchestrate(config, judgeResult.tier, judgeResult.orchestrate, smartResolvable, subagentAvailable)) {
-      enterOrchestration(state);
-      const orchPrompt = buildOrchestratorPrompt(config, cooldownPredicate(state.modelCooldowns, Date.now()));
-      if (config.ux.routerLogVerbose) {
-        console.log(
-          `[ShiftRouter] 🪄 orchestrating: judge=${judgeResult.tier}` +
-            (judgeResult.orchestrate !== undefined ? ` orchestrate=${judgeResult.orchestrate}` : "") +
-            `, injecting orchestrator prompt (${orchPrompt.length} chars)`,
-        );
+    // Manual override means the user explicitly forced plain routing for
+    // this turn — never inject the orchestrator prompt or enter the
+    // orchestration state. Without this guard, a `/router smart` + complex
+    // task would enter orchestration and then agent_end's manualOverride
+    // guard would skip the failover path while orchestration state (and its
+    // status-bar label) lingered.
+    const orchestrationAllowed = !state.manualOverride.active;
+    try {
+      if (
+        orchestrationAllowed &&
+        shouldOrchestrate(config, judgeResult.tier, judgeResult.orchestrate, smartResolvable, subagentAvailable)
+      ) {
+        enterOrchestration(state);
+        const orchPrompt = buildOrchestratorPrompt(config, cooldownPredicate(state.modelCooldowns, Date.now()));
+        if (config.ux.routerLogVerbose) {
+          console.log(
+            `[ShiftRouter] 🪄 orchestrating: judge=${judgeResult.tier}` +
+              (judgeResult.orchestrate !== undefined ? ` orchestrate=${judgeResult.orchestrate}` : "") +
+              `, injecting orchestrator prompt (${orchPrompt.length} chars)`,
+          );
+        }
+        // Animate the orchestration badge in the status bar while the Smart
+        // agent plans/delegates. updateBar() paints the live worker count;
+        // the dots animation keeps it visibly alive between spawn events.
+        if (config.ux.statusBar) startLoading(ctx.ui, "🪄 orchestrating");
+        // Inject the orchestrator instruction into this turn's system prompt.
+        // Chained across extensions — later handlers can still modify it.
+        const systemPrompt = (event as any).systemPrompt;
+        if (typeof systemPrompt === "string") {
+          (event as any).systemPrompt = systemPrompt + "\n\n" + orchPrompt;
+        } else {
+          // No chained system prompt available — inject as an inline message
+          // instead (fallback path, still reaches the LLM this turn).
+          return {
+            message: {
+              customType: "shift-router-orchestrator",
+              content: orchPrompt,
+              display: false,
+            },
+          };
+        }
       }
-      // Animate the orchestration badge in the status bar while the Smart
-      // agent plans/delegates. updateBar() paints the live worker count;
-      // the dots animation keeps it visibly alive between spawn events.
-      if (config.ux.statusBar) startLoading(ctx.ui, "🪄 orchestrating");
-      // Inject the orchestrator instruction into this turn's system prompt.
-      // Chained across extensions — later handlers can still modify it.
-      const systemPrompt = (event as any).systemPrompt;
-      if (typeof systemPrompt === "string") {
-        (event as any).systemPrompt = systemPrompt + "\n\n" + orchPrompt;
-      } else {
-        // No chained system prompt available — inject as an inline message
-        // instead (fallback path, still reaches the LLM this turn).
-        return {
-          message: {
-            customType: "shift-router-orchestrator",
-            content: orchPrompt,
-            display: false,
-          },
-        };
-      }
-    }
 
-    if (result.switchTo) {
-      const ok = await applyModelSwitch(
-        result.switchTo, state,
-        ctx.modelRegistry as any,
-        (m) => pi.setModel(m as any),
-      );
-      if (verbose) console.log(`[ShiftRouter] model switch ${ok ? "ok" : "FAILED"}`);
-      if (ok && !config.ux.quietMode && config.ux.inlineToast) {
-        ctx.ui.notify(`${formatTierDisplay(state.currentTier, state.currentModelId)}`, "info");
+      if (result.switchTo) {
+        const ok = await applyModelSwitch(
+          result.switchTo, state,
+          ctx.modelRegistry as any,
+          (m) => pi.setModel(m as any),
+        );
+        if (verbose) console.log(`[ShiftRouter] model switch ${ok ? "ok" : "FAILED"}`);
+        if (ok && !config.ux.quietMode && config.ux.inlineToast) {
+          ctx.ui.notify(`${formatTierDisplay(state.currentTier, state.currentModelId)}`, "info");
+        }
+      } else if (!state.currentModelId && state.currentTier) {
+        // First turn with no model yet — resolve one for current tier,
+        // skipping models in cooldown.
+        const m = findBestModelForTier(state.currentTier, config, ctx.modelRegistry as any, cooldownPredicate(state.modelCooldowns, Date.now()));
+        if (m) {
+          await applyModelSwitch(m, state, ctx.modelRegistry as any, (model) => pi.setModel(model as any));
+        }
       }
-    } else if (!state.currentModelId && state.currentTier) {
-      // First turn with no model yet — resolve one for current tier,
-      // skipping models in cooldown.
-      const m = findBestModelForTier(state.currentTier, config, ctx.modelRegistry as any, cooldownPredicate(state.modelCooldowns, Date.now()));
-      if (m) {
-        await applyModelSwitch(m, state, ctx.modelRegistry as any, (model) => pi.setModel(model as any));
-      }
+    } catch (err) {
+      // Error containment: if anything after the Judge call throws
+      // (processRoute / prompt build / model switch), the turn would die
+      // before agent_end ever fires — leaving the dots animation spinning
+      // and state.orchestration.active stuck true (status bar frozen on
+      // "🪄 orchestrating…"). Clean up here and let the turn proceed on the
+      // current model; per AGENTS.md errors are logged, never crash host.
+      console.error("[ShiftRouter] before_agent_start error — recovering:", err);
+      stopLoading();
+      if (state.orchestration.active) exitOrchestration(state);
+      if (config.ux.statusBar) updateBar(ctx.ui, config, state);
     }
 
     updateBar(ctx.ui, config, state);
@@ -319,29 +346,20 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     // the UI from clearing it, this guarantees it goes away.
     try { ctx.ui.setWorkingVisible(false); } catch { /* ignore */ }
     if (!initialized) await init(ctx);
-    if (!config?.enabled) return;
-    if (state.manualOverride.active) return; // user forced a model — don't override
 
-    const t0 = Date.now();
-    const msgCount = (event as any).messages?.length ?? 0;
-    const plan = planTurnFailover(
-      (event as any).messages ?? [],
-      state,
-      config,
-      (ctx as any).modelRegistry as any,
-      t0,
-    );
-    if (config.ux.routerLogVerbose) {
-      console.log(`[ShiftRouter][diag] agent_end entered: messages=${msgCount} plan=${plan ? "failover" : "none"} elapsed=${Date.now() - t0}ms`);
-    }
-
-    // ── Orchestration lifecycle (SPEC §9.3) ────────────────────────
+    // ── Orchestration lifecycle (SPEC §9.3) ────────────────────
     // MVP is single-turn orchestration: the Smart turn that got the
     // orchestrator prompt is the whole loop (plan + delegate + review inside
     // that turn). On agent_end that turn is done → exit orchestration so the
-    // next turn routes normally. Placed BEFORE the `!plan` early return so a
-    // healthy orchestration turn still releases its state. (Cross-turn
-    // lifecycle is Phase 3.)
+    // next turn routes normally.
+    //
+    // MUST run BEFORE any early return (enabled / manualOverride): those
+    // guards are about failover policy, not about orchestration state. If we
+    // returned early with an active orchestration, the status bar would stay
+    // stuck on "🪄 orchestrating…" until the next successful exit path.
+    // (Placed also before the `!plan` early return below so a healthy
+    // orchestration turn still releases its state. Cross-turn lifecycle is
+    // Phase 3.)
     if (state.orchestration.active) {
       stopLoading();
       const o = state.orchestration;
@@ -358,6 +376,23 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       // until the next event that calls updateBar (next turn, etc.).
       if (config.ux.statusBar) updateBar(ctx.ui, config, state);
     }
+
+    if (!config?.enabled) return;
+    if (state.manualOverride.active) return; // user forced a model — don't override
+
+    const t0 = Date.now();
+    const msgCount = (event as any).messages?.length ?? 0;
+    const plan = planTurnFailover(
+      (event as any).messages ?? [],
+      state,
+      config,
+      (ctx as any).modelRegistry as any,
+      t0,
+    );
+    if (config.ux.routerLogVerbose) {
+      console.log(`[ShiftRouter][diag] agent_end entered: messages=${msgCount} plan=${plan ? "failover" : "none"} elapsed=${Date.now() - t0}ms`);
+    }
+
 
     if (!plan) {
       if (config.ux.routerLogVerbose) {

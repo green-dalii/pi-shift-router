@@ -138,6 +138,7 @@ export function createOrchestrationState(): OrchestrationState {
     spend: 0,
     spawned: 0,
     done: 0,
+    workerSpeeds: [],
   };
 }
 
@@ -160,6 +161,7 @@ export function enterOrchestration(state: RouterState): void {
     orch.spend = 0;
     orch.spawned = 0;
     orch.done = 0;
+    orch.workerSpeeds = [];
   }
 }
 

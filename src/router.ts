@@ -39,6 +39,7 @@ export function createRouterState(): RouterState {
       spend: 0,
       spawned: 0,
       done: 0,
+      workerSpeeds: [],
     },
   };
 }

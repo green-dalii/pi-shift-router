@@ -158,6 +158,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       console.log(`[ShiftRouter] prompt: "${promptPreview}${event.prompt.length > 80 ? "…" : ""}"`);
       console.log(`[ShiftRouter] current: ${formatTierDisplay(state.currentTier, state.currentModelId)}`);
       console.log(`[ShiftRouter][diag] before_agent_start entered @${tDiag}`);
+      console.log(`[ShiftRouter][diag] systemPrompt base: ${(event as any).systemPrompt?.length ?? "?"} chars`);
     }
 
     // Restore the working indicator flag. pi's `agent_start` only shows the
@@ -258,6 +259,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     // guard would skip the failover path while orchestration state (and its
     // status-bar label) lingered.
     const orchestrationAllowed = !state.manualOverride.active;
+    let orchestratorSystemPrompt: string | undefined;
     try {
       if (
         orchestrationAllowed &&
@@ -275,15 +277,18 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         // Animate the orchestration badge in the status bar while the Smart
         // agent plans/delegates. updateBar() paints the live worker count;
         // the dots animation keeps it visibly alive between spawn events.
-        if (config.ux.statusBar) startLoading(ctx.ui, "🪄 orchestrating");
-        // Inject the orchestrator instruction into this turn's system prompt.
-        // Chained across extensions — later handlers can still modify it.
-        const systemPrompt = (event as any).systemPrompt;
-        if (typeof systemPrompt === "string") {
-          (event as any).systemPrompt = systemPrompt + "\n\n" + orchPrompt;
-        } else {
-          // No chained system prompt available — inject as an inline message
-          // instead (fallback path, still reaches the LLM this turn).
+      if (config.ux.statusBar) startLoading(ctx.ui, "🪄 orchestrating");
+        // Inject the orchestrator instruction into this turn's system prompt
+        // by returning it — pi's before_agent_start handler chain reads
+        // `result.systemPrompt` from the handler return value (NOT
+        // `event.systemPrompt`), so we must use this contract. Earlier
+        // versions mutated `event.systemPrompt` in place, which was dead
+        // code: the mutation never reached the LLM.
+        const baseSystemPrompt = (event as any).systemPrompt;
+        if (typeof baseSystemPrompt !== "string") {
+          // No system prompt at all (shouldn't happen — BeforeAgentStartEvent
+          // types it as string). Fallback: inject as a hidden custom message
+          // so the instruction still reaches the LLM this turn.
           return {
             message: {
               customType: "shift-router-orchestrator",
@@ -292,6 +297,18 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
             },
           };
         }
+        const chainedSystemPrompt = baseSystemPrompt + "\n\n" + orchPrompt;
+        if (config.ux.routerLogVerbose) {
+          console.log(
+            `[ShiftRouter] 🪄 system prompt chained: ${baseSystemPrompt.length} → ${chainedSystemPrompt.length} chars (+${orchPrompt.length} orchestrator)`,
+          );
+        }
+        // Defer the handler return to the end of this function so the
+        // model-switch logic below still runs on orchestration turns (the
+        // Judge said "smart" — switchTo points at the smart chain, and
+        // returning early here would leave the previous turn's model active,
+        // potentially a Fast model running the CTO loop).
+        orchestratorSystemPrompt = chainedSystemPrompt;
       }
 
       if (result.switchTo) {
@@ -325,8 +342,21 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       if (config.ux.statusBar) updateBar(ctx.ui, config, state);
     }
 
+    if (config.ux.routerLogVerbose) {
+      console.log(
+        `[ShiftRouter][diag] before_agent_start end: systemPrompt=${(event as any).systemPrompt?.length ?? "?"} chars, current=${formatTierDisplay(state.currentTier, state.currentModelId)}`,
+      );
+    }
+
     updateBar(ctx.ui, config, state);
     if (state.manualOverride.active) clearManualOverride(state);
+
+    // Deliver the orchestrator system prompt via the handler RESULT — pi's
+    // before_agent_start chain reads `result.systemPrompt` from the return
+    // value, NOT `event.systemPrompt` (in-place mutation is dead code).
+    if (orchestratorSystemPrompt !== undefined) {
+      return { systemPrompt: orchestratorSystemPrompt };
+    }
   });
 
   // ── Runtime failover (SPEC §8.5) ──────────────────────────────
@@ -391,6 +421,60 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     );
     if (config.ux.routerLogVerbose) {
       console.log(`[ShiftRouter][diag] agent_end entered: messages=${msgCount} plan=${plan ? "failover" : "none"} elapsed=${Date.now() - t0}ms`);
+      // Dump a compact shape of every message so the next-turn API 400
+      // ("role 'tool' without preceding tool_calls") can be traced to a
+      // specific message in agent.state.messages. Each message is wrapped in
+      // try/catch so a single malformed entry cannot hide the rest.
+      // Format: idx | role | stopReason? | toolCallId? | toolUseIds? |
+      //         contentKind | contentPreview (truncated).
+      const msgs = (event as any).messages ?? [];
+      for (let i = 0; i < msgs.length; i++) {
+        const m: any = msgs[i];
+        try {
+          const role = m.role ?? "(no role)";
+          const stop = m.stopReason ? ` stop=${m.stopReason}` : "";
+          const tcid = m.toolCallId ? ` tcid=${m.toolCallId}` : "";
+          let kind = "";
+          let preview = "";
+          if (Array.isArray(m.content)) {
+            const types = m.content
+              .map((b: any) => b?.type ?? "?")
+              .filter((x: string, idx: number, arr: string[]) => arr.indexOf(x) === idx);
+            kind = ` kinds=[${types.join(",")}]`;
+            // First 60 chars of first text block as a preview.
+            const firstText = m.content.find((b: any) => b?.type === "text");
+            if (firstText?.text) {
+              preview = ` text="${String(firstText.text).slice(0, 60).replace(/\n/g, " ")}${firstText.text.length > 60 ? "…" : ""}"`;
+            }
+          } else if (typeof m.content === "string") {
+            kind = ` str.len=${m.content.length}`;
+            preview = ` text="${m.content.slice(0, 60).replace(/\n/g, " ")}${m.content.length > 60 ? "…" : ""}"`;
+          } else if (m.content === undefined || m.content === null) {
+            kind = ` content=(${m.content === null ? "null" : "undefined"})`;
+          } else {
+            kind = ` content.type=${typeof m.content}`;
+          }
+          let toolUseIds = "";
+          if (role === "assistant" && Array.isArray(m.content)) {
+            const ids = m.content
+              .filter((b: any) => b?.type === "toolCall")
+              .map((b: any) => b.id)
+              .filter(Boolean);
+            if (ids.length > 0) toolUseIds = ` toolUse=[${ids.join(",")}]`;
+          }
+          // Provider/model info (helps confirm api=openai-completions vs
+          // anthropic-messages for the failure case).
+          const provider = m.provider ? ` provider=${m.provider}` : "";
+          const api = m.api ? ` api=${m.api}` : "";
+          console.log(
+            `[ShiftRouter][diag]   msg[${i}] role=${role}${stop}${tcid}${provider}${api}${kind}${toolUseIds}${preview}`,
+          );
+        } catch (dumpErr) {
+          console.log(
+            `[ShiftRouter][diag]   msg[${i}] <dump failed: ${dumpErr instanceof Error ? dumpErr.message : String(dumpErr)}> keys=${m && typeof m === "object" ? Object.keys(m).join(",") : "?"}`,
+          );
+        }
+      }
     }
 
 
@@ -448,12 +532,24 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     if (!config?.enabled) return;
     const e: any = event;
     if (e?.toolName !== "subagent") return;
-    if (!state.orchestration.active) return;
+    if (!state.orchestration.active) {
+      if (config.ux.routerLogVerbose) {
+        console.log(
+          `[ShiftRouter][diag] subagent tool_call but orchestration INACTIVE (active=false, spawned=${state.orchestration.spawned}) — skipping count; ui stays on tier badge`,
+        );
+      }
+      return;
+    }
     state.orchestration.spawned += 1;
     // Stop the "orchestrating…" dots once real workers are in flight —
     // show the live count instead (static, no interval to fight the bar).
     stopLoading();
     if (config.ux.statusBar) updateBar(ctx.ui, config, state);
+    if (config.ux.routerLogVerbose) {
+      console.log(
+        `[ShiftRouter][diag] subagent tool_call #${state.orchestration.spawned}: spawned=${state.orchestration.spawned}, active=${state.orchestration.active} → updateBar`,
+      );
+    }
   });
 
   pi.on("tool_result", async (event, ctx) => {
@@ -470,6 +566,11 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     const cost = usage?.cost?.total ?? 0;
     if (cost > 0) state.orchestration.spend += cost;
     if (config.ux.statusBar) updateBar(ctx.ui, config, state);
+    if (config.ux.routerLogVerbose) {
+      console.log(
+        `[ShiftRouter][diag] subagent tool_result: done=${state.orchestration.done}/${state.orchestration.spawned}, active=${state.orchestration.active}, cost=$${cost.toFixed(4)} → updateBar`,
+      );
+    }
   });
 
   pi.on("turn_end", async (event) => {

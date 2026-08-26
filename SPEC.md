@@ -836,11 +836,18 @@ we keep paying for it.
    large (smart, orchestrate).
 3. **Orchestration observability.** Status bar animates during Judge
    (`🧭 judging` + cycling dots — a static badge read as "hung" during the
-   1-2s API call) and during orchestration (`🪄 orchestrating…` → live
-   `🪄 done/spawned workers`). `tool_call`/`tool_result` events with
-   `toolName === "subagent"` increment spawn/done counters (and fold
-   `tool_result.usage.cost.total` into `orchestration.spend` — Phase 2 cost
-   attribution). `/router status` shows workers `done/spawned` while active.
+   1-2s API call) and during orchestration. Labels (v1.1.0): planning phase
+   keeps the live badge + throughput with a pending marker
+   (`[🧠 deepseek] • 42 tok/s 🪄…`); once workers run, a dedicated label
+   shows completion count plus AVERAGE per-worker throughput across
+   completed workers — `🪄 2/5 workers • ~30 tok/s avg` — stable under
+   concurrency (not latest-single-completion, which jumps). `tool_call`
+   records spawn wall-clock per `toolCallId`; `tool_result` pairs it back,
+   computes tokens/sec from `usage.output`, and pushes into
+   `orchestration.workerSpeeds` while folding `usage.cost.total` into
+   `orchestration.spend`. Router-off turns keep telemetry too:
+   `⛔ • 55 tok/s`. `/router status` shows workers `done/spawned` while
+   active.
 
 **Open design decisions (to be settled before code):**
 

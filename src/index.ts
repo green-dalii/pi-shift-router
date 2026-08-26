@@ -7,6 +7,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { readFileSync } from "node:fs";
 import type { Tier, ShiftRouterConfig, RouterState, ProviderEndpoint } from "./types.js";
 import { loadConfig, resolveFastEndpoints } from "./config.js";
 import { findBestModelForTier, formatTierDisplay, formatTierDisplayWithSpeed } from "./tier.js";
@@ -163,6 +164,18 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     state = createRouterState();
     fastEndpoints = await resolveFastEndpoints(config);
     initialized = true;
+    // Startup banner: makes stale dist/ builds detectable at a glance.
+    // pi loads dist/index.js from this working copy at process start —
+    // if this version doesn't match the branch you think you're testing,
+    // run `npm run build` and restart pi.
+    let version = "?";
+    try {
+      const pkgPath = new URL("../package.json", import.meta.url);
+      version = JSON.parse(readFileSync(pkgPath, "utf-8")).version ?? "?";
+    } catch {
+      /* banner is best-effort */
+    }
+    console.log(`[ShiftRouter] v${version} loaded`);
   }
 
   // ── Status bar ──────────────────────────────────────────────

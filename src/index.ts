@@ -495,6 +495,8 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       // try/catch so a single malformed entry cannot hide the rest.
       // Format: idx | role | stopReason? | toolCallId? | toolUseIds? |
       //         contentKind | contentPreview (truncated).
+      // Only dump when a failover actually happened — no need to spam per-turn logs.
+      if (plan) {
       const msgs = (event as any).messages ?? [];
       for (let i = 0; i < msgs.length; i++) {
         const m: any = msgs[i];
@@ -542,6 +544,9 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
             `[ShiftRouter][diag]   msg[${i}] <dump failed: ${dumpErr instanceof Error ? dumpErr.message : String(dumpErr)}> keys=${m && typeof m === "object" ? Object.keys(m).join(",") : "?"}`,
           );
         }
+      }
+
+
       }
     }
 

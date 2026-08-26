@@ -194,6 +194,12 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 | `/route-force <provider>/<model>` | 下一轮强制指定模型 |
 | `/route-force auto` | 清除手动覆盖 |
 
+> **原生模型切换 vs 路由器权威。** 用 pi 自带的模型切换器（`/model`、`Ctrl+P`
+> 循环）只会**同步状态栏显示**——路由器仍保留每轮模型决定权。下一轮
+> `before_agent_start` 会通过 Judge 重新路由（升级 / 降级 / 首轮 / failover
+> 路径），所以原生切换可能在一轮内被覆盖。想锁定模型恰好一轮用
+> `/route-force`；想完全手动控制请 `/router off`（状态栏显示 `⛔`）。
+
 `/router status` 还会展示**花费统计**——各档位花费与路由替你省了多少钱：
 
 ```

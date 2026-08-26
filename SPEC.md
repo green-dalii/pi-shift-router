@@ -771,7 +771,7 @@ judgment, code does boundary control):
 
 | Control layer | Owns | Responsibilities |
 |---|---|---|
-| **Hard (plugin code)** | pi-shift-router state machine | entry gate (Judge complex), main-model switch to Smart, **max rounds cap**, **escalation threshold N**, **elapsed/cost budget**, abort/reset semantics, per-phase state (`currentPhase`, `attempts`, `spend`) |
+| **Hard (plugin code)** | pi-shift-router state machine | entry gate (Judge complex), main-model switch to Smart, **max rounds cap**, **escalation threshold N** (v1.2.0: plugin-enforced via `recordWorkerOutcome` + `tool_call` block), **elapsed/cost budget**, abort/reset semantics, per-phase state (`currentPhase`, `attempts`, `spend`) |
 | **Soft (Smart main agent)** | CTO judgment | plan (phase list + per-phase acceptance criteria), delegation (which worker, what task), review pass/fail, final acceptance |
 
 **"Should the loop continue?" is a double judgment**: the *content* answer
@@ -888,10 +888,15 @@ we keep paying for it.
      cross-turn lifecycle as Phase 3 extension.**
 
 **Risks**: review-loop convergence (a picky orchestrator can reject good work —
-the injected prompt must only flag blocking issues); subagent output quality
-variance (each worker is fresh-context, so the task prompt must be
-self-contained); orchestration runaway cost (needs a session budget or max
-phase cap); state robustness (user interrupts mid-orchestration need
-cancel/reset semantics). Suggested build order: prove one Smart-plan →
+the injected prompt must only flag blocking issues; **v1.2.0 added a
+convergence protocol** — every re-delegation must carry a structured failure
+report (what failed / where / acceptance test to re-run) and repeating the
+same feedback twice triggers takeover instead of re-delegation); subagent
+output quality variance (each worker is fresh-context, so the task prompt must
+be self-contained); orchestration runaway cost (needs a session budget or max
+phase cap; **v1.2.0 enforces maxRounds + escalationThreshold plugin-side via
+`recordWorkerOutcome` + `tool_call` blocking** — the caps are no longer
+prompt-side suggestions); state robustness (user interrupts mid-orchestration
+need cancel/reset semantics). Suggested build order: prove one Smart-plan →
 Fast-subagent-execute → Smart-accept loop first, then add review iteration and
 escalation.

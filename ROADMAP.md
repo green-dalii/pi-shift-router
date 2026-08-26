@@ -29,6 +29,7 @@ Release history and planned work for **pi-shift-router**.
 |---------|---------|-------|
 | Cost telemetry — deep view | v0.9.0 ✅ done | Smart vs Fast spend breakdown + savings vs **all-turns-on-smart** baseline (`config.tiers.smart.models[0]` pricing × session tokens). Data: pi-agent `message_end.usage.cost.total` + `models-store.json`. |
 | Cooldown backoff rescale | v0.9.0 ✅ done | 4× multiplier, 6h cap, **4xx starts at 16m** (client-side rate limits outlive 5xx blips), 5xx keeps 1m. |
+| Orchestration hardening (Phase 2) | v1.2.0 ✅ done | Review-loop convergence protocol + plugin-enforced escalation/max-rounds caps (`recordWorkerOutcome` + `tool_call` block + `⛔cap` status). Native /model contract documented (Scheme A). |
 | Examples directory | ongoing | Sample configs (frontend / ML / cross-provider cost-saving) for documentation. |
 | Tool-result classification | TBD | SPEC §9: classify tool calls (long shell output may indicate debugging, not a question). |
 | Verbose logs to file | TBD | `routerLogVerbose` currently writes straight to stdout, which interleaves with pi's TUI frame render and can leave the working spinner on screen after a turn (reported + root-caused in v0.10.0). Plan: route verbose diagnostics to a log file (e.g. `~/.pi/logs/shift-router.log`) instead of stdout, or expose a pi logging channel if one ships. |
@@ -56,8 +57,8 @@ Release history and planned work for **pi-shift-router**.
 - [x] **Backward-compat tests** (SPEC §9.3 contract): orchestration-off byte-identical behavior; simple task never orchestrates; config without `orchestration.*` parses unchanged; pi-subagents missing → prompt injection skipped, smart-tier run proceeds; abort mid-loop → clean reset; existing features (failover/telemetry/cache-aware) unaffected.
 
 **Phase 2 — Loop hardening:**
-- [ ] Review-loop convergence: only-blocking-issues rule in the orchestrator prompt; verify re-delegation carries concrete feedback.
-- [ ] Escalation threshold N (default 2) honored: worker fails ≥N → Smart takes over the phase itself; hard cap prevents runaway even if Smart keeps asking for more rounds.
+- [x] **Review-loop convergence (v1.2.0)**: only-blocking-issues rule + **convergence protocol** — every re-delegation must carry a structured failure report (what failed / where / acceptance test to re-run); repeating the same feedback triggers takeover instead of re-delegation. Prompt: `src/prompts/orchestrator.md` + fallback.
+- [x] **Escalation threshold N (v1.2.0, plugin-enforced)**: `recordWorkerOutcome(state, config, ok)` consumes a round per subagent result and advances the consecutive-failure streak; at N the phase escalates. `tool_call` blocks new spawns via `{ block: true }` once `capHit()` fires — the caps are hard, not prompt-side suggestions. Status bar shows `⛔cap` when hit.
 - [ ] Cost attribution: subagent `usage` from NDJSON routed into §9.1 telemetry (per-worker spend in `/router stats`).
 - [ ] Context discipline: orchestrator digests between phases (reuse compaction ideas); worker tasks self-contained.
 - [ ] Interplay with §9.2 warm-cache guard for main-agent switches.

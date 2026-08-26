@@ -140,6 +140,12 @@ Upgrades (fast → smart) are never affected. Cross-family setups are untouched.
 
 ## Reading `/router stats`
 
+> **Native model picks are display-only (Scheme A).** pi's own `/model` or
+> `Ctrl+P` switcher only syncs the status bar — the router keeps per-turn
+> model authority, so a native pick can be re-routed on the very next turn.
+> Use `/route-force` for a one-turn pin, or `/router off` for full manual
+> control. (v1.2.0+; documented as the explicit contract.)
+
 ```text
 Tier: smart / p/claude-opus-5
 Window: 3 entries (confidence: high=2 mid=1 low=0 none=0)

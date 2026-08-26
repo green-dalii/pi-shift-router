@@ -25,6 +25,7 @@ import {
   exitOrchestration,
   resetOrchestration,
   capHit,
+  recordWorkerOutcome,
 } from "../src/orchestrate.js";
 
 function makeConfig(partial?: Partial<ShiftRouterConfig>): ShiftRouterConfig {
@@ -265,6 +266,89 @@ describe("orchestration lifecycle", () => {
     state.orchestration.rounds = 1;
     state.orchestration.escalations = 1;
     expect(capHit(state, cfg)).toBe(false);
+  });
+
+  it("recordWorkerOutcome is a no-op when inactive", () => {
+    const state: RouterState = createRouterState();
+    const cfg = makeConfig({ orchestration: { ...DEFAULT_CONFIG.orchestration, mode: "auto" } });
+    recordWorkerOutcome(state, cfg, false);
+    expect(state.orchestration.rounds).toBe(0);
+    expect(state.orchestration.escalations).toBe(0);
+  });
+
+  it("recordWorkerOutcome success consumes a round and resets streak", () => {
+    const state: RouterState = createRouterState();
+    const cfg = makeConfig({ orchestration: { ...DEFAULT_CONFIG.orchestration, mode: "auto", escalationThreshold: 2 } });
+    enterOrchestration(state);
+    state.orchestration.workerFailStreak = 1; // a prior failure happened
+    recordWorkerOutcome(state, cfg, true);
+    expect(state.orchestration.rounds).toBe(1);
+    expect(state.orchestration.workerFailStreak).toBe(0);
+    expect(state.orchestration.escalations).toBe(0);
+  });
+
+  it("recordWorkerOutcome escalates after N consecutive failures", () => {
+    const state: RouterState = createRouterState();
+    const cfg = makeConfig({ orchestration: { ...DEFAULT_CONFIG.orchestration, mode: "auto", escalationThreshold: 2 } });
+    enterOrchestration(state);
+    recordWorkerOutcome(state, cfg, false);
+    recordWorkerOutcome(state, cfg, false);
+    expect(state.orchestration.escalations).toBe(1);
+    expect(state.orchestration.workerFailStreak).toBe(0); // reset after escalation
+    expect(state.orchestration.rounds).toBe(2);
+    // One more failure starts a new streak toward the next escalation.
+    recordWorkerOutcome(state, cfg, false);
+    expect(state.orchestration.escalations).toBe(1);
+    expect(state.orchestration.workerFailStreak).toBe(1);
+  });
+
+  it("recordWorkerOutcome interleaved success breaks the streak", () => {
+    const state: RouterState = createRouterState();
+    const cfg = makeConfig({ orchestration: { ...DEFAULT_CONFIG.orchestration, mode: "auto", escalationThreshold: 2 } });
+    enterOrchestration(state);
+    recordWorkerOutcome(state, cfg, false); // streak=1
+    recordWorkerOutcome(state, cfg, true); // success → streak=0
+    recordWorkerOutcome(state, cfg, false); // streak=1 again
+    expect(state.orchestration.escalations).toBe(0);
+    expect(state.orchestration.workerFailStreak).toBe(1);
+    expect(state.orchestration.rounds).toBe(3);
+  });
+
+  it("capHit fires once escalations reach threshold via outcomes", () => {
+    const state: RouterState = createRouterState();
+    const cfg = makeConfig({ orchestration: { ...DEFAULT_CONFIG.orchestration, mode: "auto", escalationThreshold: 2 } });
+    enterOrchestration(state);
+    recordWorkerOutcome(state, cfg, false);
+    recordWorkerOutcome(state, cfg, false); // escalations=1
+    recordWorkerOutcome(state, cfg, false);
+    recordWorkerOutcome(state, cfg, false); // escalations=2 → cap
+    expect(state.orchestration.escalations).toBe(2);
+    expect(capHit(state, cfg)).toBe(true);
+  });
+
+  it("capHit fires once rounds reach maxRounds via outcomes", () => {
+    const state: RouterState = createRouterState();
+    const cfg = makeConfig({ orchestration: { ...DEFAULT_CONFIG.orchestration, mode: "auto", maxRounds: 3, escalationThreshold: 10 } });
+    enterOrchestration(state);
+    recordWorkerOutcome(state, cfg, true);
+    recordWorkerOutcome(state, cfg, true);
+    recordWorkerOutcome(state, cfg, true); // rounds=3 → cap
+    expect(state.orchestration.rounds).toBe(3);
+    expect(capHit(state, cfg)).toBe(true);
+  });
+
+  it("capHit reflects escalations in status bar label", () => {
+    const state: RouterState = createRouterState();
+    const cfg = makeConfig({ orchestration: { ...DEFAULT_CONFIG.orchestration, mode: "auto", escalationThreshold: 2 } });
+    enterOrchestration(state);
+    recordWorkerOutcome(state, cfg, false);
+    recordWorkerOutcome(state, cfg, false); // escalations=1, cap not hit
+    expect(formatStatusBarLabel(cfg, state)).toContain("🪄");
+    expect(formatStatusBarLabel(cfg, state)).not.toContain("⛔cap");
+    recordWorkerOutcome(state, cfg, false);
+    recordWorkerOutcome(state, cfg, false); // escalations=2 → cap
+    expect(capHit(state, cfg)).toBe(true);
+    expect(formatStatusBarLabel(cfg, state)).toContain("⛔cap");
   });
 });
 

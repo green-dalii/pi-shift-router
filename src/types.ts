@@ -159,6 +159,14 @@ export interface OrchestrationState {
    * concurrent completions don't make the display jumpy.
    */
   workerSpeeds: number[];
+  /**
+   * Consecutive failed worker results this task (SPEC §9.3 escalation).
+   * A failed subagent result increments it; when it reaches
+   * `config.orchestration.escalationThreshold` it is counted as an
+   * escalation and reset. A successful result resets it. Drives the hard
+   * "Smart takes over the phase" cap — plugin-enforced, not prompt-side.
+   */
+  workerFailStreak: number;
 }
 
 /** Default configuration */

@@ -194,6 +194,14 @@ You should see your current tier, scope, judge threshold, and throughput. Your n
 | `/route-force <provider>/<model>` | Pin a specific model for the next turn |
 | `/route-force auto` | Clear manual override |
 
+> **Native model picks vs router authority.** Using pi's own model switcher
+> (`/model`, `Ctrl+P` cycling) only **syncs the status-bar display** — the
+> router keeps per-turn model authority. On the next turn `before_agent_start`
+> re-routes via the Judge (upgrade / downgrade / first-turn / failover paths),
+> so a native pick can be overridden within one turn. To pin a model for
+> exactly one turn use `/route-force`; to take full manual control run
+> `/router off` (status bar shows `⛔`).
+
 `/router status` also reports **cost telemetry** — per-tier spend and how much routing saves you:
 
 ```

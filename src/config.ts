@@ -250,7 +250,11 @@ export async function resolveFastEndpoints(
     if (ep) endpoints.push(ep);
   }
   if (endpoints.length > 0) {
-    console.log(`[ShiftRouter] Judge endpoints: ${endpoints.map((e) => `${e.provider}/${e.modelId}`).join(", ")}`);
+    // Verbose-gated: this fires on every /router config save / on-off toggle
+    // via onConfigChanged — unconditional logging was user-visible noise.
+    if (config?.ux?.routerLogVerbose) {
+      console.log(`[ShiftRouter] Judge endpoints: ${endpoints.map((e) => `${e.provider}/${e.modelId}`).join(", ")}`);
+    }
     return endpoints;
   }
 

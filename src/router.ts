@@ -9,7 +9,7 @@
 import type { ShiftRouterConfig, Tier, WindowEntry, RouterState, JudgeResult } from "./types.js";
 import { TIERS } from "./types.js";
 import { findBestModelForTier, type ResolvedModel } from "./tier.js";
-import { createCooldowns, cooldownPredicate } from "./failover.js";
+import { createCooldowns, cooldownPredicate, findTierForModel } from "./failover.js";
 
 /** Create an initial RouterState */
 export function createRouterState(): RouterState {
@@ -269,6 +269,28 @@ export async function applyModelSwitch(
     console.warn(`[ShiftRouter] Model switch failed: ${err}`);
     return false;
   }
+}
+
+/**
+ * Sync display state to the ACTUAL session model after a model_select
+ * event (native picker /model, Ctrl+P cycle, session restore). Display-only:
+ * routing decisions are untouched. Tier is re-inferred from tier membership
+ * so the badge emoji follows; models outside both tiers keep the last tier.
+ *
+ * @returns true when the inferred tier changed (for verbose logging).
+ */
+export function syncSessionModel(
+  state: RouterState,
+  config: ShiftRouterConfig,
+  provider: string,
+  modelId: string,
+): boolean {
+  const previousTier = state.currentTier;
+  state.currentProvider = provider;
+  state.currentModelId = modelId;
+  const tier = findTierForModel(config, provider, modelId);
+  if (tier) state.currentTier = tier;
+  return tier !== undefined && tier !== previousTier && tier !== null;
 }
 
 export function clearManualOverride(state: RouterState): void {

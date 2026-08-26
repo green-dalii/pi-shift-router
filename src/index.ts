@@ -7,6 +7,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { readFileSync } from "node:fs";
 import type { Tier, ShiftRouterConfig, RouterState, ProviderEndpoint } from "./types.js";
 import { loadConfig, resolveFastEndpoints } from "./config.js";
 import { findBestModelForTier, formatTierDisplay, formatTierDisplayWithSpeed } from "./tier.js";
@@ -17,6 +18,7 @@ import {
   applyModelSwitch,
   clearManualOverride,
   setManualOverrideTier,
+  syncSessionModel,
 } from "./router.js";
 import {
   shouldOrchestrate,
@@ -35,6 +37,7 @@ import {
   formatRemaining,
   tokensPerSecond,
   recordSpeed,
+  findTierForModel,
 } from "./failover.js";
 import { registerCommands } from "./commands.js";
 
@@ -94,6 +97,27 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
   let fastEndpoints: ProviderEndpoint[] = [];
   let initialized = false;
 
+  // Track the ACTUAL session model for display purposes. The router only
+  // updates state.current* on its own switches; user-driven changes via
+  // pi's native picker (/model, Ctrl+P) or session restore arrive as
+  // model_select events. Without this sync the badge shows a model that
+  // is no longer running.
+  pi.on("model_select", async (event, ctx) => {
+    if (!initialized) await init(ctx);
+    const e: any = event;
+    const provider: string | undefined = e?.model?.provider;
+    const modelId: string | undefined = e?.model?.id ?? e?.model?.modelId;
+    if (!provider || !modelId) return;
+    const tierChanged = syncSessionModel(state, config, provider, modelId);
+    if (config.ux.routerLogVerbose) {
+      console.log(
+        `[ShiftRouter][diag] model_select (${e?.source}): ${provider}/${modelId}` +
+          (tierChanged ? ` (tier -> ${state.currentTier})` : ""),
+      );
+    }
+    if (config.ux.statusBar) updateBar(ctx.ui, config, state);
+  });
+
   // Status-bar loading animation. `setStatus` frames are cheap and the bar
   // repaints every frame — we animate by cycling a suffix (· → ·· → ···) so
   // the user sees progress during the Judge API call and orchestration runs
@@ -140,6 +164,18 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     state = createRouterState();
     fastEndpoints = await resolveFastEndpoints(config);
     initialized = true;
+    // Startup banner: makes stale dist/ builds detectable at a glance.
+    // pi loads dist/index.js from this working copy at process start —
+    // if this version doesn't match the branch you think you're testing,
+    // run `npm run build` and restart pi.
+    let version = "?";
+    try {
+      const pkgPath = new URL("../package.json", import.meta.url);
+      version = JSON.parse(readFileSync(pkgPath, "utf-8")).version ?? "?";
+    } catch {
+      /* banner is best-effort */
+    }
+    console.log(`[ShiftRouter] v${version} loaded`);
   }
 
   // ── Status bar ──────────────────────────────────────────────
@@ -459,6 +495,8 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       // try/catch so a single malformed entry cannot hide the rest.
       // Format: idx | role | stopReason? | toolCallId? | toolUseIds? |
       //         contentKind | contentPreview (truncated).
+      // Only dump when a failover actually happened — no need to spam per-turn logs.
+      if (plan) {
       const msgs = (event as any).messages ?? [];
       for (let i = 0; i < msgs.length; i++) {
         const m: any = msgs[i];
@@ -507,6 +545,9 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
           );
         }
       }
+
+
+      }
     }
 
 
@@ -520,6 +561,15 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     if (config.ux.routerLogVerbose) {
       console.log(
         `[ShiftRouter] ⚠ ${plan.failed.provider}/${plan.failed.model} failed (${plan.failed.code}) → cooldown ${formatRemaining(remainingFor(state, plan.failed.provider, plan.failed.model))}`,
+      );
+    }
+    // Diagnosability: a failed failover is otherwise easy to miss when
+    // pi's own same-model retries keep producing identical errors. Warn
+    // unconditionally (console.warn is not gated by inlineToast).
+    if (!plan.switched || !plan.fallback) {
+      const failTier = findTierForModel(config, plan.failed.provider, plan.failed.model) ?? state.currentTier;
+      console.warn(
+        `[ShiftRouter] ⚠ failover unavailable: ${plan.failed.provider}/${plan.failed.model} failed (${plan.failed.code}); no healthy ${failTier}-tier candidate (cooldown/exhausted). Keeping current model. Cross-tier switching is disabled by principle.`,
       );
     }
 

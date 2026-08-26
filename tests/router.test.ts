@@ -12,6 +12,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   createRouterState,
   processRoute,
+  syncSessionModel,
   type RouterState,
 } from "../src/router.js";
 import type { ShiftRouterConfig, JudgeResult, Tier } from "../src/types.js";
@@ -305,3 +306,48 @@ describe("manual override helpers", () => {
     });
   });
 });
+
+
+// ─── syncSessionModel: display follows the ACTUAL session model ────
+describe("syncSessionModel (model_select sync)", () => {
+  it("updates provider/modelId and re-infers tier from membership", () => {
+    const config = makeConfig();
+    const state = createRouterState();
+    state.currentTier = "smart";
+    state.currentProvider = "p";
+    state.currentModelId = "smart-model";
+
+    const changed = syncSessionModel(state, config, "p", "fast-model");
+    expect(changed).toBe(true);
+    expect(state.currentTier).toBe("fast");
+    expect(state.currentProvider).toBe("p");
+    expect(currentModelIdIs(state, "fast-model")).toBe(true);
+  });
+
+  it("keeps last tier for models outside both tiers (display-only)", () => {
+    const config = makeConfig();
+    const state = createRouterState();
+    state.currentTier = "fast";
+    state.currentModelId = "fast-model";
+
+    const changed = syncSessionModel(state, config, "other", "mystery-model");
+    expect(changed).toBe(false);
+    expect(state.currentTier).toBe("fast"); // badge emoji stays on last known tier
+    expect(currentModelIdIs(state, "mystery-model")).toBe(true);
+    expect(state.currentProvider).toBe("other");
+  });
+
+  it("same-tier re-select reports no tier change", () => {
+    const config = makeConfig();
+    const state = createRouterState();
+    state.currentTier = "fast";
+    state.currentProvider = "p";
+    state.currentModelId = "fast-model";
+
+    expect(syncSessionModel(state, config, "p", "fast-model")).toBe(false);
+  });
+});
+
+function currentModelIdIs(state: RouterState, id: string): boolean {
+  return state.currentModelId === id;
+}

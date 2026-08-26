@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.1.1] — Logging & status-bar display fixes
+
+### Fixed
+
+- **"Judge endpoints" log leaked in non-verbose mode** — `resolveFastEndpoints` (`src/config.ts`) unconditionally printed `[ShiftRouter] Judge endpoints: ...` on every init and every `onConfigChanged` trigger. Now gated behind `config?.ux?.routerLogVerbose`.
+- **Verbose 70+ line history dump spammed every turn** — the full-session messages dump in `agent_end` ran on every verbose turn. Now gated on `if (plan)` so it only dumps when an actual failure/failover occurred.
+- **Status bar didn't follow native model switches** (`/model` / `Ctrl+P`) — only router-driven switches updated the badge. Now listens to pi's `model_select` event (docs-recommended for status bars) via pure helper `syncSessionModel()`. Tier re-inferred from membership — display-only, zero routing impact.
+- **Failover exhaustion was invisible when `inlineToast` disabled** — exhausted same-tier candidates left pi retrying the same dead endpoint with no visible warning. Now `console.warn`s unconditionally when a failover is detected but `no healthy <tier>-tier candidate` exists. Cross-tier switching stays disabled by principle.
+
+### Added
+
+- **Startup version banner** — `init()` now logs `[ShiftRouter] vX.Y.Z loaded` (version read from `package.json` relative to `dist/`). Makes stale builds detectable at a glance.
+- **AGENTS.md mandatory pre-e2e checklist** — documents the build-before-e2e rule the agent must follow.
+
+### Tests
+
+- 338 tests pass (15 files; +3 since v1.1.0).
+
 ## [1.1.0] — Orchestration actually works now; full status-bar telemetry
 
 ### Fixed

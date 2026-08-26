@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.1.0] — Orchestration actually works now; full status-bar telemetry
+
+### Fixed
+
+- **Orchestrator prompt never reached the LLM in v1.0.x** (#7) — the `(event as any).systemPrompt = ...` mutation was dead code: pi reads the handler *return value* (`handlerResult.systemPrompt`). Injection now uses the return-value contract, deferred to end-of-handler so model switching still runs on orchestration turns.
+- **Subagent detection was always false in v1.0.x** (#7) — dot-access on pi's internal `Extension.tools` Map never resolves; now uses `pi.getAllTools()` / `pi.getActiveTools()` with try/catch fallback.
+- **Status bar stuck on "🪄 orchestrating…"** (#6) — four-layer hardening: manualOverride entry guard; unconditional orchestration cleanup in `agent_end` (before early returns); try/catch error containment around the post-Judge section; defensive reset on `session_start`.
+
+### Added
+
+- **Judge `orchestrate` signal** (#7) — optional `"orchestrate": true|false` decouples complexity (which tier) from scale/decomposability (whether to delegate). Absent = tier default; explicit veto/go supported.
+- **Full status-bar telemetry matrix** (#8, #9):
+  - Planning phase keeps the live badge + throughput: `[🧠 deepseek] • 42 tok/s 🪄…`
+  - Workers phase shows completion count + average per-worker throughput: `🪄 2/5 workers • ~30 tok/s avg` (average across completed workers — stable under concurrency, not latest-single)
+  - `/router off` keeps telemetry: `⛔ • 55 tok/s` instead of bare `⛔`
+- **Per-worker throughput measurement** (#9) — spawn wall-clock paired back via `toolCallId` on `tool_result`; readings live in `orchestration.workerSpeeds` (auto-reset with the task).
+
+### Tests
+
+- 335 tests pass (15 files; +30 since v1.0.1).
+
 ## [1.0.1] — Custom-provider support, branch protection policy, expandEnv fix
 
 ### Added

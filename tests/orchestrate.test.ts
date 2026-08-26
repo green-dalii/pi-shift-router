@@ -354,4 +354,33 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
     exitOrchestration(s);
     expect(formatStatusBarLabel(cfg, s)).toBe("⛔");
   });
+  it("⛔ keeps throughput segment when router disabled and a reading exists", () => {
+    const cfg = makeConfig({ enabled: false });
+    const s = makeState();
+    s.recentSpeeds.push(55);
+    expect(formatStatusBarLabel(cfg, s)).toBe("⛔ • 55 tok/s");
+  });
+
+  it("⛔ stays bare when router disabled and no readings", () => {
+    const cfg = makeConfig({ enabled: false });
+    expect(formatStatusBarLabel(cfg, makeState())).toBe("⛔");
+  });
+
+  it("workers label shows AVERAGE tok/s across completed workers", () => {
+    const s = makeState();
+    enterOrchestration(s);
+    s.orchestration.spawned = 5;
+    s.orchestration.done = 2;
+    // Completed workers ran at 20 and 40 tok/s -> avg 30.
+    s.orchestration.workerSpeeds.push(20, 40);
+    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 2/5 workers • ~30 tok/s avg");
+  });
+
+  it("workers label has no throughput segment until first worker completes", () => {
+    const s = makeState();
+    enterOrchestration(s);
+    s.orchestration.spawned = 3;
+    s.orchestration.done = 0;
+    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 0/3 workers");
+  });
 });

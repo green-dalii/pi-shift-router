@@ -56,20 +56,36 @@ function allTiersIdentical(config: ShiftRouterConfig): boolean {
 export function formatStatusBarLabel(cfg: ShiftRouterConfig, s: RouterState): string | undefined {
   if (!cfg.ux.statusBar) return undefined;
   const speed = s.recentSpeeds.length > 0 ? s.recentSpeeds[s.recentSpeeds.length - 1] : 0;
-  const badge = cfg.enabled
-    ? formatTierDisplayWithSpeed(s.currentTier, s.currentModelId, speed)
-    : "⛔";
   if (s.orchestration.active) {
     const o = s.orchestration;
-    // Workers in flight → dedicated orchestration label.
-    if (o.spawned > 0) return `🪄 ${o.done}/${o.spawned} workers`;
+    // Workers in flight → dedicated orchestration label. Throughput shown is
+    // the AVERAGE across completed workers this task (stable under
+    // concurrency), not the latest single completion (jumpy).
+    if (o.spawned > 0) {
+      if (o.workerSpeeds.length > 0) {
+        const sum = o.workerSpeeds.reduce((a, b) => a + b, 0);
+        const avg = Math.round(sum / o.workerSpeeds.length);
+        return `🪄 ${o.done}/${o.spawned} workers • ~${avg} tok/s avg`;
+      }
+      return `🪄 ${o.done}/${o.spawned} workers`;
+    }
     // Planning phase (no workers yet) → keep the live tier badge — incl.
     // tok/s throughput — and append a pending marker. Long CTO planning
     // phases must not hide throughput telemetry (regression from #7:
     // orchestration now genuinely triggers, so this path is hot).
-    return `${badge} 🪄`;
+    const planningBase = cfg.enabled
+      ? formatTierDisplayWithSpeed(s.currentTier, s.currentModelId, speed)
+      : speedLabel("⛔", speed);
+    return `${planningBase} 🪄`;
   }
-  return badge;
+  return cfg.enabled
+    ? formatTierDisplayWithSpeed(s.currentTier, s.currentModelId, speed)
+    : speedLabel("⛔", speed);
+}
+
+/** Append a throughput segment when a reading exists; bare label otherwise. */
+function speedLabel(base: string, speed: number): string {
+  return speed > 0 ? `${base} • ${speed} tok/s` : base;
 }
 
 export default function slimRouterExtension(pi: ExtensionAPI) {
@@ -86,6 +102,12 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
   let loadingTimer: ReturnType<typeof setInterval> | null = null;
   let loadingPhase = 0;
   const LOADING_DOTS = ["", ".", "..", "..."];
+
+  // In-flight subagent spawn start times, keyed by toolCallId. tool_call
+  // records the wall-clock start; tool_result pairs it back to compute that
+  // worker's tokens/sec. Closure-local runtime bookkeeping — not part of
+  // RouterState.
+  const workerSpawnStarts = new Map<string, number>();
 
   const getConfig = () => config;
   const getState = () => state;
@@ -551,6 +573,10 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       return;
     }
     state.orchestration.spawned += 1;
+    // Pair with the matching tool_result to compute this worker's tok/s.
+    if (typeof e?.toolCallId === "string") {
+      workerSpawnStarts.set(e.toolCallId, Date.now());
+    }
     // Stop the "orchestrating…" dots once real workers are in flight —
     // show the live count instead (static, no interval to fight the bar).
     stopLoading();
@@ -569,6 +595,17 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     if (e?.toolName !== "subagent") return;
     if (!state.orchestration.active) return;
     state.orchestration.done += 1;
+    // Per-worker throughput: pair toolCallId back to its spawn time and
+    // compute tokens/sec from usage.output. The bar shows the AVERAGE of
+    // these readings, stable under concurrent completions.
+    const spawnStart = typeof e?.toolCallId === "string" ? workerSpawnStarts.get(e.toolCallId) : undefined;
+    if (spawnStart !== undefined) workerSpawnStarts.delete(e.toolCallId);
+    const outputTokens: number = e?.usage?.output ?? 0;
+    if (spawnStart !== undefined && outputTokens > 0) {
+      const elapsed = Date.now() - spawnStart;
+      const tps = tokensPerSecond(outputTokens, elapsed);
+      if (tps > 0) state.orchestration.workerSpeeds.push(tps);
+    }
     // Cost attribution (Phase 2): pi-subagents reports the subagent's usage
     // on the tool result. Fold it into the orchestration spend so agent_end
     // and (later) /router stats can show what delegation cost.

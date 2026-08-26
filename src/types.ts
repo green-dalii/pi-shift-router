@@ -152,6 +152,13 @@ export interface OrchestrationState {
   spawned: number;
   /** Subagent workers completed (tool_result received) this task. */
   done: number;
+  /**
+   * Per-worker throughput readings (tokens/sec), one per completed worker
+   * this task. Drives the "~N tok/s avg" segment of the workers status-bar
+   * label — average across completed workers, not a single worker, so
+   * concurrent completions don't make the display jumpy.
+   */
+  workerSpeeds: number[];
 }
 
 /** Default configuration */

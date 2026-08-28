@@ -100,6 +100,8 @@ tiers:
 | `orchestration.maxRounds` | `3` | Hard cap on delegate→review rounds per task; the loop stops when this is hit regardless of what the Smart agent wants. |
 | `orchestration.escalationThreshold` | `2` | A worker failing ≥N times on a phase → Smart takes over that phase itself. |
 | `orchestration.requireSmartModel` | `true` | When true and the Smart tier model can't be resolved, orchestration is skipped and the turn runs as today's smart-tier run (no crash). |
+| `orchestration.audit.enabled` | `true` | Run the post-turn acceptance audit (safety-net review) after every orchestrated turn. Deterministic checks always run; when `true` an LLM pass on the fast tier verifies the CTO's acceptance claim is grounded in the worker results. Never blocks the turn — findings surface via `console.warn` + toast and `/router status` → `Last audit`. |
+| `orchestration.audit.timeoutMs` | `5000` | Max time for the audit LLM call (best-effort; a failure degrades to a warn, never a crash). |
 
 ## Tuning guide
 

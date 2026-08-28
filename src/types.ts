@@ -134,6 +134,48 @@ export interface OrchestrationConfig {
   escalationThreshold: number;
   /** Skip orchestration when the Smart tier model can't be resolved. */
   requireSmartModel: boolean;
+  /**
+   * Post-turn acceptance audit (托底 review). When enabled, the plugin runs
+   * a deterministic completeness check on every orchestrated turn and (when
+   * the audit LLM is reachable) a small verification pass over the CTO's
+   * summary vs the worker results. The audit is a hard *fallback*: it never
+   * blocks the completed turn, but it flags ungrounded acceptance (e.g. the
+   * CTO claimed "done" without reviewing) in logs / toast / `/router status`.
+   */
+  audit?: OrchestrationAuditConfig;
+}
+
+/** Configuration for the orchestration acceptance audit (SPEC §9.3). */
+export interface OrchestrationAuditConfig {
+  /** Run the audit at the end of every orchestrated turn. Default true. */
+  enabled: boolean;
+  /** Max ms for the LLM audit call (best-effort; deterministics always run). */
+  timeoutMs: number;
+}
+
+/**
+ * Result of the post-turn acceptance audit for one orchestrated turn.
+ * Stored on `RouterState.lastAudit` (survives orchestration state reset)
+ * and surfaced in logs / toast / `/router status`.
+ */
+export interface OrchestrationAudit {
+  /** Epoch ms when the audit ran (agent_end of the orchestrated turn). */
+  auditedAt: number;
+  /** All spawned workers returned (done === spawned). False if a worker never reported back. */
+  complete: boolean;
+  /** Final assistant message looks like a CTO summary (output-contract markers). */
+  hasCtoSummary: boolean;
+  /** The task ended at a hard cap (maxRounds / escalationThreshold reached). */
+  capHit: boolean;
+  /** Deterministic violation strings (empty when the turn was clean). */
+  violations: string[];
+  /** LLM audit verdict (optional — only when the audit LLM call succeeded). */
+  llm?: {
+    /** "pass" or "flag". */
+    verdict: "pass" | "flag";
+    /** Specific issues the auditor found (human-readable). */
+    issues: string[];
+  };
 }
 
 /** Orchestration lifecycle state (session-scoped, not persisted). */
@@ -167,6 +209,14 @@ export interface OrchestrationState {
    * "Smart takes over the phase" cap — plugin-enforced, not prompt-side.
    */
   workerFailStreak: number;
+  /**
+   * Snapshot of the user's original prompt for this orchestrated turn.
+   * Captured at `enterOrchestration` (before_agent_start) and fed to the
+   * post-turn acceptance audit so it can verify **goal alignment** — the
+   * delivered work matches what the user asked for, not just that the CTO
+   * claimed success. Null until the first orchestrated turn starts.
+   */
+  goal: string | null;
 }
 
 /** Default configuration */
@@ -205,6 +255,7 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
     maxRounds: 3,
     escalationThreshold: 2,
     requireSmartModel: true,
+    audit: { enabled: true, timeoutMs: 5000 },
   },
 };
 
@@ -322,6 +373,13 @@ export interface RouterState {
   callLog: CallRecord[];
   /** Task-level orchestration lifecycle (SPEC §9.3). */
   orchestration: OrchestrationState;
+  /**
+   * Result of the last orchestration acceptance audit (SPEC §9.3 audit).
+   * Survives orchestration state reset so `/router status` can report it
+   * after the turn that triggered it has ended. Null until the first
+   * orchestrated turn completes.
+   */
+  lastAudit: OrchestrationAudit | null;
 }
 
 /** Token counts for one assistant message. */

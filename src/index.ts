@@ -29,6 +29,7 @@ import {
   recordWorkerOutcome,
   capHit,
 } from "./orchestrate.js";
+import { auditOrchestration, callAuditLLM, extractFinalAssistantText, extractWorkerResults } from "./audit.js";
 import {
   planTurnFailover,
   markModelFailed,
@@ -70,16 +71,18 @@ export function formatStatusBarLabel(cfg: ShiftRouterConfig, s: RouterState): st
       o.rounds >= cfg.orchestration.maxRounds || o.escalations >= cfg.orchestration.escalationThreshold
         ? " ⛔cap"
         : "";
-    // Workers in flight → dedicated orchestration label. Throughput shown is
-    // the AVERAGE across completed workers this task (stable under
-    // concurrency), not the latest single completion (jumpy).
+    // Workers in flight → dedicated orchestration label. Done/Total =
+    // completed vs started subagent tool-calls this run (one
+    // workflowScript call is one tool_call; inner `runs.all` fan-out is
+    // not separately counted). Throughput is the AVERAGE across completed
+    // workers (stable under concurrency).
     if (o.spawned > 0) {
       if (o.workerSpeeds.length > 0) {
         const sum = o.workerSpeeds.reduce((a, b) => a + b, 0);
         const avg = Math.round(sum / o.workerSpeeds.length);
-        return `🪄 ${o.done}/${o.spawned} workers • ~${avg} tok/s avg${capLabel}`;
+        return `🪄 Done(${o.done})/Total(${o.spawned}) • ~${avg} tok/s avg${capLabel}`;
       }
-      return `🪄 ${o.done}/${o.spawned} workers${capLabel}`;
+      return `🪄 Done(${o.done})/Total(${o.spawned})${capLabel}`;
     }
     // Planning phase (no workers yet) → keep the live tier badge — incl.
     // tok/s throughput — and append a pending marker. Long CTO planning
@@ -281,6 +284,20 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       );
     }
 
+    // Explicit orchestration intent override (no new command): if the user
+    // explicitly asks for orchestration (e.g. "编排" / "orchestrat*" /
+    // "delegate"), force smart + orchestrate:true regardless of what the
+    // Judge said. Judge's `orchestrate` rule is soft (prompt-only); this is
+    // the hard gate so explicit intent never gets blocked by a `fast` verdict.
+    const EXPLICIT_ORCH_RE = /(编排|并行调研|并行对比|拆成.*子任务|派发|子代理|orchestrat|delegate\s+to\s+subagents?|fan[ -]?out|spawn\s+workers?)/i;
+    const wantsExplicitOrch = EXPLICIT_ORCH_RE.test(event.prompt ?? "");
+    if (wantsExplicitOrch && config.orchestration.mode === "auto" && config.enabled) {
+      if (judgeResult.tier !== "smart" || judgeResult.orchestrate !== true) {
+        if (verbose) console.log(`[ShiftRouter] explicit orchestration intent detected → forcing smart + orchestrate:true (was ${judgeResult.tier}/${String(judgeResult.orchestrate)})`);
+        judgeResult = { ...judgeResult, tier: "smart" as const, orchestrate: true };
+      }
+    }
+
     const result = processRoute(judgeResult, state, config, ctx.modelRegistry as any);
 
     if (verbose) {
@@ -289,12 +306,15 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     }
 
     // ── Task-level orchestration (SPEC §9.3) ──────────────────────
-    // Judge said "smart" + orchestration mode auto + smart model resolvable +
-    // subagent tool available → inject the orchestrator instruction.
-    // The Smart main agent then plans/delegates/reviews itself.
+    // Judge said "smart" (or explicit override above) + orchestration mode
+    // auto + smart model resolvable + subagent tool available → inject the
+    // orchestrator instruction. The Smart main agent then plans/delegates/
+    // reviews itself.
     //
     // Backward-compat: all conditions gated by config.orchestration.mode
-    // (default "off"); with it off this block is inert.
+    // (auto by default since v1.1.0; "off" disables entirely). Explicit
+    // orchestration intent above bypasses the Judge tier gate, so
+    // "use orchestration to research" no longer gets stuck on `fast`.
     const smartResolvable =
       (() => {
         try {
@@ -338,6 +358,9 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         shouldOrchestrate(config, judgeResult.tier, judgeResult.orchestrate, smartResolvable, subagentAvailable)
       ) {
         enterOrchestration(state);
+        // Snapshot the user's original goal for the post-turn acceptance
+        // audit (goal-alignment check — see SPEC §9.3 audit).
+        state.orchestration.goal = event.prompt ?? null;
         const orchPrompt = buildOrchestratorPrompt(config, cooldownPredicate(state.modelCooldowns, Date.now()));
         if (config.ux.routerLogVerbose) {
           console.log(
@@ -475,6 +498,50 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
           `[ShiftRouter] 🪄 orchestration turn ended — exited orchestrator state ` +
             `(workers ${o.done}/${o.spawned}, spend $${o.spend.toFixed(4)})`,
         );
+      }
+      // ── Acceptance audit (SPEC §9.3 托底 review) ─────────────────
+      // Hard fallback after the CTO turn: verify the loop actually closed —
+      // workers reported back, a CTO summary exists, acceptance is grounded.
+      // Deterministic checks always run; the LLM pass (small fast-tier call)
+      // runs when enabled. Best-effort: never blocks agent_end, never throws.
+      const messages = (event as any).messages ?? [];
+      const auditEnabled = config.orchestration.audit?.enabled ?? true;
+      const auditTimeout = config.orchestration.audit?.timeoutMs ?? 5000;
+      const verboseAudit = config.ux.routerLogVerbose;
+      try {
+        const audit = await auditOrchestration({
+          spawned: o.spawned,
+          done: o.done,
+          rounds: o.rounds,
+          escalations: o.escalations,
+          maxRounds: config.orchestration.maxRounds,
+          escalationThreshold: config.orchestration.escalationThreshold,
+          messages,
+          enabled: auditEnabled,
+          goal: o.goal ?? undefined,
+          ctoSummary: extractFinalAssistantText(messages),
+          workerResults: extractWorkerResults(messages),
+          endpoints: fastEndpoints,
+          timeoutMs: auditTimeout,
+          verbose: verboseAudit,
+          llmCall: callAuditLLM,
+        });
+        state.lastAudit = audit;
+        if (audit.violations.length > 0) {
+          // Diagnosability over silence: ungrounded acceptance is exactly the
+          // case the user must see. console.warn is not gated by verbose.
+          console.warn(
+            `[ShiftRouter] ⛔ orchestration audit flagged ${audit.violations.length} issue(s): ${audit.violations.join(" | ")}`,
+          );
+          if (!config.ux.quietMode && config.ux.inlineToast) {
+            ctx.ui.notify(`pi-shift-router: ⛔ audit: ${audit.violations[0]}`, "warning");
+          }
+        } else if (verboseAudit) {
+          console.log(`[ShiftRouter] ✓ orchestration audit passed (workers ${o.done}/${o.spawned})`);
+        }
+      } catch (auditErr) {
+        // Errors are values: a broken audit must never crash agent_end.
+        console.warn(`[ShiftRouter] orchestration audit failed: ${auditErr}`);
       }
       exitOrchestration(state);
       // Refresh the status bar: the previous frame may have shown

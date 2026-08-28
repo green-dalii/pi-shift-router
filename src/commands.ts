@@ -471,6 +471,12 @@ export function registerCommands(
               ? ` 🪄 active (round ${state.orchestration.rounds}/${config.orchestration.maxRounds}, esc ${state.orchestration.escalations}/${config.orchestration.escalationThreshold}, workers ${state.orchestration.done}/${state.orchestration.spawned})`
               : ` 🪄 auto (idle)`)
           : " ✗ (off)";
+        // Last orchestration acceptance-audit result (托底 review, SPEC §9.3).
+        const sAudit = state.lastAudit
+          ? (state.lastAudit.violations.length > 0
+              ? ` ⛔ ${state.lastAudit.violations.length} issue(s)${state.lastAudit.llm ? ` (LLM: ${state.lastAudit.llm.verdict})` : ""}`
+              : ` ✓ clean${state.lastAudit.llm ? ` (LLM: ${state.lastAudit.llm.verdict})` : ""}`)
+          : " —";
         const totalTurns = state.window.length + state.upgradeCount + state.downgradeCount;
 
         // Grouped, human-readable status. Raw Window/Counts stay at the
@@ -487,6 +493,7 @@ export function registerCommands(
             `  Turns: ${totalTurns}   Upgrades: ↑${state.upgradeCount}   Downgrades: ↓${state.downgradeCount}`,
             `  Manual override:${sManual}`,
             `  Orchestration:${sOrch}`,
+            `  Last audit:${sAudit}`,
             `  Cache-aware: ${shareProviderFamily(config) ? "🎯 same-family (threshold " + (config.routing.cacheAware?.enabled ? config.routing.cacheAware.sameFamilyThreshold : config.routing.window.threshold) + ", " + (config.routing.cacheAware?.enabled ? "warm-cache guarded" : "inactive — enable in /router config") + ")" : "— (cross-family)"}`,
             ...(cooldownLines.length > 0
               ? [`  Cooldowns (${cooldownLines.length}):`, ...cooldownLines]

@@ -67,6 +67,7 @@ describe("orchestration: default config", () => {
       maxRounds: 3,
       escalationThreshold: 2,
       requireSmartModel: true,
+      audit: { enabled: true, timeoutMs: 5000 },
     });
   });
 });
@@ -403,12 +404,12 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
     expect(formatStatusBarLabel(makeConfig(), s)).toBe("[🧠 deepseek] • 42 tok/s 🪄");
   });
 
-  it("returns '🪄 X/Y workers' when workers have been spawned", () => {
+  it("returns '🪄 Done(1)/Total(3)' when workers have been spawned", () => {
     const s = makeState();
     enterOrchestration(s);
     s.orchestration.spawned = 3;
     s.orchestration.done = 1;
-    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 1/3 workers");
+    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 Done(1)/Total(3)");
   });
 
   it("returns tier badge after exitOrchestration (the bug fix)", () => {
@@ -457,7 +458,7 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
     s.orchestration.done = 2;
     // Completed workers ran at 20 and 40 tok/s -> avg 30.
     s.orchestration.workerSpeeds.push(20, 40);
-    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 2/5 workers • ~30 tok/s avg");
+    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 Done(2)/Total(5) • ~30 tok/s avg");
   });
 
   it("workers label has no throughput segment until first worker completes", () => {
@@ -465,6 +466,6 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
     enterOrchestration(s);
     s.orchestration.spawned = 3;
     s.orchestration.done = 0;
-    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 0/3 workers");
+    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 Done(0)/Total(3)");
   });
 });

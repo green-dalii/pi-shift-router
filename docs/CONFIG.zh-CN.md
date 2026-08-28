@@ -100,6 +100,8 @@ tiers:
 | `orchestration.maxRounds` | `3` | 每任务 delegate→review 轮数硬上限；达到即停，无论 Smart 想继续多少轮。 |
 | `orchestration.escalationThreshold` | `2` | 某阶段 worker 失败 ≥N 次 → Smart 亲自接管该阶段。 |
 | `orchestration.requireSmartModel` | `true` | 为 true 且 Smart 模型不可解析时跳过编排，按现有 smart 档运行（不崩溃）。 |
+| `orchestration.audit.enabled` | `true` | 编排轮次结束后运行验收审计（托底 review）。确定性检查始终执行；为 true 时再让 Fast 档跑一次 LLM 审计，核验 CTO 的验收主张是否建立在 worker 结果之上。绝不阻断已完成轮次——发现的问题通过 `console.warn` + toast 与 `/router status` → `Last audit` 呈现。 |
+| `orchestration.audit.timeoutMs` | `5000` | 审计 LLM 调用超时（尽力而为；失败降级为警告，不崩溃）。 |
 
 ## 调参指南
 

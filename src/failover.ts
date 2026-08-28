@@ -132,6 +132,17 @@ export function detectFailoverError(message: string | undefined | null): { code:
     return { code: "429" };
   }
 
+  // Provider-side "model not on this endpoint" — retrying the same model
+  // will never succeed. Treat as failover-worthy so the next same-tier
+  // model is tried next turn and the dead model is cooled.
+  if (
+    /unsupported[_ -]?model/i.test(text) ||
+    /model[_ -]?not[_ -]?found/i.test(text) ||
+    /not\s+supported/i.test(text)
+  ) {
+    return { code: "unsupported_model" };
+  }
+
   // HTTP status codes, only when prefixed by an error context
   // (e.g. "Error: 500", "HTTP 502", "status 503") so bare numbers
   // in prose ("the output was 500 tokens") are not misread.

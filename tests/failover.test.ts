@@ -223,10 +223,18 @@ describe("detectFailoverError", () => {
     expect(detectFailoverError("Too Many Requests")).not.toBeNull();
   });
 
-  it("does NOT detect 400/401/404 (config/auth errors)", () => {
+  it("does NOT detect 400/401/404 (config/auth errors) — except unsupported_model", () => {
     expect(detectFailoverError("400 Bad Request: invalid_prompt")).toBeNull();
     expect(detectFailoverError("401 Unauthorized: invalid api key")).toBeNull();
-    expect(detectFailoverError("404 model not found")).toBeNull();
+    // 404 without model-not-found body is still config/auth, not failover.
+    expect(detectFailoverError("404 page not found")).toBeNull();
+  });
+
+  it("detects unsupported_model / model_not_found as failover (retry next model)", () => {
+    expect(detectFailoverError('400: {"code":"unsupported_model"}')).toEqual({ code: "unsupported_model" });
+    expect(detectFailoverError('Model "stealth/ox-alpha" is not supported on this endpoint.')).toEqual({ code: "unsupported_model" });
+    expect(detectFailoverError("404 model not found")).toEqual({ code: "unsupported_model" });
+    expect(detectFailoverError("model_not_found: unknown model id")).toEqual({ code: "unsupported_model" });
   });
 
   it("returns null for arbitrary errors", () => {

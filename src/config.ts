@@ -227,6 +227,24 @@ export function isProviderAuthenticated(
   return !!expandEnv(entry.apiKey, env);
 }
 
+/**
+ * Whether a configured `provider/model` is unavailable — i.e. not present
+ * in the catalog or its provider lacks valid auth. Pure helper for the
+ * tier-editor's "(unavailable)" badge; exported for testing.
+ */
+export function isModelUnavailable(
+  provider: string,
+  model: string,
+  store: ModelsStore,
+  auth: AuthStore,
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  if (!isProviderAuthenticated(provider, auth, store, env)) return true;
+  const entry = store[provider];
+  if (!entry) return true;
+  return !entry.models.some((m) => m.id === model);
+}
+
 // ─── Fast endpoint resolution ────────────────────────────────────
 
 /**

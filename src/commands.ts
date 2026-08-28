@@ -33,6 +33,7 @@ import {
   invalidateModelsStoreCache,
   invalidateAuthStoreCache,
   isProviderAuthenticated,
+  isModelUnavailable,
 } from "./config.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -151,6 +152,11 @@ async function routeConfigWizard(
 
     // TUI mode: use the chain editor with add/remove/reorder
     if (ctx.mode === "tui") {
+      const unavailableKeys = new Set(
+        cfg.models
+          .filter((m) => isModelUnavailable(m.provider, m.model, store, auth))
+          .map((m) => `${m.provider}/${m.model}`),
+      );
       const { createChainEditor } = await import("./tui/fallback-chain-editor.js");
       const updated = await ctx.ui.custom<ModelRef[] | null>(
         (_tui, theme, _keybindings, done) => {
@@ -160,6 +166,7 @@ async function routeConfigWizard(
             tier,
             tierLabel: cfg.label,
             theme,
+            unavailableKeys,
             onDone: (items) => done(items),
             onCancel: () => done(null),
           });

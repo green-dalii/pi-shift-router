@@ -107,6 +107,7 @@ export interface ChainEditorOptions {
 	tier: Tier;
 	tierLabel: string;
 	theme: Theme;
+	unavailableKeys?: Set<string>;
 	onDone: (items: ModelRef[]) => void;
 	onCancel: () => void;
 }
@@ -121,6 +122,7 @@ export class ChainEditorComponent extends Container implements Focusable {
 	private mode: EditorMode;
 	private allModels: StoredModel[];
 	private tierLabel: string;
+	private unavailableKeys: Set<string>;
 	private onDone: (items: ModelRef[]) => void;
 	private onCancel: () => void;
 	private theme: SelectListTheme;
@@ -143,6 +145,7 @@ export class ChainEditorComponent extends Container implements Focusable {
 		this.mode = { kind: "list" };
 		this.allModels = opts.allModels;
 		this.tierLabel = opts.tierLabel;
+		this.unavailableKeys = opts.unavailableKeys ?? new Set<string>();
 		this.onDone = opts.onDone;
 		this.onCancel = opts.onCancel;
 		this.theme = getLocalTheme(opts.theme);
@@ -178,10 +181,17 @@ export class ChainEditorComponent extends Container implements Focusable {
 				const item = this.items[i]!;
 				const isCursor = i === this.cursor;
 				const num = `#${i + 1}`;
+				const key = `${item.provider}/${item.model}`;
+				const unavailable = this.unavailableKeys.has(key);
+				const suffix = unavailable ? " (unavailable)" : "";
+				const base = `${num}  ${item.provider}/${item.model}${suffix}`;
 				const prefix = isCursor ? this.theme.selectedPrefix("→ ") : "  ";
-				const label = isCursor
-					? this.theme.selectedText(`${num}  ${item.provider}/${item.model}`)
-					: `${num}  ${item.provider}/${item.model}`;
+				// Unavailable entries are muted; available entries use accent when selected.
+				const label = unavailable
+					? this.theme.description(base)
+					: isCursor
+						? this.theme.selectedText(base)
+						: base;
 				this.addChild(new Text(`  ${prefix}${label}`, 0, 0));
 			}
 		}
@@ -191,6 +201,12 @@ export class ChainEditorComponent extends Container implements Focusable {
 			this.theme.description("Press: ↑↓ select · A add · X remove · J/K move · D done · Esc cancel"),
 			0, 0,
 		));
+		if (this.unavailableKeys.size > 0) {
+			this.addChild(new Text(
+				this.theme.description("(unavailable) = not in catalog or no auth"),
+				0, 0,
+			));
+		}
 	}
 
 	private renderPicker(): void {

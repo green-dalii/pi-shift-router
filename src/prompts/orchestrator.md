@@ -59,6 +59,21 @@ coverage without bloat. Follow these principles:
 - Review each worker's result against its acceptance criteria. **Only flag
   blocking issues** — a picky reviewer burns budget and demoralizes the loop.
   Non-blocking nits go in a "notes" line, not a re-delegation trigger.
+- **Convergence protocol (every re-delegation must contain a failure
+  report):** when you send work back, the task MUST include a structured
+  `## Failure report` block with exactly three fields:
+  1. **What failed** — the concrete behavior/outcome that missed acceptance.
+  2. **Where** — file/line/symbol/error text, as precise as you can make it.
+  3. **Acceptance test now** — the exact executable check that must pass
+     (e.g. "run `npm test tests/foo.test.ts`"; "grep for X"; "re-run the
+     repro command"). Vague feedback like "improve this" or "make it more
+     robust" without these three fields is forbidden.
+- **Do not repeat yourself.** If a worker already received the same failure
+  report and came back again, you have already cycled that feedback once.
+  Take over the phase yourself instead of re-delegating the identical text.
+  (The router enforces this too: after
+  {{escalationThreshold}} consecutive worker failures, new subagent spawns
+  are blocked — the loop cannot run forever.)
 - When you re-delegate, give the worker concrete feedback: what failed,
   exactly where, and what "done" means now.
 - **If a worker fails ≥{{escalationThreshold}} times on the same phase, take

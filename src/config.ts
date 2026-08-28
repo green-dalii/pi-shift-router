@@ -198,10 +198,51 @@ export function invalidateConfigCache(): void {
  * Invalidate the merged models-store cache. Call before any user-facing picker
  * (e.g., `/router config`) so the wizard shows the current state of
  * `models-store.json` and `models.json` from disk, not a stale startup snapshot.
- * `_authStore` is owned by pi-agent and is not cleared here.
+ * `_authStore` is owned by pi-agent and is not cleared here — call
+ * `invalidateAuthStoreCache()` separately when you also need fresh credentials.
  */
 export function invalidateModelsStoreCache(): void {
   _modelsStore = null;
+}
+
+/** Invalidate the auth.json cache so the next `loadAuthStore()` re-reads from disk. */
+export function invalidateAuthStoreCache(): void {
+  _authStore = null;
+}
+
+/**
+ * Whether `provider` currently has valid credentials.
+ * True if auth.json has any credential for the provider, or its catalog entry
+ * carries an inline `apiKey` that expands to a real value (e.g. `$ENV_VAR`).
+ */
+export function isProviderAuthenticated(
+  provider: string,
+  auth: AuthStore,
+  store: ModelsStore,
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  if (auth[provider]) return true;
+  const entry = store[provider];
+  if (!entry) return false;
+  return !!expandEnv(entry.apiKey, env);
+}
+
+/**
+ * Whether a configured `provider/model` is unavailable — i.e. not present
+ * in the catalog or its provider lacks valid auth. Pure helper for the
+ * tier-editor's "(unavailable)" badge; exported for testing.
+ */
+export function isModelUnavailable(
+  provider: string,
+  model: string,
+  store: ModelsStore,
+  auth: AuthStore,
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  if (!isProviderAuthenticated(provider, auth, store, env)) return true;
+  const entry = store[provider];
+  if (!entry) return true;
+  return !entry.models.some((m) => m.id === model);
 }
 
 // ─── Fast endpoint resolution ────────────────────────────────────
@@ -269,13 +310,17 @@ export async function resolveFastEndpoints(
   }
   candidates.sort((a, b) => a.cost - b.cost);
   if (candidates.length === 0) {
-    console.warn("[ShiftRouter] Judge: no provider with valid API key found — cannot resolve judge endpoint");
+    if (config?.ux?.routerLogVerbose) {
+      console.warn("[ShiftRouter] Judge: no provider with valid API key found — cannot resolve judge endpoint");
+    }
     return [];
   }
   const cheapest = candidates[0];
   const ep = await resolve(cheapest.provider, cheapest.modelId);
   if (ep) {
-    console.warn(`[ShiftRouter] Judge: fast tier unavailable, falling back to cheapest: ${cheapest.provider}/${cheapest.modelId}`);
+    if (config?.ux?.routerLogVerbose) {
+      console.warn(`[ShiftRouter] Judge: fast tier unavailable, falling back to cheapest: ${cheapest.provider}/${cheapest.modelId}`);
+    }
     return [ep];
   }
   return [];
@@ -373,17 +418,6 @@ export async function loadConfig(cwd: string): Promise<ShiftRouterConfig> {
   _configPath = (await fileExists(projectPath)) ? projectPath
               : (await fileExists(userPath))   ? userPath
               : projectPath; // default write target
-
-  // Validate and warn (non-fatal)
-  try {
-    const store = await loadModelsStore();
-    const warnings = validateConfig(merged, store);
-    if (warnings.length > 0) {
-      console.warn(`[ShiftRouter] Config warnings:\n  ${warnings.join("\n  ")}`);
-    }
-  } catch {
-    // Validation failure should never block startup
-  }
 
   return merged;
 }

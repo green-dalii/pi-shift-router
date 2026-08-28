@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.2.0] — Orchestration hardening + stale-model cleanup
+
+### Added
+
+- **Review-loop convergence protocol.** `orchestrator.md` now requires a
+  structured `## Failure report` (what/where/acceptance test) on every
+  re-delegation; re-sending identical feedback is forbidden and triggers a
+  takeover. The `FALLBACK_ORCHESTRATOR_PROMPT` was kept in sync.
+- **Tier-editor `(unavailable)` badge.** `/router config` → Fast/Smart chain
+  editor now flags each `provider/model` that is missing from the catalog
+  or lacks auth (via `isModelUnavailable`) as muted
+  `provider/model (unavailable)` plus a `(unavailable) = not in catalog or
+  no auth` hint. Picker candidates remain filtered to authenticated
+  providers.
+- **Startup model coverage:** `ROADMAP` Phase 2 row + SPEC Risks updated to
+  document the convergence + hard-cap enforcement.
+
+### Fixed
+
+- **Stale Judge chain after `/router config` re-wire.** `onConfigChanged`
+  kept the old cached `pi-shift-router.json`, so the Judge kept calling
+  a deprecated `commandcode/stealth/ox-alpha` (\`unsupported_model\`) even
+  after the user re-saved a healthy chain. Now the callback clears the
+  `_config` cache and reloads from disk before resolving `fastEndpoints`.
+- **Ghost models after `/logout`.** The wizard refreshed the model
+  catalog but never the `auth.json` credential cache, so a provider
+  removed by `/logout` kept showing its models. Now both caches are
+  invalidated and the flattened list is filtered via
+  `isProviderAuthenticated` (credential in `auth.json` OR inline
+  `apiKey` after `expandEnv`); an empty authenticated list shows a
+  `No authenticated providers — run /login` warning.
+- **`unsupported_model` is now failover-worthy.** `detectFailoverError`
+  (and `judgeFailureCode` body-first pass) recognizes
+  `unsupported_model` / `model_not_found` / `not supported` so both the
+  Judge (next fast chain model) and runtime (`planTurnFailover`) cool the
+  dead endpoint instead of hammering it every turn.
+- **`/router config` log spam with verbose OFF.** `loadConfig`
+  validation `Config warnings` and `resolveFastEndpoints` fallback
+  `Judge: …` warnings now gate behind `routerLogVerbose` (earlier fix
+  only gated the primary `Judge endpoints` line); non-verbose
+  `/router config` is silent. Intentional `Model not found` /
+  `switch failed` warnings remain visible — they only fire on a real
+  routing attempt, not on every config round-trip.
+
+### Tests
+
+- 346 tests pass (15 files); new failover case for `unsupported_model`.
+
 ## [1.1.1] — Logging & status-bar display fixes
 
 ### Fixed

@@ -27,9 +27,13 @@ import { formatRemaining } from "./failover.js";
 import {
   getConfigPath,
   loadModelsStore,
+  loadAuthStore,
   flattenModels,
   saveConfig,
   invalidateModelsStoreCache,
+  invalidateAuthStoreCache,
+  isProviderAuthenticated,
+  isModelUnavailable,
 } from "./config.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -98,12 +102,20 @@ async function routeConfigWizard(
   cwd: string,
   ctx: ExtensionCommandContext,
 ): Promise<boolean> {
-  // Force a fresh read of the merged models store: pi's catalog and the user's
-  // models.json may have been updated since pi started, and the picker must
-  // reflect current disk state (Issue: stale model list in /router config).
+  // Force a fresh read of the merged models store AND credentials: pi's
+  // catalog, the user's models.json, and auth.json may all have changed since
+  // pi started (e.g. /login or /logout while the session is running). The
+  // picker must reflect current disk state and only offer authenticated
+  // providers — otherwise a provider removed by /logout keeps showing stale
+  // ghost models in the list.
   invalidateModelsStoreCache();
+  invalidateAuthStoreCache();
   const store = await loadModelsStore();
-  const allModels = flattenModels(store);
+  const auth = await loadAuthStore();
+  const allModels = flattenModels(store).filter((m) => isProviderAuthenticated(m.provider, auth, store));
+  if (allModels.length === 0 && Object.keys(store).length > 0) {
+    ctx.ui.notify("No authenticated providers — run /login for a provider before configuring tiers", "warning");
+  }
 
   if (allModels.length === 0) {
     ctx.ui.notify("No models found in models-store.json", "error");
@@ -140,6 +152,11 @@ async function routeConfigWizard(
 
     // TUI mode: use the chain editor with add/remove/reorder
     if (ctx.mode === "tui") {
+      const unavailableKeys = new Set(
+        cfg.models
+          .filter((m) => isModelUnavailable(m.provider, m.model, store, auth))
+          .map((m) => `${m.provider}/${m.model}`),
+      );
       const { createChainEditor } = await import("./tui/fallback-chain-editor.js");
       const updated = await ctx.ui.custom<ModelRef[] | null>(
         (_tui, theme, _keybindings, done) => {
@@ -149,6 +166,7 @@ async function routeConfigWizard(
             tier,
             tierLabel: cfg.label,
             theme,
+            unavailableKeys,
             onDone: (items) => done(items),
             onCancel: () => done(null),
           });

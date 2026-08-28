@@ -41,7 +41,11 @@ const FALLBACK_ORCHESTRATOR_PROMPT =
   `implementation to Fast subagents (agent: "worker", context: "fresh", model\n` +
   `pinned from the Fast tier), review each result, re-delegate with concrete\n` +
   `feedback, take over a phase yourself after {{escalationThreshold}} failed\n` +
-  `worker attempts, and do a final acceptance pass. Max {{maxRounds}} rounds.`;
+  `worker attempts, and do a final acceptance pass. Max {{maxRounds}} rounds.\n` +
+  `Re-delegations must include a failure report (what failed, where, the\n` +
+  `acceptance test to re-run). Do not repeat the same feedback twice — after\n` +
+  `{{escalationThreshold}} consecutive failures the router blocks new spawns;\n` +
+  `take over the phase yourself.`;
 
 function loadOrchestratorPrompt(): string {
   try {
@@ -139,6 +143,7 @@ export function createOrchestrationState(): OrchestrationState {
     spawned: 0,
     done: 0,
     workerSpeeds: [],
+    workerFailStreak: 0,
   };
 }
 
@@ -162,6 +167,7 @@ export function enterOrchestration(state: RouterState): void {
     orch.spawned = 0;
     orch.done = 0;
     orch.workerSpeeds = [];
+    orch.workerFailStreak = 0;
   }
 }
 
@@ -207,10 +213,33 @@ export function shouldOrchestrate(
 }
 
 /**
- * Hard-cap guard. The LLM says WHAT is wrong; these caps decide HOW LONG we
- * pay. Returns true when the loop must stop (cap hit) regardless of what
- * the Smart agent wants.
+ * Record a worker outcome for this orchestration task and update the hard-cap
+ * counters (SPEC §9.3 — hard/soft control split).
+ *
+ * Each subagent `tool_result` consumes one `round`. A failed worker result
+ * (isError) advances the per-phase consecutive-failure streak; when the streak
+ * reaches `escalationThreshold`, it is counted as an escalation (the Smart
+ * agent is expected to take over the phase) and the streak resets so a fresh
+ * phase starts from zero. A successful result resets the streak.
+ *
+ * Pure state update — no side effects. Call from the `tool_result` handler for
+ * subagent tools only, and only while orchestration is active.
  */
+export function recordWorkerOutcome(state: RouterState, config: ShiftRouterConfig, ok: boolean): void {
+  const orch = state.orchestration;
+  if (!orch.active) return;
+  orch.rounds += 1;
+  if (ok) {
+    orch.workerFailStreak = 0;
+    return;
+  }
+  orch.workerFailStreak += 1;
+  if (orch.workerFailStreak >= config.orchestration.escalationThreshold) {
+    orch.escalations += 1;
+    orch.workerFailStreak = 0;
+  }
+}
+
 export function capHit(state: RouterState, config: ShiftRouterConfig): boolean {
   const orch = state.orchestration;
   if (!orch.active) return false;

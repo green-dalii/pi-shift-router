@@ -40,6 +40,7 @@ export function createRouterState(): RouterState {
       spawned: 0,
       done: 0,
       workerSpeeds: [],
+      workerFailStreak: 0,
     },
   };
 }
@@ -255,6 +256,10 @@ export async function applyModelSwitch(
   try {
     const model = modelRegistry?.find?.(resolved.provider, resolved.modelId);
     if (!model) {
+      // Not verbose-gated: indicates a config/catalog desync the user must fix.
+      // Kept as warn so the failure is visible even with verbose OFF, but it
+      // only fires when a routing decision actually tries to switch to a
+      // missing model — not on every /router config round-trip.
       console.warn(`[ShiftRouter] Model not found: ${resolved.provider}/${resolved.modelId}`);
       return false;
     }

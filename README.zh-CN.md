@@ -11,7 +11,7 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.zh-CN.md
 - docs: README.md / README.zh-CN.md / docs/CONFIG.zh-CN.md / docs/MODELS.zh-CN.md / docs/TROUBLESHOOTING.zh-CN.md
 - first-published: v0.4.0
-- latest: v1.1.1
+- latest: v1.2.0
 - last-updated: 2026-08
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
 - search-intents: "自动路由 pi agent 每轮", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router 与 pi-model-router 对比", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排"
@@ -193,6 +193,12 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 | `/route-force <档位>` | 下一轮强制走某档 |
 | `/route-force <provider>/<model>` | 下一轮强制指定模型 |
 | `/route-force auto` | 清除手动覆盖 |
+
+> **原生模型切换 vs 路由器权威。** 用 pi 自带的模型切换器（`/model`、`Ctrl+P`
+> 循环）只会**同步状态栏显示**——路由器仍保留每轮模型决定权。下一轮
+> `before_agent_start` 会通过 Judge 重新路由（升级 / 降级 / 首轮 / failover
+> 路径），所以原生切换可能在一轮内被覆盖。想锁定模型恰好一轮用
+> `/route-force`；想完全手动控制请 `/router off`（状态栏显示 `⛔`）。
 
 `/router status` 还会展示**花费统计**——各档位花费与路由替你省了多少钱：
 

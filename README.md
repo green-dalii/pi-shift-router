@@ -10,7 +10,7 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 - repo: https://github.com/green-dalii/pi-shift-router
 - docs: README.md / README.zh-CN.md / docs/CONFIG.md / docs/MODELS.md / docs/TROUBLESHOOTING.md
 - first-published: v0.4.0
-- latest: v1.1.1
+- latest: v1.2.0
 - last-updated: 2026-08
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
 - search-intents: "auto-route pi agent turns", "LLM as classifier", "two-tier model routing", "model failover on 429", "cost vs quality model selection", "pi-coding-agent extension", "model cooldown exponential backoff", "JSON-mode classifier", "pi-shift-router vs pi-model-router", "auto switch models in pi agent", "task-level orchestration pi", "Smart CTO delegates to Fast subagents", "pi agent subagent orchestration"
@@ -193,6 +193,14 @@ You should see your current tier, scope, judge threshold, and throughput. Your n
 | `/route-force <tier>` | Pin a tier for the next turn |
 | `/route-force <provider>/<model>` | Pin a specific model for the next turn |
 | `/route-force auto` | Clear manual override |
+
+> **Native model picks vs router authority.** Using pi's own model switcher
+> (`/model`, `Ctrl+P` cycling) only **syncs the status-bar display** — the
+> router keeps per-turn model authority. On the next turn `before_agent_start`
+> re-routes via the Judge (upgrade / downgrade / first-turn / failover paths),
+> so a native pick can be overridden within one turn. To pin a model for
+> exactly one turn use `/route-force`; to take full manual control run
+> `/router off` (status bar shows `⛔`).
 
 `/router status` also reports **cost telemetry** — per-tier spend and how much routing saves you:
 

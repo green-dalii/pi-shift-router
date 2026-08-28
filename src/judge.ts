@@ -52,11 +52,14 @@ export type JudgeCallOutcome =
 
 /** Derive a failover signature from an HTTP error. Returns null when not failover-worthy. */
 function judgeFailureCode(status: number, bodyText: string): string | null {
-  // Body signature first — catches rate_limit_error / quota / 限流 / etc.
+  // Body signature first — catches unsupported_model / rate_limit_error / quota / 限流.
+  // unsupported_model is a 400 on OpenAI-compat APIs but must still trigger
+  // Judge failover (try next fast chain model) and shared cooldown.
   const fromBody = detectFailoverError(bodyText);
   if (fromBody) return fromBody.code;
-  // Status-based: 429 and 5xx are transient; everything else (400/401/403…)
-  // is a config error and must NOT trigger cooldown.
+  // Status-based: 429 and 5xx are transient; other 4xx (400/401/403) are
+  // config/auth errors and must NOT trigger cooldown — except the body
+  // already handled unsupported_model above.
   if (status === 429) return "429";
   if (status >= 500 && status < 600) return String(status);
   return null;

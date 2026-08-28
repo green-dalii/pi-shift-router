@@ -140,6 +140,11 @@ tiers:
 
 ## 读 /router stats
 
+> **原生模型切换仅同步显示（方案 A）。** pi 自带的 `/model` 或 `Ctrl+P`
+> 切换器只更新状态栏——路由器保留每轮模型决定权，所以原生切换在下一轮就
+> 可能被重新路由。需要锁定一轮用 `/route-force`；需要完全手动控制请
+> `/router off`。（v1.2.0+，已作为明确契约记录。）
+
 ```text
 Tier: smart / p/claude-opus-5
 Window: 3 entries (confidence: high=2 mid=1 low=0 none=0)

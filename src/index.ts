@@ -26,6 +26,8 @@ import {
   enterOrchestration,
   exitOrchestration,
   resetOrchestration,
+  recordWorkerOutcome,
+  capHit,
 } from "./orchestrate.js";
 import {
   planTurnFailover,
@@ -61,6 +63,13 @@ export function formatStatusBarLabel(cfg: ShiftRouterConfig, s: RouterState): st
   const speed = s.recentSpeeds.length > 0 ? s.recentSpeeds[s.recentSpeeds.length - 1] : 0;
   if (s.orchestration.active) {
     const o = s.orchestration;
+    // Cap-hit indicator: the hard caps (maxRounds / escalationThreshold)
+    // are reached and new worker spawns are blocked. Show it so the user
+    // sees the loop is being stopped by the plugin, not silently stuck.
+    const capLabel =
+      o.rounds >= cfg.orchestration.maxRounds || o.escalations >= cfg.orchestration.escalationThreshold
+        ? " ⛔cap"
+        : "";
     // Workers in flight → dedicated orchestration label. Throughput shown is
     // the AVERAGE across completed workers this task (stable under
     // concurrency), not the latest single completion (jumpy).
@@ -68,9 +77,9 @@ export function formatStatusBarLabel(cfg: ShiftRouterConfig, s: RouterState): st
       if (o.workerSpeeds.length > 0) {
         const sum = o.workerSpeeds.reduce((a, b) => a + b, 0);
         const avg = Math.round(sum / o.workerSpeeds.length);
-        return `🪄 ${o.done}/${o.spawned} workers • ~${avg} tok/s avg`;
+        return `🪄 ${o.done}/${o.spawned} workers • ~${avg} tok/s avg${capLabel}`;
       }
-      return `🪄 ${o.done}/${o.spawned} workers`;
+      return `🪄 ${o.done}/${o.spawned} workers${capLabel}`;
     }
     // Planning phase (no workers yet) → keep the live tier badge — incl.
     // tok/s throughput — and append a pending marker. Long CTO planning
@@ -79,7 +88,7 @@ export function formatStatusBarLabel(cfg: ShiftRouterConfig, s: RouterState): st
     const planningBase = cfg.enabled
       ? formatTierDisplayWithSpeed(s.currentTier, s.currentModelId, speed)
       : speedLabel("⛔", speed);
-    return `${planningBase} 🪄`;
+    return `${planningBase} 🪄${capLabel}`;
   }
   return cfg.enabled
     ? formatTierDisplayWithSpeed(s.currentTier, s.currentModelId, speed)
@@ -622,6 +631,21 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       }
       return;
     }
+    // Hard cap (SPEC §9.3): once maxRounds or escalationThreshold is reached,
+    // physically refuse new worker spawns — the plugin's cap is not a prompt
+    // suggestion, it is a block. The Smart agent sees the blocked call and
+    // must take over the phase / wrap up.
+    if (capHit(state, config)) {
+      if (config.ux.routerLogVerbose) {
+        console.log(
+          `[ShiftRouter] ⛔ cap hit (rounds=${state.orchestration.rounds}/${config.orchestration.maxRounds}, escalations=${state.orchestration.escalations}/${config.orchestration.escalationThreshold}) — blocking new subagent spawn`,
+        );
+      }
+      return {
+        block: true,
+        reason: `orchestration cap reached (max ${config.orchestration.maxRounds} rounds, ${config.orchestration.escalationThreshold} escalations) — take over the phase yourself and wrap up`,
+      };
+    }
     state.orchestration.spawned += 1;
     // Pair with the matching tool_result to compute this worker's tok/s.
     if (typeof e?.toolCallId === "string") {
@@ -644,6 +668,10 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     const e: any = event;
     if (e?.toolName !== "subagent") return;
     if (!state.orchestration.active) return;
+    // Hard-cap accounting (SPEC §9.3): every subagent result consumes a round;
+    // an errored result advances the escalation streak. isError is pi's
+    // standard field on tool_result events (see extensions docs).
+    recordWorkerOutcome(state, config, e?.isError !== true);
     state.orchestration.done += 1;
     // Per-worker throughput: pair toolCallId back to its spawn time and
     // compute tokens/sec from usage.output. The bar shows the AVERAGE of
@@ -786,6 +814,14 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     getConfig,
     getState,
     async () => {
+      const { loadConfig: reloadConfig, invalidateConfigCache: clearCache } =
+        await import("./config.js");
+      clearCache();
+      try {
+        config = await reloadConfig(process.cwd());
+      } catch {
+        /* keep old config on reload failure */
+      }
       fastEndpoints = await resolveFastEndpoints(config);
       state.window = [];
       state.modelCooldowns.clear();

@@ -54,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 369 tests pass (16 files; +24 since v1.2.0 — audit deterministics, verdict
   parser, goal threading, prompt-structure and status-bar updates).
 
+## [1.2.0] — Orchestration hardening + stale-model cleanup
+
 ### Added
 
 - **Review-loop convergence protocol.** `orchestrator.md` now requires a

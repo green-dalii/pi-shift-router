@@ -11,12 +11,12 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.zh-CN.md
 - docs: README.md / README.zh-CN.md / docs/CONFIG.zh-CN.md / docs/MODELS.zh-CN.md / docs/TROUBLESHOOTING.zh-CN.md
 - first-published: v0.4.0
-- latest: v1.2.0
+- latest: v1.3.0
 - last-updated: 2026-08
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
-- search-intents: "自动路由 pi agent 每轮", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router 与 pi-model-router 对比", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排"
+- search-intents: "自动路由 pi agent 每轮", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排"
 - features: 两层路由、LLM Judge、JSON-mode 分类器、滑动窗口降级门、多模型 fallback 链、TUI 配置向导、指数退避运行时 failover（429/5xx）、路由与 Judge 共享冷却、cache-aware 路由（同 Provider 缓存保护）、跨 Provider、零配置起步、token 吞吐遥测、任务级编排（默认开启：Smart 档作为 CTO 派发给 Fast 子代理；需安装 pi-subagents）
-- direct-competitor: pi-model-router（3 档 + 预算 + 关键词规则；同类问题，不同实现选择）
+- direct-competitor: "@tenchi4u/pi-bifrost（7 阶段启发式 + 订阅配额）· pi-smart-router（12 阶段本地管线 + HyDRA + Virtual Cost v2）"
 - author: green-dalii（https://github.com/green-dalii）
 -->
 
@@ -29,7 +29,7 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 [![npm](https://img.shields.io/npm/v/pi-shift-router.svg)](https://www.npmjs.com/package/pi-shift-router)
 [![Downloads](https://img.shields.io/npm/dm/pi-shift-router.svg)](https://www.npmjs.com/package/pi-shift-router)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Pi Agent](https://img.shields.io/badge/pi--agent-extension-purple)](https://github.com/earendil-works/pi)
+[![Pi Agent](https://img.shields.io/badge/pi--agent-extension-purple)](https://pi.dev/packages/pi-shift-router)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-green)](https://nodejs.org)
 [![deps](https://img.shields.io/badge/dependencies-zero-brightgreen)](package.json)
 [![size](https://img.shields.io/badge/install%20size-~409kB-blue)](https://packagephobia.com/package/pi-shift-router)
@@ -38,7 +38,7 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 
 [English](README.md) | [简体中文]
 
-[🌐 项目官网](https://shiftrouter.greenerai.top) | [⚙️ 工作原理](#工作原理) | [🚀 快速开始](#快速开始) | [⚖️ 和 pi-model-router 的区别](#和-pi-model-router-的区别) | [❓ 常见问题](#常见问题) | [🔧 配置参考](docs/CONFIG.zh-CN.md) | [🩺 故障排查](docs/TROUBLESHOOTING.zh-CN.md)
+[🌐 项目官网](https://shiftrouter.greenerai.top) | [⚙️ 工作原理](#工作原理) | [🚀 快速开始](#快速开始) | [⚖️ 和同类路由器的区别](#和同类路由器的区别) | [❓ 常见问题](#常见问题) | [🔧 配置参考](docs/CONFIG.zh-CN.md) | [🩺 故障排查](docs/TROUBLESHOOTING.zh-CN.md)
 
 例行的活儿不该花旗舰模型的钱，重要的事也不该拿便宜模型凑合。
 
@@ -114,6 +114,18 @@ worker 以 `context: "fresh"` 运行——不继承会话历史。任务字符�
 - **`orchestration.escalationThreshold`**（默认 2）——某阶段 worker 连续失败 N 次，Smart 亲自接管该阶段。
 
 循环在 Smart 说完成、或命中上限时停止——两者任一即停。
+
+### 验收审计（托底 review，v1.3.0）
+
+因为验收是 Smart 档自己的判断，插件在每个编排轮次结束时（`agent_end`）再加一道**硬兜底审计**：
+
+1. **确定性检查（始终执行、零成本）：** 所有 worker 都已回包（`done == spawned`）、最后一条消息带 **CTO 总结**（输出契约标记）、以及是否命中硬上限。
+2. **LLM 审计（默认开启，Fast 档一次小调用）：** 审计 prompt 读取**原始用户目标**（进编排时快照）、CTO 总结与 worker 结果，从三个维度核验：
+   - **有据（Grounding）** —— 验收主张有实际结果支撑（没看结果就说 done、忽略 worker 失败、前后矛盾）。
+   - **目标对齐（Goal alignment）** —— 交付物确实回应了用户请求（无范围漂移、核心诉求有答）。
+   - **交付质量（Delivered quality）** —— worker 输出完整，不是占位/TODO 充数，无空结果、无“没做完”。
+
+审计从不阻断已完成轮次——它只**标记**：`console.warn` + toast，且 `/router status` 的 `Last audit` 显示最近一次编排运行的结果。用 `orchestration.audit.enabled`（默认 `true`）开关。审计是 CTO 自审下方的安全网：循环硬性终止，验收主张被核验而非被信任。
 
 ### 什么时候不触发
 
@@ -211,16 +223,21 @@ Spend: fast $0.045 (9 calls) · smart $0.42 (3 calls) · total $0.465
 
 ---
 
-## 和 pi-model-router 的区别
+## 和同类路由器的区别
 
-| | 🦾 **pi-shift-router**（本插件） | pi-model-router |
-|---|---|---|
-| **判定** | 纯 LLM（JSON mode 强制），一个 prompt 就能读懂和改写，零规则可维护 | LLM 分类器 + 关键词兜底，规则随场景越积越多 |
-| **档位** | 只有 2 档，逻辑一晚上能读完 | 3 档 + USD 预算上限 + 关键词钉选，更重但控制力更强 |
-| **编排** | 任务级：复杂任务由 Smart 档规划并把实现派发给 Fast 子代理（默认开启；需 pi-subagents） | —（仅单轮选模型） |
-| **韧性** | 429/5xx 同轮接管 + 指数退避冷却（与 Judge 共享） | profile 级 fallback 链 |
+|  | 🦾 **pi-shift-router**（本插件） | [@tenchi4u/pi-bifrost](https://pi.dev/packages/@tenchi4u/pi-bifrost?name=router&type=extension) | [pi-smart-router](https://pi.dev/packages/pi-smart-router?name=router&type=extension) |
+|---|---|---|---|
+| **怎么定的** | ✅ **一个 LLM 说了算，写在明处**——重要的就升级，例行的就留下 | 7 步规则 + 历史技巧——情况越多，越难理清 | 12 步本地流水线（不用 LLM）——最复杂，也最重 |
+| **档位** | ✅ **就两档 `fast` / `smart`** · 一个心智模型，一晚上读完 | 4 档（`quick` / `general` / `writing` / `frontier`）——档越多，学越多 | 3 档还带本地档（LM Studio / Ollama）——多数时候用不上 |
+| **难任务怎么干** | ✅ **Smart 当 CTO**——定计划、拆给 Fast 去做、逐项验收、来回迭代 | 每次只选一个模型自己干——不编排 | 顺手叫一次强模型帮看——不算团队作战 |
+| **省钱** | ✅ **给你算真省了多少**——每轮都计账，对比“全走 smart 会花多少”（`/router stats`） | 省的是订阅配额，不是钱 | 用公式估成本（论文级，非账单） |
+| **挂了怎么办** | ✅ **接着干**——同档自动换人 + 越挂越久的冷却（1m→6h），判定也共享 | 阈值熔断，可能跨档换 | 熔断 + 档内回退 |
+| **缓存** | ✅ **护住你的 prompt 缓存**——更便宜永不更贵 | 维护自己的缓存 | 也护缓存，算法不同 |
+| **上手** | ✅ **约 9 条命令 + 一个可视化编辑器**——5 分钟可上线 | 4 份配置要合并 | 15+ 环境变量——更陡峭 |
+| **轻重** | ✅ **0 依赖 / ~409 KB** | 0 依赖 / 2.5 MB | 要本地数据库 + 机器学习模型 / ~2.5 MB + 额外下载 |
+| **适合谁** | ✅ **要清晰的路由、真实的省钱、开箱的编排，就从这里开始** | 要规则密集 + 配额技巧 | 要本地优先 + 研究向遥测 |
 
-要零依赖、纯 LLM 判定、同轮故障接管——选我们；要硬性预算上限、跨会话状态、关键词钉选——选它。
+> **我们直说：** 为**简单、可审计、轻量**而生——一个 prompt 定夺、一个守卫护住缓存、复杂活直接**编排**。另外两家也都很强，只是旋钮更多；旋钮越多，越难一眼看懂。想少点旋钮、账单更清楚，从这里开始。
 
 ---
 
@@ -276,6 +293,6 @@ Smart 档负责规划与审核，Fast 档负责实现——worker 用 `fresh` �
 
 - [pi-coding-agent](https://github.com/earendil-works/pi) by earendil-works —— host agent
 - [pi-tui](https://www.npmjs.com/package/@earendil-works/pi-tui) —— TUI 组件
-- [pi-model-router](https://github.com/yeliu84/pi-model-router) —— 同赛道竞品，见上面对比
+- **同类路由对比见上** —— [@tenchi4u/pi-bifrost](https://github.com/the-matt-moo/pi-bifrost) 与 [pi-smart-router](https://github.com/beettlle/pi-smart-router)，同题不同解，见[和同类路由器的区别](#和同类路由器的区别)。
 
 **作者 & 许可** —— pi-shift-router 由 [green-dalii](https://github.com/green-dalii) 开发并维护，[MIT](LICENSE) © 2026。

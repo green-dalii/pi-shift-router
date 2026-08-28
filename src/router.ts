@@ -41,7 +41,9 @@ export function createRouterState(): RouterState {
       done: 0,
       workerSpeeds: [],
       workerFailStreak: 0,
+      goal: null,
     },
+    lastAudit: null,
   };
 }
 

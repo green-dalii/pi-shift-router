@@ -144,6 +144,7 @@ export function createOrchestrationState(): OrchestrationState {
     done: 0,
     workerSpeeds: [],
     workerFailStreak: 0,
+    goal: null,
   };
 }
 
@@ -168,6 +169,7 @@ export function enterOrchestration(state: RouterState): void {
     orch.done = 0;
     orch.workerSpeeds = [];
     orch.workerFailStreak = 0;
+    orch.goal = null;
   }
 }
 

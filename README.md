@@ -10,12 +10,12 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 - repo: https://github.com/green-dalii/pi-shift-router
 - docs: README.md / README.zh-CN.md / docs/CONFIG.md / docs/MODELS.md / docs/TROUBLESHOOTING.md
 - first-published: v0.4.0
-- latest: v1.2.0
+- latest: v1.3.0
 - last-updated: 2026-08
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
-- search-intents: "auto-route pi agent turns", "LLM as classifier", "two-tier model routing", "model failover on 429", "cost vs quality model selection", "pi-coding-agent extension", "model cooldown exponential backoff", "JSON-mode classifier", "pi-shift-router vs pi-model-router", "auto switch models in pi agent", "task-level orchestration pi", "Smart CTO delegates to Fast subagents", "pi agent subagent orchestration"
+- search-intents: "auto-route pi agent turns", "LLM as classifier", "two-tier model routing", "model failover on 429", "cost vs quality model selection", "pi-coding-agent extension", "model cooldown exponential backoff", "JSON-mode classifier", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "auto switch models in pi agent", "task-level orchestration pi", "Smart CTO delegates to Fast subagents", "pi agent subagent orchestration"
 - features: two-tier routing, LLM judge, JSON-mode classifier, sliding-window downgrade gate, multi-model fallback chains, TUI config wizard, exponential-backoff runtime failover (429/5xx), shared cooldown map between routing and Judge, cache-aware routing (same-provider cache protection), cross-provider native, zero-config defaults, token throughput telemetry, task-level orchestration (on by default: Smart CTO delegates to Fast subagents; requires pi-subagents)
-- direct-competitor: pi-model-router (3-tier + budget + keyword rules; same agent-routing problem)
+- direct-competitor: "@tenchi4u/pi-bifrost (7-stage heuristic + subscription quota) · pi-smart-router (12-stage local pipeline + HyDRA + Virtual Cost v2)"
 - author: green-dalii (https://github.com/green-dalii)
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.md
 -->
@@ -29,7 +29,7 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 [![npm](https://img.shields.io/npm/v/pi-shift-router.svg)](https://www.npmjs.com/package/pi-shift-router)
 [![Downloads](https://img.shields.io/npm/dm/pi-shift-router.svg)](https://www.npmjs.com/package/pi-shift-router)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Pi Agent](https://img.shields.io/badge/pi--agent-extension-purple)](https://github.com/earendil-works/pi)
+[![Pi Agent](https://img.shields.io/badge/pi--agent-extension-purple)](https://pi.dev/packages/pi-shift-router)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-green)](https://nodejs.org)
 [![deps](https://img.shields.io/badge/dependencies-zero-brightgreen)](package.json)
 [![size](https://img.shields.io/badge/install%20size-~409kB-blue)](https://packagephobia.com/package/pi-shift-router)
@@ -38,7 +38,7 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 
 [English] | [简体中文](README.zh-CN.md)
 
-[🌐 Project site](https://shiftrouter.greenerai.top) | [⚙️ How it works](#how-it-works) | [🚀 Quick start](#quick-start) | [⚖️ vs. pi-model-router](#vs-pi-model-router) | [❓ FAQ](#faq) | [🔧 Configuration](docs/CONFIG.md) | [🩺 Troubleshooting](docs/TROUBLESHOOTING.md)
+[🌐 Project site](https://shiftrouter.greenerai.top) | [⚙️ How it works](#how-it-works) | [🚀 Quick start](#quick-start) | [⚖️ vs. peer routers](#vs-peer-routers) | [❓ FAQ](#faq) | [🔧 Configuration](docs/CONFIG.md) | [🩺 Troubleshooting](docs/TROUBLESHOOTING.md)
 
 Routine turns shouldn't cost flagship money. The turns that matter shouldn't be left to a cheap model.
 
@@ -114,6 +114,30 @@ The plugin enforces two numbers, independent of what the Smart agent wants:
 - **`orchestration.escalationThreshold`** (default 2) — after N worker failures on a phase, the Smart agent takes over that phase itself.
 
 The loop stops when either the Smart agent says done or a cap is hit.
+
+### Acceptance audit (safety net under the CTO's review, v1.3.0)
+
+Because review is the Smart agent's own judgment, the plugin adds a **hard
+fallback audit** at the end of every orchestrated turn (`agent_end`):
+
+1. **Deterministic checks (always run, free):** every spawned worker reported
+   back (`done == spawned`), the final message carries a **CTO summary**
+   (the output-contract markers), and whether the run ended at a hard cap.
+2. **LLM audit (on by default, one small fast-tier call):** the auditor prompt
+   reads the **original user goal** (captured when orchestration entered),
+   the CTO summary, and the worker results, and checks three dimensions:
+   - **Grounding** — the acceptance claim is backed by actual results (no
+     "done" without review, no ignored worker failures, no contradictions).
+   - **Goal alignment** — the delivered work actually addresses the user's
+     request (no scope drift, core ask answered).
+   - **Delivered quality** — worker outputs are complete, not placeholders/
+     TODOs passed off as done, no empty results, no "could not finish".
+
+An audit finding never blocks the already-finished turn; it **flags** —
+`console.warn` + toast, and `/router status` shows `Last audit` for the most
+recent orchestrated run. Toggle with `orchestration.audit.enabled` (default
+`true`). The audit is the safety net under the CTO's own review: the loop
+terminates hard, and acceptance claims are checked, not trusted.
 
 ### When it doesn't engage
 
@@ -213,16 +237,19 @@ The baseline asks: *what would this session have cost if every turn ran on your 
 
 ---
 
-## vs. pi-model-router
+## vs. peer routers
 
-| | 🦾 **pi-shift-router** (this plugin) | pi-model-router |
-|---|---|---|
-| **Judging** | Pure LLM (JSON mode enforced) — one readable, editable prompt, zero rules to maintain | LLM classifier with a keyword fallback — the rule list grows with every new scenario |
-| **Tiers** | Just 2 — a codebase you can read end to end in an evening | 3 tiers + a USD budget cap + keyword pinning — more powerful, heavier |
-| **Orchestration** | Task-level: on complex tasks the Smart tier plans and delegates implementation to Fast subagents (on by default; needs pi-subagents) | — (per-turn model selection only) |
-| **Resilience** | Same-turn 429/5xx failover with exponential-backoff cooldown, shared with the judge | Profile-level fallback chain |
-
-Want zero deps, a pure-LLM judge, and same-turn failover — pick us. Want a hard USD cap, cross-session state, or keyword pinning — pick it.
+|  | 🦾 **pi-shift-router** (this) | [@tenchi4u/pi-bifrost](https://pi.dev/packages/@tenchi4u/pi-bifrost?name=router&type=extension) | [pi-smart-router](https://pi.dev/packages/pi-smart-router?name=router&type=extension) |
+|---|---|---|---|
+| **How it decides** | ✅ **One LLM prompt, auditable as plain text** — if it's important, it upgrades; if it's routine, it stays | 7-step rules + history tricks — more cases, harder to reason about | 12-step local pipeline (no LLM) — most complex, heaviest to run |
+| **Tiers** | ✅ **2 tiers — `fast` vs `smart`** · One mental model, whole codebase in an evening | 4 tiers (`quick` / `general` / `writing` / `frontier`) — more knobs, more to learn | 3 tiers including a local one (LM Studio / Ollama) — adds a local mode you'll rarely need |
+| **Hard task?** | ✅ **The smart model orchestrates as CTO** — plans, splits work to fast engineers, reviews, iterates | Per-turn routing only — no orchestration | One helper call on the strong model — not a team |
+| **Cost** | ✅ **Shows dollars saved** — every turn counted vs “what if all ran on smart?” (`/router stats`) | Saves subscription quota, not dollars | Estimates cost with a formula (research-grade, not your bill) |
+| **When provider fails** | ✅ **Keeps working** — same-tier fallback with smart cooldown (1m→6h), shared with the judge | Circuit breaker, may switch tiers on failure | Circuit breaker, falls back within tier only |
+| **Cache** | ✅ **Protects your prompt cache** — cheaper never costs more | Keeps its own prompt cache | Also protects cache, different math |
+| **Setup** | ✅ **~9 commands + one visual editor** — 5 min to ship | 4 files to merge, similar surface | 15+ env vars — steeper curve |
+| **Weight** | ✅ **0 deps / ~409 KB** | 0 deps / 2.5 MB | Needs a local DB + ML model / ~2.5 MB + downloads |
+| **Pick when** | ✅ **You want clear routing + real savings + orchestration out of the box** | You need rule-heavy routing + quota tricks | You want local-first + research telemetry |
 
 ---
 
@@ -278,6 +305,6 @@ The Smart tier plans and reviews; the Fast tier implements — workers run `fres
 
 - **[pi-coding-agent](https://github.com/earendil-works/pi)** by earendil-works — the host agent.
 - **[pi-tui](https://www.npmjs.com/package/@earendil-works/pi-tui)** — TUI primitives used by the config wizard.
-- **[pi-model-router](https://github.com/yeliu84/pi-model-router)** — the same problem, different trade-offs; see the comparison above.
+- **Peer routers compared above** — [@tenchi4u/pi-bifrost](https://github.com/the-matt-moo/pi-bifrost) and [pi-smart-router](https://github.com/beettlle/pi-smart-router), same problem, different trade-offs; see [vs. peer routers](#vs-peer-routers).
 
 **Author & License** — pi-shift-router by [green-dalii](https://github.com/green-dalii), licensed under [MIT](LICENSE) © 2026.

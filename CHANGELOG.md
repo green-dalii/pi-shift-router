@@ -9,6 +9,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.3.0] — Orchestration acceptance audit + prompt overhaul
+
+### Added
+
+- **Post-turn acceptance audit (safety net under the CTO's review).** After
+  every orchestrated turn (`agent_end`) the plugin verifies the loop actually
+  closed: deterministic checks always run (every spawned worker reported back;
+  the final message carries a **CTO summary**; whether the run ended at a hard
+  cap), and an optional small fast-tier **LLM audit** (`orchestration.audit.enabled`, default on) checks three dimensions against the **captured user goal**
+  + worker results: **grounding** (acceptance claim backed by results), **goal
+  alignment** (delivered work addresses the request), and **delivered quality**
+  (no placeholder/empty/aborted results passed off as done). Findings never
+  block the finished turn — they surface via `console.warn` + toast and
+  `/router status` → `Last audit`. New `src/audit.ts` + `src/prompts/auditor.md`.
+- **Explicit orchestration intent now wins end-to-end (no new command).** The
+  Judge prompt and a local hard gate treat explicit asks to orchestrate
+  (`编排` / `orchestrat*` / delegate / parallel research) as forcing
+  `smart + orchestrate:true` — an explicit "use orchestration" request is no
+  longer blocked by a `fast` verdict.
+- **`/router status` shows the last audit** (`Last audit: ✓ clean / ⛔ N issue(s) (LLM: flag)`).
+
+### Changed
+
+- **Judge prompt restructured (first-principles rewrite).** Clear role
+  boundary (tier = who does the work; orchestrate = how a smart turn runs),
+  all four output fields **required** (`tier` / `confidence` / `reason` /
+  `orchestrate`), priority-ordered decision signals, and a few-shot table —
+  with the keyword-list style removed so the LLM generalizes instead of
+  pattern-matching.
+- **Orchestrator prompt compressed ~52%** (4.3k → 2.1k chars) with zero logic
+  loss: Loop → Tool → Task contract → Review (convergence protocol) → Hard
+  caps → Tier config → Output.
+- **Status bar worker label is now explicit**: `🪄 Done(X)/Total(Y)` (was
+  `X/Y workers`) — completed vs started subagent tool-calls, no ambiguous
+  ratio.
+- **README ×2**: comparison table now covers `@tenchi4u/pi-bifrost` and
+  `pi-smart-router` (replaces `pi-model-router`), written to recommend this
+  plugin while staying factual; Pi Agent badge links to the pi.dev package
+  page; new Acceptance audit section.
+
+### Tests
+
+- 369 tests pass (16 files; +24 since v1.2.0 — audit deterministics, verdict
+  parser, goal threading, prompt-structure and status-bar updates).
+
 ## [1.2.0] — Orchestration hardening + stale-model cleanup
 
 ### Added

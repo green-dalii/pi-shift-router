@@ -781,6 +781,18 @@ spent) is the plugin's hard cap. The loop stops when either one says stop —
 Smart's judgment decides *what* is wrong, the plugin's caps decide *how long*
 we keep paying for it.
 
+**Acceptance audit (v1.3.0, safety-net review)** — because the *content* judgment is
+Smart's alone, the plugin adds a post-turn safety net: deterministic checks
+(workers all reported back; final message carries a CTO summary; hard-cap
+flag) always run, and an optional small fast-tier LLM audit (`orchestration.audit.enabled`, default true) checks three dimensions against the **captured
+user goal** + worker results: **grounding** (acceptance claim backed by
+results), **goal alignment** (delivered work addresses the request), and
+**delivered quality** (no placeholder/empty/aborted results passed off as
+done). The audit never blocks the finished turn — it flags via warn/toast and
+`/router status` → `Last audit`. Files: `src/audit.ts` (pure deterministics +
+`callAuditLLM`), `src/prompts/auditor.md`, wiring in `agent_end`; goal
+snapshot in `OrchestrationState.goal`.
+
 **Backward compatibility contract (must not break existing behavior):**
 
 1. **Default `auto`, one-command opt-out.** Orchestration ships on by default
@@ -829,7 +841,7 @@ we keep paying for it.
    JSON object; absent = no opinion (caller falls back to the tier default:
    smart → orchestrate, preserving v1.0.0). `false` on a smart verdict is an
    explicit veto (smart runs the turn directly); `true` is an explicit go
-   (e.g. user says "拆几个子任务并行做"). Only meaningful on smart turns —
+   (e.g. user asks to split into parallel subtasks). Only meaningful on smart turns —
    fast never orchestrates regardless. This decouples *complexity* (which
    model) from *scale/decomposability* (whether to delegate) — a task can be
    judgment-heavy but small (smart, no orchestration) or simple-scope but

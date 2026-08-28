@@ -1,6 +1,6 @@
 {
   "name": "pi-shift-router",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Task-level router + orchestrator for pi-coding-agent: LLM Judge routes each turn to a fast execution tier or a smart judgment tier, with multi-model fallback chains, exponential-backoff failover, and cache-aware routing; complex tasks escalate to a Smart CTO that delegates implementation to Fast subagents. Zero runtime dependencies.",
   "keywords": [
     "pi-package",

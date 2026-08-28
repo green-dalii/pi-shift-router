@@ -198,10 +198,33 @@ export function invalidateConfigCache(): void {
  * Invalidate the merged models-store cache. Call before any user-facing picker
  * (e.g., `/router config`) so the wizard shows the current state of
  * `models-store.json` and `models.json` from disk, not a stale startup snapshot.
- * `_authStore` is owned by pi-agent and is not cleared here.
+ * `_authStore` is owned by pi-agent and is not cleared here — call
+ * `invalidateAuthStoreCache()` separately when you also need fresh credentials.
  */
 export function invalidateModelsStoreCache(): void {
   _modelsStore = null;
+}
+
+/** Invalidate the auth.json cache so the next `loadAuthStore()` re-reads from disk. */
+export function invalidateAuthStoreCache(): void {
+  _authStore = null;
+}
+
+/**
+ * Whether `provider` currently has valid credentials.
+ * True if auth.json has any credential for the provider, or its catalog entry
+ * carries an inline `apiKey` that expands to a real value (e.g. `$ENV_VAR`).
+ */
+export function isProviderAuthenticated(
+  provider: string,
+  auth: AuthStore,
+  store: ModelsStore,
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  if (auth[provider]) return true;
+  const entry = store[provider];
+  if (!entry) return false;
+  return !!expandEnv(entry.apiKey, env);
 }
 
 // ─── Fast endpoint resolution ────────────────────────────────────

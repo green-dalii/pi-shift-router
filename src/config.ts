@@ -310,13 +310,17 @@ export async function resolveFastEndpoints(
   }
   candidates.sort((a, b) => a.cost - b.cost);
   if (candidates.length === 0) {
-    console.warn("[ShiftRouter] Judge: no provider with valid API key found — cannot resolve judge endpoint");
+    if (config?.ux?.routerLogVerbose) {
+      console.warn("[ShiftRouter] Judge: no provider with valid API key found — cannot resolve judge endpoint");
+    }
     return [];
   }
   const cheapest = candidates[0];
   const ep = await resolve(cheapest.provider, cheapest.modelId);
   if (ep) {
-    console.warn(`[ShiftRouter] Judge: fast tier unavailable, falling back to cheapest: ${cheapest.provider}/${cheapest.modelId}`);
+    if (config?.ux?.routerLogVerbose) {
+      console.warn(`[ShiftRouter] Judge: fast tier unavailable, falling back to cheapest: ${cheapest.provider}/${cheapest.modelId}`);
+    }
     return [ep];
   }
   return [];
@@ -414,17 +418,6 @@ export async function loadConfig(cwd: string): Promise<ShiftRouterConfig> {
   _configPath = (await fileExists(projectPath)) ? projectPath
               : (await fileExists(userPath))   ? userPath
               : projectPath; // default write target
-
-  // Validate and warn (non-fatal)
-  try {
-    const store = await loadModelsStore();
-    const warnings = validateConfig(merged, store);
-    if (warnings.length > 0) {
-      console.warn(`[ShiftRouter] Config warnings:\n  ${warnings.join("\n  ")}`);
-    }
-  } catch {
-    // Validation failure should never block startup
-  }
 
   return merged;
 }

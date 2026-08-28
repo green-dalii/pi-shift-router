@@ -814,6 +814,14 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     getConfig,
     getState,
     async () => {
+      const { loadConfig: reloadConfig, invalidateConfigCache: clearCache } =
+        await import("./config.js");
+      clearCache();
+      try {
+        config = await reloadConfig(process.cwd());
+      } catch {
+        /* keep old config on reload failure */
+      }
       fastEndpoints = await resolveFastEndpoints(config);
       state.window = [];
       state.modelCooldowns.clear();

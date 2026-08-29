@@ -544,10 +544,16 @@ retries are exhausted.
 
 ### 8.5.3 Failover signatures
 
-- **Trigger cooldown**: HTTP 429, 5xx (500/502/503/504); body containing
-  `rate limit`, `quota`, `rate_limit_error`, `insufficient_quota`.
+- **Trigger cooldown**: HTTP 429, 402, 5xx (500/502/503/504); body containing
+  `rate limit`, `quota`, `rate_limit_error`, `insufficient_quota`,
+  `insufficient balance` / `余额不足` (402 billing-exhausted — e.g.
+  OpenRouter-style "Insufficient Balance" wrapped in `Error: 402: {…}`).
+  The 4xx bucket (429 + 402) inherits the longer 16m backoff start because
+  both are client-side limits (rate window / account balance) that
+  typically outlive server-side blips; 5xx keeps the 1m start.
 - **Do NOT trigger**: 400 (invalid request — config error, not transient),
-  401 (auth — user must fix credentials).
+  401 (auth — user must fix credentials), 403 (permission — user/role
+  fix, not transient), network/timeout errors, unparseable responses.
 
 ### 8.5.4 User-visible feedback
 

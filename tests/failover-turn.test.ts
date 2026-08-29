@@ -88,6 +88,26 @@ describe("detectTurnFailure", () => {
     expect(detectTurnFailure(messages)).toBeNull();
   });
 
+  it("detects 402 Insufficient Balance on a real-world payload (regression — v1.4.0)", () => {
+    // The user's reported failure: pre-fix, neither '402' (not in the status
+    // list) nor 'Insufficient Balance' (not in the keyword list) was caught —
+    // the dead model stayed pinned and the same 402 fired on every turn.
+    const exact = 'Error: 402: {"message":"Insufficient Balance","type":"unknown_error","param":null,"code":"invalid_request_error"}';
+    const messages = [
+      assistant({
+        provider: "openrouter",
+        model: "anthropic/claude-3.5-sonnet",
+        stopReason: "error",
+        errorMessage: exact,
+      }),
+    ];
+    expect(detectTurnFailure(messages)).toEqual({
+      provider: "openrouter",
+      model: "anthropic/claude-3.5-sonnet",
+      code: "402",
+    });
+  });
+
   it("returns null when transcript is empty", () => {
     expect(detectTurnFailure([])).toBeNull();
   });

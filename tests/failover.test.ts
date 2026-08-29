@@ -103,6 +103,23 @@ describe("markModelFailed exponential backoff", () => {
     expect(e.until - (NOW + 16 * MIN + 1)).toBe(64 * MIN);
   });
 
+  it("402 (billing-exhausted) inherits the 4xx 16m-start backoff — same as 429", () => {
+    // 402 / Insufficient Balance is a client-side limit (account balance), so
+    // it gets the longer backoff just like 429. markModelFailed keys off
+    // `code.startsWith("4")` — verify 402 is treated identically so the
+    // failover cadence is consistent across the 4xx quota/billing bucket.
+    const cd429 = createCooldowns();
+    markModelFailed(cd429, "m", "model-429", NOW, "429");
+    const cd402 = createCooldowns();
+    markModelFailed(cd402, "m", "model-402", NOW, "402");
+
+    const e429 = cd429.get(modelKey("m", "model-429"))!;
+    const e402 = cd402.get(modelKey("m", "model-402"))!;
+    expect(e402.attempts).toBe(e429.attempts);
+    expect(e402.until - NOW).toBe(e429.until - NOW);
+    expect(e402.until - NOW).toBe(16 * MIN);
+  });
+
   it("4xx start tier does not clobber a higher 5xx-evolved tier", () => {
     const cd = createCooldowns();
     // Evolve to 4h16m via 5xx failures (attempts=5).
@@ -236,6 +253,26 @@ describe("detectFailoverError", () => {
     expect(detectFailoverError('Model "stealth/ox-alpha" is not supported on this endpoint.')).toEqual({ code: "unsupported_model" });
     expect(detectFailoverError("404 model not found")).toEqual({ code: "unsupported_model" });
     expect(detectFailoverError("model_not_found: unknown model id")).toEqual({ code: "unsupported_model" });
+  });
+
+  it("detects 402 Insufficient Balance (real-world billing-exhausted payload)", () => {
+    // The exact error string a user reported in v1.4.0: OpenRouter-style
+    // JSON body wrapped in an "Error: 402: …" prefix. Pre-fix this silently
+    // returned null (no '402' in the status list, no 'balance' keyword) and
+    // left the dead model pinned forever.
+    const exact = 'Error: 402: {"message":"Insufficient Balance","type":"unknown_error","param":null,"code":"invalid_request_error"}';
+    expect(detectFailoverError(exact)).toEqual({ code: "402" });
+  });
+
+  it("detects 402 HTTP status without a body", () => {
+    expect(detectFailoverError("Error: 402 Payment Required")).toEqual({ code: "402" });
+    expect(detectFailoverError("HTTP 402")).toEqual({ code: "402" });
+  });
+
+  it("detects 'insufficient balance' as 402 (keyword path)", () => {
+    expect(detectFailoverError("Insufficient Balance for account")).toEqual({ code: "402" });
+    expect(detectFailoverError("insufficient_balance on key")).toEqual({ code: "402" });
+    expect(detectFailoverError("余额不足，请充值后再试")).toEqual({ code: "402" });
   });
 
   it("returns null for arbitrary errors", () => {

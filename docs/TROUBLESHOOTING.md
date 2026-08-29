@@ -24,6 +24,21 @@ The router is disabled — run `/router on`. If `enabled: true` in the config bu
 
 The model ID doesn't exist in the provider. Update the ID or re-pick via `/router config` (the wizard only lists real models).
 
+## Model returns 402 / "Insufficient Balance" but router never switches
+
+Symptom: every turn ends with the same dead model and an error like
+`Error: 402: {"message":"Insufficient Balance", ...}` — the router
+keeps re-trying the depleted account instead of falling back to the
+next model in the chain. **Fixed in v1.4.1**: the detection layer now
+recognizes HTTP 402 and the `insufficient balance` / `余额不足` keywords
+(prior to v1.4.1 the status list was 429 + 5xx only, so billing-exhausted
+errors silently slipped past and pinned the dead model).
+
+If you see this on an older install, upgrade to **pi-shift-router ≥ 1.4.1**
+(`npm install -g pi-shift-router@latest` or `pi install npm:pi-shift-router`).
+The failing model enters a 16m cooldown (same 4xx bucket as 429) and the
+router picks the next healthy same-tier model.
+
 ## Router keeps downgrading to Fast
 
 Either the Judge is misclassifying (inspect with `/router verbose`) or the threshold is too aggressive. Raise it:

@@ -132,6 +132,17 @@ export function detectFailoverError(message: string | undefined | null): { code:
     return { code: "429" };
   }
 
+  // Billing-exhausted (402): the account has no credits left, so retrying the
+  // same model is futile. Many pi-3 providers (OpenRouter-style gateways,
+  // zhipu/GLM, MiniMax) return "Insufficient Balance" wrapped in an HTTP 402.
+  // Pre-v1.4.1 this silently fell through and pinned the dead model forever.
+  if (
+    /insufficient[_ -]?balance/i.test(text) ||
+    /余额不足/i.test(text)
+  ) {
+    return { code: "402" };
+  }
+
   // Provider-side "model not on this endpoint" — retrying the same model
   // will never succeed. Treat as failover-worthy so the next same-tier
   // model is tried next turn and the dead model is cooled.
@@ -146,8 +157,10 @@ export function detectFailoverError(message: string | undefined | null): { code:
   // HTTP status codes, only when prefixed by an error context
   // (e.g. "Error: 500", "HTTP 502", "status 503") so bare numbers
   // in prose ("the output was 500 tokens") are not misread.
+  // 429 = rate limit; 402 = billing-exhausted (same 4xx backoff bucket);
+  // 50[0-9]/51[0-9]/52[0-9] = server errors (transient, fast 1m start).
   const statusMatch = text.match(
-    /(?:error|http|status|code)[^\n]{0,12}\b(429|50[0-9]|51[0-9]|52[0-9])\b/i,
+    /(?:error|http|status|code)[^\n]{0,12}\b(429|402|50[0-9]|51[0-9]|52[0-9])\b/i,
   );
   if (statusMatch) return { code: statusMatch[1] };
 

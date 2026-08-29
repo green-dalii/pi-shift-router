@@ -113,9 +113,9 @@ The judge output format is strict so small models parse it reliably: OpenAI-comp
 
 ### When a provider goes down
 
-429 / 5xx / quota / token-plan exhausted? pi retries first (3× provider, 3× agent); if it still fails, the router takes over:
+429 / 402 / 5xx / quota / token-plan exhausted / account balance empty? pi retries first (3× provider, 3× agent); if it still fails, the router takes over:
 
-1. The failing model enters exponential-backoff cooldown — 5xx starts at 1m (1m → 4m → 16m → 1h → 4h… capped at 6h), while a failover-worthy 4xx (429 rate limit / quota) skips the first two tiers and starts at 16m, because client-side limits usually outlive server blips.
+1. The failing model enters exponential-backoff cooldown — 5xx starts at 1m (1m → 4m → 16m → 1h → 4h… capped at 6h), while a failover-worthy 4xx (429 rate limit / 402 Insufficient Balance / quota) skips the first two tiers and starts at 16m, because client-side limits (rate window or account balance) usually outlive server blips.
 2. `setModel` switches immediately to the next healthy model in the **same** tier — never across tiers.
 3. pi's pending retry lands on the fallback — same-turn failover.
 4. Later turns skip cooled models; a 2xx response clears the cooldown; a session restart resets everything.

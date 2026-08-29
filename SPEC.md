@@ -66,6 +66,15 @@ User sends message
 | **🧠 Smart (CTO)** | Judgment driver: direction-setting, correction, review, and hard problems handled personally — and when chosen, executes the entire turn at high intelligence | Architecture design, technology selection, code review, security audit, performance optimization, multi-step planning, any irrecoverable action. **Small workload, critically important.** |
 | **🦾 Fast (Engineer)** | Execution driver: follows known patterns, drives the whole turn with the simpler model | Writing code, fixing bugs, adding tests, writing docs, adding comments, small refactors. **Large workload, well-defined patterns.** |
 
+**Document & bulk work is Fast.** Document handling — reading, checking,
+updating, formatting, translating, cross-doc consistency — and tedious
+batches (mechanical replace, renaming, same edit across many files) are
+`fast`: they follow established patterns and don't need frontier judgment.
+Only **direction-setting** doc work escalates to `smart` — a new
+design/architecture doc, or a review whose findings drive rework (e.g.
+security). The Judge prompt carries this as explicit guidance + few-shots
+(*“检查文档的更新修订” → fast*).
+
 ### 2.3 Transition Rules
 
 Transitions are driven by an **expected-cost (EV) decision rule** over the Judge's

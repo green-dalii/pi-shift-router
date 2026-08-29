@@ -28,7 +28,7 @@ The tier you pick **does the whole turn** (thinking, tooling, writing). You don'
 
 | Use `smart` | Use `fast` |
 |---|---|
-| Needs judgment — direction, trade-off, architecture, planning, diagnosis with unknown cause, security review where findings drive rework, or staking course correction | Needs execution — routine code, bug fix, tests, small refactor, reading/explaining/summarizing, following an established pattern |
+| Needs judgment — direction, trade-off, architecture, planning, diagnosis with unknown cause, security review where findings drive rework, or staking course correction | Needs execution — routine code, bug fix, tests, small refactor, **document handling (read / check / update / format / translate / cross-doc consistency)**, tedious/bulk batches, reading/explaining/summarizing, following an established pattern |
 
 ### How to choose
 
@@ -43,6 +43,8 @@ Weigh these signals, in priority order:
 **Tier = role.** `smart` is the CTO (judgment driver); `fast` is the engineer (execution driver).
 
 **Reading tasks:** `reading / explaining / summarizing → fast`; `review as a deliverable that sets direction or finds risks → smart`. If the turn is *“point out nits and fix them”* with a clear path, that's fast.
+
+**Document & bulk tasks:** document handling — reading, checking, updating, formatting, translating, cross-doc consistency — is `fast`: it follows established patterns and doesn't need frontier judgment. Same for tedious batches (mechanical replace, renaming, running the same edit across many similar files). Escalate to `smart` only when the doc work actually *sets direction* — e.g. writing a new design/architecture doc, or a review whose findings drive rework (like a security review). *“Check the docs for consistency / 检查文档的更新修订”* → `fast`.
 
 ---
 
@@ -63,6 +65,10 @@ When the user explicitly asks for or against orchestration, follow them directly
 |---|---|---|---|
 | "Write a function to sort an array" | fast | false | routine |
 | "Fix typo in README" | fast | false | trivial |
+| "检查文档的更新修订 / check the docs for consistency" | fast | false | doc handling |
+| "Update README across all packages" | fast | false | doc handling |
+| "批量把 X 替换成 Y / batch-replace across files" | fast | false | bulk execution |
+| "Write the migration design doc" | smart | false | direction-setting doc |
 | "Design the billing data model" | smart | false | architecture, one-pass |
 | "Should we use REST or GraphQL?" | smart | false | trade-off |
 | "Review this PR for security issues" | smart | false | review = deliverable |

@@ -30,14 +30,17 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # dist/ is gitignored — Build MUST run before Test: tests/pack-isolation.test.ts
+      # gates the compiled artifact (every dist runtime import covered by
+      # `dependencies`). Running Test first fails spuriously on a fresh checkout.
+      - name: Build
+        run: npm run build
+
       - name: Test
         run: npm test
 
       - name: "Coverage (thresholds: router/failover ≥90%)"
         run: npm run test:coverage
-
-      - name: Build
-        run: npm run build
 
       - name: Pack-check (publish-state validation)
         run: npm run pack:check

@@ -7,7 +7,7 @@
  * uses a sandbox-safe /tmp directory.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -23,6 +23,13 @@ import {
   invalidateConfigCache,
 } from "../src/config.js";
 import { DEFAULT_CONFIG, type ModelsStore, type ShiftRouterConfig, type StoredModel } from "../src/types.js";
+
+// Hermetic test isolation: the real ~/.pi/agent/pi-shift-router.json is a
+// machine-dependent layer (e.g. a persisted economics.mode from /router mode)
+// and would leak into every loadConfig() here — flaky on dev machines and CI.
+// Redirect homedir so the user-config path resolves into a sandbox-safe temp
+// home (config.ts computes PI_AGENT_DIR from homedir() at module scope).
+vi.mock("node:os", () => ({ homedir: () => "/tmp/pi-shift-router-test-home" }));
 
 const TMP_DIR = "/tmp/pi-shift-router-stale-test";
 const TMP_CUSTOM = join(TMP_DIR, "models.json");

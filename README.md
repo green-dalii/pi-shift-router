@@ -102,7 +102,7 @@ So a router that can't perfectly tell "simple" from "hard" shouldn't bet at 50/5
 f + P·Δ·R > f + Δ   ⟺   P > 1/R
 ```
 
-The price difference cancels: **the rule doesn't care how expensive your models are — only how badly a fumble hurts relative to the price difference.** Default `R = 3` → θ ≈ 0.33: a one-in-three chance of needing smart is enough. **Higher R lowers the bar**: `R = 5` → θ = 0.2 (eager — `/router mode sport`), `R = 2` → θ = 0.5 (conservative — `/router mode eco`).
+The price difference cancels: **the rule doesn't care how expensive your models are — only how badly a fumble hurts relative to the price difference.** Default `R = 3` → θ ≈ 0.33: a one-in-three chance of needing smart is enough. **Higher R lowers the bar**: `R = 5` → θ = 0.2 (eager — `/router sport`), `R = 2` → θ = 0.5 (conservative — `/router eco`).
 
 **Two guards stop it from bouncing:**
 
@@ -250,7 +250,7 @@ You should see your current tier, scope, economics (R / θ), downgrade-streak re
 | `/router config` | Launch the TUI configuration wizard |
 | `/router quiet` | Toggle inline toast notifications |
 | `/router verbose` | Toggle verbose logging |
-| `/router mode eco\|default\|sport` | Gear-shift economics presets (persisted): **eco** → R=2 (θ=0.5, cheaper — only clearly-needed turns run smart), **default** → R=3 (θ≈0.33), **sport** → R=5 (θ=0.2, eager — any real chance of needing Smart escalates). No arg shows the current mode + preset table |
+| `/router eco\|default\|sport` | Gear-shift economics presets (persisted): **eco** → R=2 (θ=0.5, cheaper — only clearly-needed turns run smart), **default** → R=3 (θ≈0.33), **sport** → R=5 (θ=0.2, eager — any real chance of needing Smart escalates). Top-level words so pi tab-completes them; `/router status` shows the current mode + the preset table |
 | `/router orchestrate auto` | Task-level orchestration (default): complex tasks → Smart CTO delegates to Fast subagents; simple tasks stay on the plain router |
 | `/router orchestrate off` | Disable orchestration — plain two-tier routing only |
 | `/route-force <tier>` | Pin a tier for the next turn |

@@ -105,7 +105,7 @@ needed — `reworkPenalty` is the whole economics knob. When cache-aware routing
 is active on the same provider family, the effective bar lowers (fewer
 downgrades) to protect the warm prompt cache.
 
-**Gear presets (`/router mode`).** R is the only knob the presets touch:
+**Gear presets (`/router eco|default|sport`).** R is the only knob the presets touch:
 `eco` (R=2, θ=0.5 — cheaper: only clearly-needed turns run smart),
 `default` (R=3, θ≈0.33), `sport` (R=5, θ=0.2 — eager: any real chance
 of needing Smart escalates). Recall θ = 1/R: higher R lowers the bar. The command sets

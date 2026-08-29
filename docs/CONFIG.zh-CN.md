@@ -92,7 +92,7 @@ tiers:
 | `routing.judgeTimeout` | `5000` | ms。Judge 调用超时。 |
 | `routing.window.size` | `5` | 判定记忆窗口长度（保留用于降级连胜分析与展示）。 |
 | `routing.window.minConfidence` | `0.5` | Judge 置信度低于此 = 无信号（hold：绝不切换，且打断 fast 连胜）。 |
-| `routing.window.threshold` | 旧版 | v1.4.0 之前的旧旋钮。**平滑迁移：旧默认值 `0.6` 已死**——配置里带着它（例如向导快照）会静默回落到新规则 `θ = 1/reworkPenalty`，而不是被重解释成保守的 θ=0.6。只有**不等于** `0.6` 的值才作为**原始 θ** 覆盖（并在 `/router status` 中显示）。优先用 `economics.reworkPenalty` / `/router mode`。 |
+| `routing.window.threshold` | 旧版 | v1.4.0 之前的旧旋钮。**平滑迁移：旧默认值 `0.6` 已死**——配置里带着它（例如向导快照）会静默回落到新规则 `θ = 1/reworkPenalty`，而不是被重解释成保守的 θ=0.6。只有**不等于** `0.6` 的值才作为**原始 θ** 覆盖（并在 `/router status` 中显示）。优先用 `economics.reworkPenalty` / `/router eco|default|sport`。 |
 | `routing.economics.mode` | 未设置 | `/router mode` 的命名预设：`eco`（R=2，θ=0.5，更省——只有明确需要 smart 的轮才升级）、`default`（R=3，θ≈0.33）、`sport`（R=5，θ=0.2，更积极——只要有需要 Smart 的苗头就升级）。R 越大 → θ 越低 → 越倾向 Smart（θ = 1/R）。设置后**优先于** `reworkPenalty`；删除它（或改文件）回到手动 R。旧版 `window.threshold`（仅非 0.6 的值）仍然压过两者。 |
 | `routing.economics.reworkPenalty` | `3` | 错误降级的代价（以价差计）。θ = 1/R：期望成本智能闸（SPEC §2.3）。设了 `economics.mode` 时被忽略。 |
 | `routing.economics.downgradeMemory` | `2` | smart → fast 降级所需的连续 decisive fast 判定次数。 |
@@ -114,8 +114,8 @@ tiers:
 
 | 你的会话看起来像… | 试试… | 为什么 |
 |---|---|---|
-| 很多例行任务（CRUD、测试、文档）；架构很少 | `/router mode eco`（R=2, θ=0.5） | 更省/保守：只有明确需要 smart 的轮才升级 |
-| 重架构 / 规划 / 代码审查 | `/router mode sport`（R=5, θ=0.2） | 更积极/粘 Smart：只要有需要 Smart 的苗头就升级——错误降级比省下的差价贵 |
+| 很多例行任务（CRUD、测试、文档）；架构很少 | `/router eco`（R=2, θ=0.5） | 更省/保守：只有明确需要 smart 的轮才升级 |
+| 重架构 / 规划 / 代码审查 | `/router sport`（R=5, θ=0.2） | 更积极/粘 Smart：只要有需要 Smart 的苗头就升级——错误降级比省下的差价贵 |
 | 混合 —— 有时连续 20 轮快任务，有时规划 | 默认（`default`，R=3, θ≈0.33） | 平衡：边界判定倾向 smart |
 | Judge 倾向过度自信（多数投票 ≥0.9） | `minConfidence: 0.7` | 剔除过度自信投票 |
 | Judge 倾向不确定（许多投票 0.3–0.6） | `minConfidence: 0.3` | 不丢弃不确定投票 |
@@ -129,9 +129,9 @@ tiers:
 **`routing.window.size`** — 滑动窗口长度。默认 `5`。越大越稳定（反应越慢），越小越敏捷（可能抖动）。
 
 **`routing.economics.reworkPenalty`** (≥1) — 一次错误降级的返工代价（以几个价差计）。**θ = 1 / reworkPenalty** 是期望成本智能闸（SPEC §2.3）：Judge 置信度读作 `pSmart`（smart 判定：`c`；fast 判定：`1−c`），`pSmart ≥ θ` 时跑 smart。因为返工比省下的差价贵，边界判定倾向 smart。**注意方向：R 越大 → θ 越低 → 越倾向 Smart**。
-- `5` → θ=0.2（`/router mode sport`）：积极/粘——大部分边界情况都升级，多在 Smart 停留
+- `5` → θ=0.2（`/router sport`）：积极/粘——大部分边界情况都升级，多在 Smart 停留
 - `3` → θ≈0.33（默认 `default`）：平衡
-- `2` → θ=0.5（`/router mode eco`）：保守/省——只有明确需要 smart 的轮才跑 smart
+- `2` → θ=0.5（`/router eco`）：保守/省——只有明确需要 smart 的轮才跑 smart
 
 **`routing.window.minConfidence`** (0–1) — 低于此置信度的投票被丢弃。默认 `0.5`。设为 `0` 恢复 v0.6.0 的等权计数；设为 `0.7+` 仅计清晰投票。
 
@@ -178,7 +178,7 @@ Detail:
 Config: /…/.pi/pi-shift-router.json
 ```
 
-- **`Economics`** — 关键行：当前**模式**（`eco` / `default` / `sport` / `custom`）、**R**（返工倍率）、基础 θ `1/R`，以及——Fast 与 Smart 共享 Provider 时——经同家族缓存除数后的**有效 θ**。降级太频繁 → 降低 R（`/router mode eco` 或更大 R）；太少 → 提高 R（`sport`）。仍生效的旧版 `window.threshold`（非默认值）会在此处标记。
+- **`Economics`** — 关键行：当前**模式**（`eco` / `default` / `sport` / `custom`）、**R**（返工倍率）、基础 θ `1/R`，以及——Fast 与 Smart 共享 Provider 时——经同家族缓存除数后的**有效 θ**。降级太频繁 → 降低 R（`/router eco` 或更大 R）；太少 → 提高 R（`/router sport`）。仍生效的旧版 `window.threshold`（非默认值）会在此处标记。
 - **`Cache-aware`** — 同家族配置把 θ 除以 `sameFamilyPenalty` 并抑制热缓存降级；跨家族显示 `—`。
 - **`Last audit`** — 最近一次委派轮的验收审计。`(self-executed)` 表示该轮自执行、被豁免。
 - **`Cooldowns`** — 触发 failover 签名后处于指数退避的模型及重试倒计时。

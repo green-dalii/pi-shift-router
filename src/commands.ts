@@ -4,7 +4,7 @@
  * /router          — Show status, enable/disable
  * /router status   — Detailed router state
  * /router config   — Interactive configuration wizard
- * /router mode     — Gear-shift economics presets (eco | default | sport)
+ * /router eco|default|sport — Gear-shift economics presets (top-level so pi completes them)
  * /route-force     — Manual override for current turn
  */
 
@@ -424,7 +424,7 @@ export function registerCommands(
   pi.registerCommand("router", {
     description: "pi-shift-router: show status, enable/disable",
     getArgumentCompletions: (prefix: string) => {
-      const cmds = ["on", "off", "status", "quiet", "verbose", "config", "mode", "orchestrate"].filter((c) => c.startsWith(prefix));
+      const cmds = ["on", "off", "status", "quiet", "verbose", "config", "orchestrate", "eco", "default", "sport"].filter((c) => c.startsWith(prefix));
       return cmds.length > 0 ? cmds.map((c) => ({ value: c, label: c })) : null;
     },
     handler: async (args, ctx) => {
@@ -504,29 +504,13 @@ export function registerCommands(
         );
         return;
       }
-      if (arg === "mode") {
-        const current = config.routing.economics?.mode;
-        const effective = effectiveTheta(config);
-        const base = 1 / Math.max(effectiveReworkPenalty(config), 1);
-        const effNote =
-          Math.abs(effective - base) > 1e-9 && shareProviderFamily(config)
-            ? ` — effective θ ${effective.toFixed(2)} (same-family cache-aware ÷${sameFamilyFactorDisplay(config)})`
-            : "";
-        ctx.ui.notify(
-          [
-            `pi-shift-router: 🚗 Economic mode: ${current ?? "unset → default preset (R=" + effectiveReworkPenalty(config) + ")"}`,
-            `  eco      → R=2  (θ=0.50)  cheaper: only clearly-needed turns run smart`,
-            `  default  → R=3  (θ≈0.33)  the default`,
-            `  sport    → R=5  (θ=0.20)  eager: any real chance of needing Smart escalates`,
-            `  base θ is divided by the same-family cache penalty when Fast and Smart share a provider${effNote}`,
-            `Usage: /router mode eco|default|sport (persisted to config)`,].join("\n"),
-          "info",
-        );
-        return;
-      }
-      const modeMatch = /^mode\s+(eco|default|sport)$/.exec(arg);
-      if (modeMatch) {
-        const mode = modeMatch[1] as EconomicMode;
+      // Gear presets are TOP-LEVEL commands so pi can tab-complete them:
+      // /router eco | default | sport. The old `/router mode <gear>` form was
+      // removed — the gear sat in the second arg slot, which pi never
+      // completes. The config field (routing.economics.mode) is unchanged.
+      const gearMatch = /^(eco|default|sport)$/.exec(arg);
+      if (gearMatch) {
+        const mode = gearMatch[1] as EconomicMode;
         const R = ECONOMIC_MODE_PRESETS[mode];
         config.routing.economics = { ...(config.routing.economics ?? { reworkPenalty: 3, downgradeMemory: 2 }), mode };
         await persistConfig(config, ctx.cwd);
@@ -608,6 +592,7 @@ export function registerCommands(
             `  Last audit:${sAudit}`,
             `  Cache-aware: ${shareProviderFamily(config) ? "🎯 same-family (θ ÷ " + (config.routing.cacheAware?.enabled ? sameFamilyFactorDisplay(config) : "1 — disabled") + ", " + (config.routing.cacheAware?.enabled ? "warm-cache guarded" : "inactive — enable in /router config") + ")" : "— (cross-family)"}`,
             `  Economics: 🚗 mode ${economicModeLabel(config)}  R=${effectiveReworkPenalty(config)} (θ=${effectiveThetaDisplay(config)}${effectiveThetaEffNote(config)})  downgrade streak ≥ ${config.routing.economics?.downgradeMemory ?? 2} fast${legacyThetaOverride(config) !== undefined ? `  ⚠ legacy window.threshold=${legacyThetaOverride(config)} (non-default value) overrides θ` : ""}`,
+            `  Gears:    /router eco (R=2, θ=0.50) · /router default (R=3, θ≈0.33) · /router sport (R=5, θ=0.20)`,
             ...(cooldownLines.length > 0
               ? [`  Cooldowns (${cooldownLines.length}):`, ...cooldownLines]
               : [`  Cooldowns: none`]),

@@ -102,7 +102,7 @@ pi install npm:pi-shift-router   # 然后：/router config → /router status
 f + P·Δ·R > f + Δ   ⟺   P > 1/R
 ```
 
-差价被约掉了：**规则不关心你选的模型贵不贵，只关心「搞砸的代价相对差价有多大」**。默认 `R = 3` → θ ≈ 0.33：有三分之一概率需要 smart，就值得升级。**R 越大闸越低**：`R = 5` → θ = 0.2（更积极——`/router mode sport`），`R = 2` → θ = 0.5（更保守——`/router mode eco`）。
+差价被约掉了：**规则不关心你选的模型贵不贵，只关心「搞砸的代价相对差价有多大」**。默认 `R = 3` → θ ≈ 0.33：有三分之一概率需要 smart，就值得升级。**R 越大闸越低**：`R = 5` → θ = 0.2（更积极——`/router sport`），`R = 2` → θ = 0.5（更保守——`/router eco`）。
 
 **两道护栏防止来回抖：**
 
@@ -233,7 +233,7 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 | `/router config` | 打开 TUI 配置向导 |
 | `/router quiet` | 关闭内联 toast 提示 |
 | `/router verbose` | 打开详细日志 |
-| `/router mode eco\|default\|sport` | 换挡经济预设（持久化）：**eco** → R=2（θ=0.5，更省——只有明确需要 smart 的轮才升级），**default** → R=3（θ≈0.33），**sport** → R=5（θ=0.2，更积极——只要有需要 Smart 的苗头就升级）。不带参数显示当前模式与预设表 |
+| `/router eco\|default\|sport` | 换挡经济预设（持久化）：**eco** → R=2（θ=0.5，更省——只有明确需要 smart 的轮才升级），**default** → R=3（θ≈0.33），**sport** → R=5（θ=0.2，更积极——只要有需要 Smart 的苗头就升级）。顶层命令词，pi 可直接 Tab 补齐；当前模式与预设表见 `/router status` |
 | `/router orchestrate auto` | 任务级编排（默认）：复杂任务 → Smart 档作为 CTO 派发给 Fast 子代理；简单任务仍走普通路由 |
 | `/router orchestrate off` | 关闭编排——仅基础两档路由 |
 | `/route-force <档位>` | 下一轮强制走某档 |

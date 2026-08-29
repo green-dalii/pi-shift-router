@@ -65,7 +65,7 @@ export interface UXConfig {
 }
 
 /** Routing behaviour config */
-/** Named economics presets for `/router mode` (SPEC §2.3). */
+/** Named economics presets for `/router eco|default|sport` (SPEC §2.3). */
 export type EconomicMode = "eco" | "default" | "sport";
 
 /**
@@ -109,7 +109,7 @@ export interface RoutingConfig {
    * price-deltas a wrong downgrade costs (rework multiplier); θ = 1/R.
    * `downgradeMemory` = consecutive decisive fast decisions required to
    * downgrade from smart to fast.
-   * `mode` = named preset (`/router mode`); when present it is authoritative
+   * `mode` = named preset (`/router eco|default|sport`); when present it is authoritative
    * over `reworkPenalty` (which stays as the legacy/manual fallback).
    */
   economics: { reworkPenalty: number; downgradeMemory: number; mode?: EconomicMode };

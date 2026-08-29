@@ -79,7 +79,7 @@ export function shareProviderFamily(config: ShiftRouterConfig): boolean {
 
 /**
  * Effective rework penalty R (SPEC §2.3). A named `economics.mode` preset
- * (`/router mode eco|default|sport`) is authoritative when present;
+ * (`/router eco|default|sport`) is authoritative when present;
  * otherwise the raw `reworkPenalty` applies (legacy default 3).
  */
 export function effectiveReworkPenalty(config: ShiftRouterConfig): number {

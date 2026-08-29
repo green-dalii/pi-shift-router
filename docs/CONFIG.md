@@ -44,7 +44,7 @@ pi-shift-router.json
 │   │   ├── threshold          LEGACY explicit θ override (raw pSmart bar); prefer economics
 │   │   └── minConfidence      below this = no signal (hold); default 0.5
 │   ├── economics
-│   │   ├── mode               named preset (/router mode): eco | default | sport; overrides reworkPenalty when set
+│   │   ├── mode               named preset (/router eco|default|sport): eco | default | sport; overrides reworkPenalty when set
 │   │   ├── reworkPenalty      wrong-downgrade cost in price-deltas; θ = 1/R; default 3
 │   │   └── downgradeMemory    consecutive decisive fast decisions to downgrade; default 2
 │   └── cacheAware
@@ -133,13 +133,13 @@ Every knob is a trade-off. Pick by workload:
 **`routing.window.size`** — Decision-history cap. Default `5`. Larger keeps more context for the downgrade streak; entries beyond it are discarded.
 
 **`routing.economics.reworkPenalty`** (≥1) — how many price-deltas a wrong downgrade costs (rework multiplier). **θ = 1 / reworkPenalty** is the expected-cost smart bar (SPEC §2.3): the judge's confidence is read as `pSmart` (smart verdict: `c`; fast verdict: `1−c`), and the turn runs smart whenever `pSmart ≥ θ`. Because rework costs more than the saved delta, borderline verdicts lean smart. NOTE the direction: **higher R → lower θ → MORE eager Smart**.
-- `5` → θ=0.2 (`/router mode sport`): eager/sticky — most borderline turns escalate, stays on Smart
+- `5` → θ=0.2 (`/router sport`): eager/sticky — most borderline turns escalate, stays on Smart
 - `3` → θ≈0.33 (default `default`): balanced
-- `2` → θ=0.5 (`/router mode eco`): conservative/cheap — only clearly-needed turns run smart
+- `2` → θ=0.5 (`/router eco`): conservative/cheap — only clearly-needed turns run smart
 
 **`routing.economics.downgradeMemory`** (≥1) — consecutive decisive fast decisions required to downgrade smart → fast. Default `2` (two independent judge agreements). A hold (confidence < `minConfidence`) or a smart decision breaks the streak.
 
-**`routing.window.threshold`** (0–1, LEGACY) — pre-v1.4.0 knob. **Smooth migration:** the old default `0.6` is **dead** — a config carrying it (e.g. a wizard snapshot) silently falls back to the new rule `θ = 1/reworkPenalty` instead of being reinterpreted as a conservative `θ=0.6`. Only a value that *differs* from `0.6` is honored as a **raw θ** override (and shown in `/router status`). Prefer `economics.reworkPenalty` / `/router mode`; remove `threshold` to use the economics default.
+**`routing.window.threshold`** (0–1, LEGACY) — pre-v1.4.0 knob. **Smooth migration:** the old default `0.6` is **dead** — a config carrying it (e.g. a wizard snapshot) silently falls back to the new rule `θ = 1/reworkPenalty` instead of being reinterpreted as a conservative `θ=0.6`. Only a value that *differs* from `0.6` is honored as a **raw θ** override (and shown in `/router status`). Prefer `economics.reworkPenalty` / `/router eco|default|sport`; remove `threshold` to use the economics default.
 
 **`routing.window.minConfidence`** (0–1) — below this, the judge's confidence is treated as **no signal** (hold): never switch tiers, and the hold breaks a fast streak. Default `0.5`. Set `0` to always follow the judge.
 
@@ -187,7 +187,7 @@ Detail:
 Config: /…/.pi/pi-shift-router.json
 ```
 
-- **`Economics`** — the money line: the active **mode** (`eco` / `default` / `sport` / `custom`), **R** (rework penalty), the base θ `1/R`, and — when Fast & Smart share a provider — the **effective θ** after the same-family cache divisor. Too many downgrades → lower R (`/router mode eco` or a higher R); too few → raise R (`sport`). A legacy `window.threshold` (non-default value) still active is flagged here.
+- **`Economics`** — the money line: the active **mode** (`eco` / `default` / `sport` / `custom`), **R** (rework penalty), the base θ `1/R`, and — when Fast & Smart share a provider — the **effective θ** after the same-family cache divisor. Too many downgrades → lower R (`/router eco` or a higher R); too few → raise R (`/router sport`). A legacy `window.threshold` (non-default value) still active is flagged here.
 - **`Cache-aware`** — same-family setups divide θ by `sameFamilyPenalty` and suppress warm-cache downgrades; cross-family shows `—`.
 - **`Last audit`** — the most recent delegated-run acceptance audit. `(self-executed)` means the turn did the work itself and was exempt.
 - **`Cooldowns`** — models currently in exponential backoff after failover signatures, with retry ETA.

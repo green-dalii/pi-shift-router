@@ -56,7 +56,7 @@ pi-shift-router 是 [pi-coding-agent](https://github.com/earendil-works/pi) 的�
 🦾 [glm-5.2]                    ← 同档 failover
 ```
 
-- **升级立即**，降级要等趋势稳定——不会来回抖。
+- **升级立即**，降级要连续 2 轮 fast——不会来回抖。
 - 每档可配多模型链，429/5xx 指数退避冷却，任务不中断。
 - 零第三方运行时依赖、一个配置文件——配好模型之前是 no-op，之后路由开箱即用（复杂任务自动编排）。
 
@@ -70,12 +70,26 @@ pi install npm:pi-shift-router   # 然后：/router config → /router status
 
 每轮开始前只做一次便宜的调用：Fast 档模型（通常是你最便宜的那个）把你的消息判为 `fast`（例行）或 `smart`（重要）。这是路由器唯一的分类——判定之后，选中的档位整轮干活。
 
-一条经济学规则管住所有切换（SPEC §2.3）：
+每轮开始前只做一次便宜调用：Fast 档模型（通常是你最便宜的）读你的消息，判为 `fast`（例行）或 `smart`（重要），并给出**置信度**（0–1，多确信）。判定之后，选中的档位整轮干活。
 
-- **置信度即概率**。Judge 返回 `{tier, confidence}`；路由器把它读成 `pSmart = confidence`（smart 判定）或 `1 − confidence`（fast 判定）——本轮需要强档的概率。
-- **期望成本闸 θ = 1 / reworkPenalty**。错误降档（fast 搞砸复杂任务 → 返工）比差价更贵，所以边界模糊时一律倾向 smart。默认 `reworkPenalty: 3` → θ≈0.33：`fast` 判定置信度低于约 0.67 会升级；`smart` 判定置信度低于约 0.33 会被驳回为 fast。置信度低于 `minConfidence`（0.5）视为无信号——路由器停在当前档位。
-- **升级立即**：任何决定性 smart 判定立刻升级；**降级需要连续 2 轮决定性 fast 判定**（外加缓存门），一句“谢谢”永远降不下来。
-- **Cache-aware 路由保护你的热 prompt 缓存**。Prompt 缓存属于单个模型：中途换档，新模型要以全价重读整个对话。当 Fast 与 Smart 同属一个 Provider（都是 Anthropic、都是 OpenAI……）时，路由器把 θ 除以 `sameFamilyPenalty`（更少降级），并在缓存还热时按住不降——让“路由到更便宜的模型”永远不会比不路由更贵。升级永不受影响；跨 Provider 配置不共享缓存，行为不变。
+**整条规则用一句话说清：*如果这一轮需要 smart 的概率 ≥ θ，就跑 smart；否则跑 fast。*** 默认闸 **θ ≈ 0.33**。
+
+| Judge 判定 | 置信度 | 需要 smart 的概率（pSmart） | 对比 θ | 去向 |
+|---|---|---|---|---|
+| `smart` | 0.9 | 0.9 | ≥ | 🧠 smart |
+| `smart` | 0.2 | 0.2 | < | 🦾 fast —— 弱判定被驳回 |
+| `fast` | 0.9 | 0.1 | < | 🦾 fast |
+| `fast` | 0.6 | 0.4 | ≥ | 🧠 smart —— 拿不准是不是简单活 |
+| 任意 | < 0.5 | —— 无信号 | —— | hold —— 停在当前档位 |
+
+置信度怎么换算？Judge 说 `smart`、置信度 `c`，那么需要 smart 的概率就是 `c` 本身；说 `fast`，概率就是 `1 − c`（**越确信 fast，越说明不需要 smart**）。这就是表里的 pSmart。
+
+为什么闸是 0.33 而不是 0.5？**因为把「这活儿很简单」判断错，代价很大**：便宜模型搞砸复杂任务，你重跑——你的时间 + 重试成本远超省下的那点差价。所以只要 Judge 真的拿不准，路由器就偏向 smart。具体数值 **θ = 1 / `reworkPenalty`**：`reworkPenalty`（默认 3）就是你估计的「一次错误降档的返工 ≈ 几个差价」。设 5 更省（θ=0.2），设 2 更粘 Smart（θ=0.5）。
+
+两条机制细节：
+
+- **升级**（fast → smart）只要 pSmart ≥ θ 就立即升。**降级**（smart → fast）需要**连续 2 轮** pSmart < θ——一句「谢谢」永远降不下来——外加下面的缓存门。
+- **缓存门**。Prompt 缓存属于单个模型：中途换档，新模型要以全价重读整个对话。当 Fast 与 Smart 同属一个 Provider（都是 Anthropic、都是 OpenAI……）时，路由器把 θ 除以 `sameFamilyPenalty`（更少降级），并在缓存还热时（空闲 5 分钟内）按住不降——「路由到更便宜的模型」永远不会比不路由更贵。升级永不受影响；跨 Provider 配置不共享缓存，行为不变。
 
 判定调用对输出格式很严格，小模型也能稳定解析：OpenAI 兼容端点用 `response_format: json_object`（非 JSON 直接被打回），Anthropic 用 `{` 前缀预填强制 JSON 开头。判定期间状态栏显示 `🧭 judging…`。判定失败时停在当前档位，不猜。
 

@@ -56,7 +56,7 @@ For complex tasks, the router graduates from *turn-level* routing to *task-level
 🦾 [glm-5.2]                    ← same-tier failover
 ```
 
-- **Upgrades are instant**; downgrades wait for a sustained trend — no mid-session bouncing.
+- **Upgrades are instant**; downgrades need 2 consecutive "fast" turns — no mid-session bouncing.
 - Per-tier fallback chains plus exponential-backoff cooldown on 429/5xx — turns keep flowing.
 - Zero runtime dependencies, one config file — a no-op until you pick models; then routing just works (and complex tasks orchestrate automatically).
 
@@ -68,14 +68,26 @@ pi install npm:pi-shift-router   # then: /router config → /router status
 
 ## How it works
 
-One cheap call per turn: the fast-tier model (usually your cheapest) reads your message and marks it `fast` (routine) or `smart` (consequential). That's the router's only classification — after it, the chosen tier does the work.
+One cheap call per turn: the fast-tier model (usually your cheapest) reads your message, marks it `fast` (routine) or `smart` (consequential), and says **how sure it is** (confidence 0–1). That's the router's only classification — the chosen tier then does the work.
 
-One economics rule governs every switch (SPEC §2.3):
+**The whole rule in one sentence: *if the chance this turn needs the smart model is at least θ, run smart; otherwise run fast.*** The default bar is **θ ≈ 0.33**.
 
-- **Judge confidence becomes probability.** The judge returns `{tier, confidence}`; the router reads it as `pSmart = confidence` (smart verdict) or `1 − confidence` (fast verdict) — the probability the turn needs the strong tier.
-- **Expected-cost bar θ = 1 / reworkPenalty.** A wrong downgrade (fast fumbles a complex task → rework) costs more than the price delta, so borderline verdicts lean smart. Default `reworkPenalty: 3` → θ ≈ 0.33: a `fast` verdict with confidence below ~0.67 upgrades; a `smart` verdict with confidence below ~0.33 is overridden to fast. Confidence below `minConfidence` (0.5) is no signal — the router holds its current tier.
-- **Upgrade is immediate** on any decisive smart decision; **downgrade needs 2 consecutive decisive fast decisions** (plus the cache gate) so a single "thanks" never drops you.
-- **Cache-aware routing protects your warm prompt cache.** Prompt caches belong to a model: switch tiers mid-session and the next model re-reads the whole conversation at full input price. When your Fast and Smart tiers share a provider (both Anthropic, both OpenAI…), the router divides θ by `sameFamilyPenalty` (fewer downgrades) and holds off downgrading while the cache is warm — so routing to a cheaper model never costs more than staying put. Upgrades are never affected; cross-provider setups don't share a cache, so nothing changes there.
+| Judge says | confidence | Chance smart is needed (pSmart) | vs θ | Goes to |
+|---|---|---|---|---|
+| `smart` | 0.9 | 0.9 | ≥ | 🧠 smart |
+| `smart` | 0.2 | 0.2 | < | 🦾 fast — weak verdict overridden |
+| `fast` | 0.9 | 0.1 | < | 🦾 fast |
+| `fast` | 0.6 | 0.4 | ≥ | 🧠 smart — not-sure-it's-simple |
+| any | < 0.5 | — no signal | — | hold — stay on the current tier |
+
+Where does the confidence go? If the judge says `smart` with confidence `c`, the chance smart is needed is `c` itself. If it says `fast`, the chance is `1 − c` (a *confident* `fast` means a *low* chance smart is needed). That's `pSmart`, the number in the table.
+
+Why is the bar 0.33 and not 0.5? **Because being wrong about "it's simple" is expensive.** If the cheap model fumbles a hard task, you re-run it — your time plus the retry costs far more than the money you saved by staying cheap. So whenever the judge is genuinely unsure, the router leans smart. The exact bar is **θ = 1 / `reworkPenalty`**: `reworkPenalty` (default 3) is your estimate of *how many times the price difference a botched downgrade costs you*. Set 5 for cheaper routing (θ=0.2), 2 to stay on Smart longer (θ=0.5).
+
+Two mechanical details:
+
+- **Upgrade** (fast → smart) is immediate whenever pSmart ≥ θ. **Downgrade** (smart → fast) needs **2 consecutive turns** where pSmart < θ — a single "thanks" never drops you — plus the cache guard below.
+- **Cache guard.** Prompt caches belong to a model: switch tiers mid-session and the next model re-reads the whole conversation at full input price. When Fast and Smart share a provider (both Anthropic, both OpenAI…), the router divides θ by `sameFamilyPenalty` (fewer downgrades) and refuses to downgrade while the cache is warm (within the 5-minute idle window). Routing to a cheaper model never costs more than staying put. Upgrades are never affected; cross-provider setups don't share a cache, so nothing changes there.
 
 The judge output format is strict so small models parse it reliably: OpenAI-compatible endpoints get `response_format: json_object` (non-JSON is rejected at the API), Anthropic gets a `{` prefill to force JSON output. The status bar shows `🧭 judging…` while it runs. If the judge fails, the router holds its current tier — it never guesses.
 

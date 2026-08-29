@@ -66,21 +66,75 @@ User sends message
 | **🧠 Smart (CTO)** | Judgment driver: direction-setting, correction, review, and hard problems handled personally — and when chosen, executes the entire turn at high intelligence | Architecture design, technology selection, code review, security audit, performance optimization, multi-step planning, any irrecoverable action. **Small workload, critically important.** |
 | **🦾 Fast (Engineer)** | Execution driver: follows known patterns, drives the whole turn with the simpler model | Writing code, fixing bugs, adding tests, writing docs, adding comments, small refactors. **Large workload, well-defined patterns.** |
 
+**Document & bulk work is Fast.** Document handling — reading, checking,
+updating, formatting, translating, cross-doc consistency — and tedious
+batches (mechanical replace, renaming, same edit across many files) are
+`fast`: they follow established patterns and don't need frontier judgment.
+Only **direction-setting** doc work escalates to `smart` — a new
+design/architecture doc, or a review whose findings drive rework (e.g.
+security). The Judge prompt carries this as explicit guidance + few-shots
+(*“检查文档的更新修订” → fast*).
+
 ### 2.3 Transition Rules
 
+Transitions are driven by an **expected-cost (EV) decision rule** over the Judge's
+verdict + confidence — not by raw vote counting. The two error directions have
+asymmetric cost: a wrong **downgrade** (fast fumbles a complex task) costs the
+price-delta times a rework multiplier and is worse than a wrong **upgrade**
+(simple task on smart, bounded extra spend). This asymmetry is encoded in a
+single knob.
+
 ```
-   Fast (execution)  ←───────────────→  Smart (judgment)
-         ↑                                     ↑
-    immediate on                        window majority
-    "smart" judge                       (≥60% of last 5)
+θ (smart bar) = 1 / economics.reworkPenalty      (default R=3 → θ≈0.33)
+
+pSmart = confidence          if Judge says smart
+       = 1 − confidence      if Judge says fast
+
+if confidence < window.minConfidence  → hold (no signal, never switch)
+else if pSmart ≥ θ                     → run smart
+else                                   → run fast
 ```
 
 | Direction | Condition | Rationale |
 |-----------|-----------|-----------|
-| **↑ fast → smart** | **Immediate** | Quality first. A single "smart" judge triggers the upgrade. |
-| **↓ smart → fast** | **Window majority** | Cache protection. Requires ≥60% of the last 5 turns to be "fast". |
+| **↑ fast → smart** | Single decisive smart decision (pSmart ≥ θ) | Upgrades cost only the price delta — cheap enough to act immediately on a confident-enough signal. An **uncertain fast verdict** (`pSmart ≥ θ`) also upgrades: not-sure-it's-simple leans smart because rework is pricier. |
+| **↓ smart → fast** | `downgradeMemory` consecutive decisive fast decisions (default 2) + cache-aware idle gate | Downgrades are the expensive direction (rework risk + cache forfeit). Two independent judge agreements dampen noise; holds break the streak. |
 
-The window is cleared on upgrade. Downgrades accumulate entries normally.
+Price cancels out of the rule: `θ = Δ/(Δ·R) = 1/R`, so no pricing lookup is
+needed — `reworkPenalty` is the whole economics knob. When cache-aware routing
+is active on the same provider family, the effective bar lowers (fewer
+downgrades) to protect the warm prompt cache.
+
+**Gear presets (`/router eco|default|sport`).** R is the only knob the presets touch:
+`eco` (R=2, θ=0.5 — cheaper: only clearly-needed turns run smart),
+`default` (R=3, θ≈0.33), `sport` (R=5, θ=0.2 — eager: any real chance
+of needing Smart escalates). Recall θ = 1/R: higher R lowers the bar. The command sets
+`economics.mode`, which is authoritative over a manual `reworkPenalty` (legacy
+fallback); a legacy `window.threshold` still overrides both. The preset is
+persisted to the config file, so a mode survives restarts.
+
+---
+
+### 2.4 Model Authority (Strict Takeover)
+
+The router **owns model selection** while enabled. The model on the wire must
+match the routed tier's chain — a tier label without model enforcement is
+fiction (a `fast` decision running on a smart-tier model is a price/behavior
+mismatch).
+
+- Every `before_agent_start`, after the routing decision, the router guarantees:
+  the active model = best available model (priority order, cooldown-aware) of
+  the **running tier** (the tier the turn actually executes on, after any
+  upgrade/downgrade). If the current model differs → `setModel`; if it is
+  already that model → no-op (no redundant `setModel`).
+- `session_start` remains read-only (no `setModel`); the first takeover happens
+  during the first turn's `before_agent_start`.
+- `/model` (native picker) is overridden at the next routing point: the model
+  the user picked runs for the current turn, then the router re-asserts the
+  tier chain. Restoring fully native `/model` behavior = `/router off`.
+- Persistent manual overrides are the explicit escape hatches:
+  `/router smart` / `/router fast` (manual override for the session, bypasses
+  takeover) and `/router off` (router disabled entirely → native model control).
 
 ---
 
@@ -96,17 +150,33 @@ Two-tier design reduces the window problem to a single question: **when is it sa
 ### 3.2 Window
 
 ```
-Window size = config.routing.window.size           (default 5)
-Threshold    = config.routing.window.threshold     (default 0.6)
+Window size = config.routing.window.size           (default 5, history cap)
+minConfidence = config.routing.window.minConfidence (default 0.5)
+downgradeMemory = config.routing.economics.downgradeMemory (default 2)
+
+Per-turn decision (EV rule, see §2.3):
+  pSmart = c (smart) or 1−c (fast); θ = 1 / economics.reworkPenalty
+  confidence < minConfidence → hold (no signal, no switch, breaks fast streak)
+  pSmart ≥ θ → smart; else fast
 
 Downgrade condition (smart → fast):
-  window.filter(tier === "fast").length / window.length ≥ threshold
+  trailing decisive entries are all fast AND count ≥ downgradeMemory
+  AND downgradeAllowedAt(state, config)  (cache-aware idle gate)
 
 Window lifecycle:
-  - Each processRoute pushes the current judge result.
+  - Each processRoute pushes a decisive entry (hold entries also pushed, marked).
   - When size is exceeded, the oldest entries are discarded.
   - On upgrade, the window is cleared.
 ```
+
+`window.threshold` (legacy) — **smooth migration:** the old default `0.6` is
+dead (configs carrying it fall back to `θ = 1/reworkPenalty`); only a value
+that differs from `0.6` acts as a raw θ override. Prefer `economics.reworkPenalty`.
+`cacheAware.sameFamilyThreshold` (legacy) is superseded by
+`cacheAware.sameFamilyPenalty` (multiplier on reworkPenalty); the old default
+`0.9` is dead too — only a differing value implies the strong default 3.0.
+Migrated-away legacy knobs are surfaced in `/router status` when a non-default
+value is still active.
 
 ### 3.3 Worked Example
 
@@ -222,7 +292,12 @@ interface ShiftRouterConfig {
   routing: {
     mode: "auto" | "manual" | "off";
     judgeTimeout: number;                                  // ms, default 5000
-    window: { size: number; threshold: number };           // default {5, 0.6}
+    window: { size: number; minConfidence: number; threshold?: number };
+                                                            // size 5, minConfidence 0.5;
+                                                            // threshold LEGACY (0.6 = dead)
+    economics: { reworkPenalty: number; downgradeMemory: number; mode?: "eco" | "default" | "sport" };
+                                                            // R default 3 (θ = 1/R); mode
+                                                            // preset authoritative when set
   };
   ux: {
     quietMode: boolean;
@@ -399,7 +474,7 @@ For advanced users debugging routing decisions:
 | Judge respects user explicit intent | ✅ | v0.5.0 | 4-signal prompt |
 | **Runtime failover (exponential backoff)** | ✅ | v0.6.0 | See §8.5; 4xx/5xx split + 6h cap refined in v0.9.0 |
 | Confidence-weighted sliding window | ✅ | v0.7.0 | `minConfidence` gate, weighted downgrade ratio |
-| Token throughput + `/router stats` + Tuning Guide | ✅ | v0.8.0 | `src/stats.ts`, 5-sample speed window |
+| Token throughput + `/router status` + Tuning Guide | ✅ | v0.8.0 | `src/stats.ts`, 5-sample speed window |
 | Judge cooldown sharing (429 no longer re-hit) | ✅ | v0.8.3 | `classify()` `onFailure` callback → `markModelFailed` |
 | **Cost telemetry — deep view** | ✅ | v0.9.0 | Per-tier spend + savings baseline; SPEC §9.1 |
 | Cooldown backoff rescale (4×, 6h cap, 4xx/5xx split) | ✅ | v0.9.0 | §8.5.2; 4xx starts at 16m, 5xx at 1m |
@@ -498,7 +573,7 @@ On failover, show a toast notification (unless `quietMode`):
 
 ### 9.1 Cost telemetry — deep view (delivered v0.9.0)
 
-`/router stats` exposes per-tier spend (USD + token counts) plus a hypothetical baseline.
+`/router status` exposes per-tier spend (USD + token counts) plus a hypothetical baseline.
 
 **Data source**: pi-agent's `message_end.usage` carries `input`, `output`, `cacheRead`, `cacheWrite`, and `cost.total` (USD) for every assistant message. The router attributes each message to whichever tier was active when it ran (`state.currentTier` at message_start).
 
@@ -506,7 +581,7 @@ On failover, show a toast notification (unless `quietMode`):
 
 **Fallback**: when pricing is missing for every model used (e.g. fully-local session with no `models-store.json` pricing), the baseline shows `unavailable` instead of a misleading savings number.
 
-**Display** (excerpt from `/router stats`):
+**Display** (excerpt from `/router status`):
 
 ```
 Spend: fast $0.045 (12 calls) · smart $0.42 (3 calls) · total $0.465
@@ -781,17 +856,29 @@ spent) is the plugin's hard cap. The loop stops when either one says stop —
 Smart's judgment decides *what* is wrong, the plugin's caps decide *how long*
 we keep paying for it.
 
-**Acceptance audit (v1.3.0, safety-net review)** — because the *content* judgment is
-Smart's alone, the plugin adds a post-turn safety net: deterministic checks
-(workers all reported back; final message carries a CTO summary; hard-cap
-flag) always run, and an optional small fast-tier LLM audit (`orchestration.audit.enabled`, default true) checks three dimensions against the **captured
+**Acceptance audit (v1.3.0, safety-net review; v1.4.0 domain-restricted)** — because
+the *content* judgment is Smart's alone, the plugin adds a post-turn safety net.
+**The audit's domain is DELEGATED orchestration runs (`spawned ≥ 1`)** — its
+invariants (workers spawned ↔ results reported; acceptance grounded in worker
+outputs) only engage when delegation actually happened. Deterministic checks
+(workers all reported back; final message carries a CTO summary; hard-cap flag)
+always run, and an optional small fast-tier LLM audit (`orchestration.audit.enabled`, default true) checks three dimensions against the **captured
 user goal** + worker results: **grounding** (acceptance claim backed by
 results), **goal alignment** (delivered work addresses the request), and
 **delivered quality** (no placeholder/empty/aborted results passed off as
-done). The audit never blocks the finished turn — it flags via warn/toast and
-`/router status` → `Last audit`. Files: `src/audit.ts` (pure deterministics +
-`callAuditLLM`), `src/prompts/auditor.md`, wiring in `agent_end`; goal
-snapshot in `OrchestrationState.goal`.
+done). **Self-executed orchestration turns (`spawned = 0`, the sanctioned
+"if it's actually simple, just do it yourself" path) are exempt from the
+audit entirely — no violations, no warnings** (their evidence is the CTO's
+own tool trail, visible to the user in the transcript). They are still
+marked `self-executed` in `/router status` for transparency. The
+CTO-summary output contract only engages when workers were actually
+spawned (`spawned ≥ 1`).
+Evidence extraction reads pi's native message schema
+(`role: "toolResult"` + `toolName`), filtering worker results to
+`toolName === "subagent"`. The audit never blocks the finished turn — it
+flags via warn/toast and `/router status` → `Last audit`. Files:
+`src/audit.ts` (pure deterministics + `callAuditLLM`), `src/prompts/auditor.md`,
+wiring in `agent_end`; goal snapshot in `OrchestrationState.goal`.
 
 **Backward compatibility contract (must not break existing behavior):**
 
@@ -848,18 +935,21 @@ snapshot in `OrchestrationState.goal`.
    large (smart, orchestrate).
 3. **Orchestration observability.** Status bar animates during Judge
    (`🧭 judging` + cycling dots — a static badge read as "hung" during the
-   1-2s API call) and during orchestration. Labels (v1.1.0): planning phase
-   keeps the live badge + throughput with a pending marker
-   (`[🧠 deepseek] • 42 tok/s 🪄…`); once workers run, a dedicated label
-   shows completion count plus AVERAGE per-worker throughput across
-   completed workers — `🪄 2/5 workers • ~30 tok/s avg` — stable under
-   concurrency (not latest-single-completion, which jumps). `tool_call`
-   records spawn wall-clock per `toolCallId`; `tool_result` pairs it back,
-   computes tokens/sec from `usage.output`, and pushes into
+   1-2s API call) and during orchestration. Label contract (v1.4.0): the
+   wand 🪄 is reserved for delegation IN FLIGHT — planning shows the plain
+   tier badge with throughput (`[🧠 deepseek] • 42 tok/s`, no wand), and
+   only spawned workers get the dedicated label with completion count plus
+   AVERAGE per-worker throughput across completed workers —
+   `🪄 Done(2)/Total(3) • ~30 tok/s avg` — stable under concurrency (not
+   latest-single-completion, which jumps). `tool_call` records spawn
+   wall-clock per `toolCallId`; `tool_result` pairs it back, computes
+   tokens/sec from `usage.output`, and pushes into
    `orchestration.workerSpeeds` while folding `usage.cost.total` into
    `orchestration.spend`. Router-off turns keep telemetry too:
    `⛔ • 55 tok/s`. `/router status` shows workers `done/spawned` while
-   active.
+   active. A leaked orchestration state (interrupted turn that skipped
+   agent_end) is swept at the start of the next turn, so a stale planning
+   frame can never keep painting over the live badge.
 
 **Open design decisions (to be settled before code):**
 

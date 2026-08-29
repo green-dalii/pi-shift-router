@@ -59,6 +59,23 @@ describe("Judge prompt structure", () => {
     expect(prompt).toMatch(/routine code|writing functions|fixing bugs/i);
   });
 
+  it("classifies document handling as fast (the '检查文档' fix)", () => {
+    // Document tasks (read/check/update/format/translate/consistency) are
+    // execution, not judgment — they must appear in the fast column/signals.
+    expect(prompt).toMatch(/document handling/i);
+    expect(prompt).toMatch(/consistency/i);
+    // The doc-vs-direction nuance must be spelled out: only direction-setting
+    // doc work (new design doc, review that drives rework) escalates.
+    expect(prompt).toMatch(/sets direction|direction-setting/i);
+    // Explicit few-shot: the exact user phrasing routes fast.
+    expect(prompt).toMatch(/检查文档的更新修订/);
+  });
+
+  it("classifies tedious/bulk batches as fast", () => {
+    expect(prompt).toMatch(/tedious|bulk/i);
+    expect(prompt).toMatch(/mechanical replace|batch/i);
+  });
+
   it("covers user explicit intent signal", () => {
     // The fix for "user says 'use最强模型'" issue — must be explicit
     expect(prompt).toMatch(/explicit intent/i);

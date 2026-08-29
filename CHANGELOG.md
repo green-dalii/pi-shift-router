@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.4.0] — EV economics routing, gear presets, doc-aware judge
+
+### Added
+
+- **Expected-cost routing.** The Judge's confidence is read as `pSmart` (a `smart`
+  verdict → `c`; a `fast` verdict → `1−c`) and the turn runs smart iff
+  `pSmart ≥ θ = 1/reworkPenalty`. Below `minConfidence` the router holds;
+  upgrades are immediate, downgrades need `downgradeMemory` consecutive
+decisive fast turns. The bar is model-price-independent: θ cancels the price
+delta, so the rule only cares how badly a fumble hurts.
+- **Gear presets as top-level commands** — `/router eco` (R=2, θ=0.5),
+  `/router default` (R=3, θ≈0.33), `/router sport` (R=5, θ=0.2) — persisted
+  and tab-completable (the old `/router mode <x>` form is removed).
+- **Doc-aware Judge.** Document handling (read/check/update/format/translate/
+  cross-doc consistency) and tedious/bulk batches classify as `fast` unless
+  the work actually sets direction (new design doc, review that drives rework).
+- **Status bar upgrades:** 🪄 only while delegation is in flight, `?` when the
+  running model is unconfirmed, and per-turn throughput recorded before cost
+  telemetry with an agent-end timestamp fallback + repaint.
+
+### Changed
+
+- **Strict model authority.** When a decision switches tier, the tier's best
+  model is enforced even if both tiers currently resolve to the same model.
+- **Audit domain.** LLM acceptance audit + violation reporting run only for
+  delegated turns (spawned ≥ 1); self-executed turns are fully exempt.
+- **Smooth legacy migration.** `window.threshold: 0.6` and
+  `cacheAware.sameFamilyThreshold: 0.9` (the old defaults) are dead — only
+  non-default values act as overrides, surfaced with ⚠ in `/router status`.
+- `default` replaces the `standard` mode name; `/router stats` removed (use
+  `/router status`, which now shows mode / R / θ → effective θ).
+
+### Fixed
+
+- `/router on|off|quiet|verbose|orchestrate` mutated memory only — the change
+  was lost on the next disk reload. Commands now persist via `saveConfig`.
+- Status bar could freeze on the last orchestration frame after an interrupted
+  turn; leaked orchestration state is swept at the next turn start.
+- Throughput missing on the fast tier: speed is computed before cost telemetry
+  and a timestamp fallback covers missing `message_start` timing.
+- Model-switch failures were silent: `pi.setModel` returning `false` (provider
+  auth not configured) now warns and the bar falls back with a `?` marker.
+
 ## [1.3.1] — pi-tui runtime dependency + release gates
 
 ### Fixed

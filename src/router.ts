@@ -7,7 +7,7 @@
  */
 
 import type { ShiftRouterConfig, Tier, WindowEntry, RouterState, JudgeResult } from "./types.js";
-import { TIERS } from "./types.js";
+import { ECONOMIC_MODE_PRESETS, LEGACY_THRESHOLD_DEFAULT, LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT } from "./types.js";
 import { findBestModelForTier, type ResolvedModel } from "./tier.js";
 import { createCooldowns, cooldownPredicate, findTierForModel } from "./failover.js";
 
@@ -56,14 +56,6 @@ function emptyTierUsage(): { calls: number; tokens: { input: number; output: num
   };
 }
 
-function tierIndex(tier: Tier): number {
-  return TIERS.indexOf(tier);
-}
-
-function shouldUpgrade(current: Tier, target: Tier): boolean {
-  return tierIndex(target) > tierIndex(current);
-}
-
 /**
  * Cache-aware routing (SPEC §9.2).
  *
@@ -86,20 +78,67 @@ export function shareProviderFamily(config: ShiftRouterConfig): boolean {
 }
 
 /**
- * The downgrade threshold to use at this moment. When cache-aware routing is
- * active (same provider family), the threshold is raised to
- * `cacheAware.sameFamilyThreshold` so fewer mid-session downgrades fire and
- * the warm prompt cache survives longer. Otherwise the user's configured
- * `window.threshold` applies unchanged.
+ * Effective rework penalty R (SPEC §2.3). A named `economics.mode` preset
+ * (`/router eco|default|sport`) is authoritative when present;
+ * otherwise the raw `reworkPenalty` applies (legacy default 3).
  */
-export function effectiveThreshold(
+export function effectiveReworkPenalty(config: ShiftRouterConfig): number {
+  const mode = config.routing.economics?.mode;
+  if (mode && mode in ECONOMIC_MODE_PRESETS) return ECONOMIC_MODE_PRESETS[mode];
+  return config.routing.economics?.reworkPenalty ?? 3;
+}
+
+/**
+ * Genuinely active legacy θ override, or undefined. The pre-v1.4.0 default
+ * `0.6` is treated as **unset** (smooth migration: old wizard snapshots must
+ * not be reinterpreted as a much more conservative θ); only a value that
+ * differs from the old default is a deliberate customization and wins.
+ */
+export function legacyThetaOverride(config: ShiftRouterConfig): number | undefined {
+  const t = config.routing.window.threshold;
+  if (typeof t === "number" && t > 0 && t < 1 && t !== LEGACY_THRESHOLD_DEFAULT) return t;
+  return undefined;
+}
+
+/**
+ * Effective θ (the smart-probability bar) for the EV decision rule (SPEC §2.3).
+ *
+ * Base: θ = 1 / economics.reworkPenalty. A legacy explicit `window.threshold`
+ * (user-set before v1.4.0, non-default value) overrides as a raw θ.
+ * Cache-aware same-family routing divides θ by the same-family penalty so
+ * fewer fast decisions fire (fewer downgrades → warm prompt cache survives).
+ */
+export function effectiveTheta(
   config: ShiftRouterConfig,
   cacheAware: boolean = shareProviderFamily(config),
 ): number {
+  const legacy = legacyThetaOverride(config);
+  if (legacy !== undefined) return legacy;
+  const R = effectiveReworkPenalty(config);
+  let theta = 1 / Math.max(R, 1);
   if (cacheAware && config.routing.cacheAware?.enabled) {
-    return config.routing.cacheAware.sameFamilyThreshold;
+    theta /= sameFamilyThetaFactor(config);
   }
-  return config.routing.window.threshold;
+  return theta;
+}
+
+/**
+ * Same-family θ divisor. New knob: `sameFamilyPenalty` (default 1.5).
+ * Legacy `sameFamilyThreshold` (old ratio bar) implies the strong default
+ * 3.0 — but only when it differs from the old default 0.9 (smooth migration:
+ * wizard snapshots of the v1.3 default must not silently turn the strong
+ * conservatism on).
+ */
+function sameFamilyThetaFactor(config: ShiftRouterConfig): number {
+  const ca = config.routing.cacheAware;
+  if (typeof ca?.sameFamilyPenalty === "number" && ca.sameFamilyPenalty > 1) return ca.sameFamilyPenalty;
+  if (
+    typeof ca?.sameFamilyThreshold === "number" &&
+    ca.sameFamilyThreshold !== LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT
+  ) {
+    return 3.0;
+  }
+  return 1.5;
 }
 
 /**
@@ -129,46 +168,34 @@ export function analyzeDowngrade(
   window: WindowEntry[],
   currentTier: Tier,
   config: ShiftRouterConfig,
-  thresholdOverride?: number,
 ): { shouldDowngrade: boolean; targetTier: Tier | null } {
   // Can't downgrade further from fast
   if (currentTier !== "smart") return { shouldDowngrade: false, targetTier: null };
 
-  const { size, minConfidence } = config.routing.window;
-  const threshold = thresholdOverride ?? config.routing.window.threshold;
-  const minConf = minConfidence ?? 0.5;
-  if (window.length === 0) return { shouldDowngrade: false, targetTier: null };
-
-  const relevant = window.slice(-Math.min(window.length, size));
-
-  // Confidence-weighted ratio: entries below minConfidence are ignored.
-  // weighted ratio = Σ confidence_for_fast / count_of_considered_entries
-  let considered = 0;
-  let fastConfidenceSum = 0;
-  for (const e of relevant) {
-    const conf = e.confidence ?? 1.0;
-    if (conf < minConf) continue;
-    considered += 1;
-    if (e.tier === "fast") fastConfidenceSum += conf;
+  // Downgrade requires `downgradeMemory` CONSECUTIVE decisive fast decisions.
+  // Holds (no-signal entries) and smart decisions both break the streak.
+  const memory = config.routing.economics?.downgradeMemory ?? 2;
+  let streak = 0;
+  for (let i = window.length - 1; i >= 0; i--) {
+    const e = window[i];
+    if (e.hold || e.tier !== "fast") break;
+    streak += 1;
   }
-
-  // All entries below minConfidence → no signal → don't downgrade
-  if (considered === 0) return { shouldDowngrade: false, targetTier: null };
-
-  const ratio = fastConfidenceSum / considered;
-  if (ratio >= threshold) {
+  if (streak >= memory) {
     return { shouldDowngrade: true, targetTier: "fast" };
   }
-
   return { shouldDowngrade: false, targetTier: null };
 }
 
 /**
- * Core routing decision:
+ * Core routing decision (SPEC §2.3 + §2.4):
  * 1. Manual override → use forced model
- * 2. Judge says "smart" and current is "fast" → immediate upgrade
- * 3. Otherwise → analyze window for possible downgrade
- * 4. Push judge result to window (capped)
+ * 2. EV decision: judge confidence → pSmart vs θ (hold below minConfidence)
+ * 3. Upgrade on any decisive smart decision (immediate)
+ * 4. Downgrade on downgradeMemory consecutive fast decisions (+ cache gate)
+ * 5. Strict takeover: return the best available model of the RUNNING tier
+ *    whenever the active model differs (or none is set) — the router owns
+ *    model selection; user /model or session default is corrected here.
  */
 export function processRoute(
   judgeResult: JudgeResult,
@@ -197,45 +224,54 @@ export function processRoute(
     }
   }
 
-  // 2. Immediate upgrade: fast → smart
-  if (shouldUpgrade(state.currentTier, targetTier)) {
-    const m = findBestModelForTier(targetTier, config, modelRegistry, cooldownPredicate(state.modelCooldowns, now));
-    if (m) {
-      // Clear window on upgrade (fresh start for the new tier)
-      state.window = [];
-      state.upgradeCount += 1;
-      return { switchTo: m, action: "upgrade" };
-    }
+  // 2. EV decision (SPEC §2.3). Confidence below minConfidence = no signal.
+  const confidence = judgeResult.confidence ?? 1.0;
+  const minConf = config.routing.window.minConfidence ?? 0.5;
+  const hold = confidence < minConf;
+  let decision: Tier = hold ? state.currentTier : (targetTier === "smart" ? "smart" : "fast");
+  if (!hold) {
+    const theta = effectiveTheta(config);
+    const pSmart = targetTier === "smart" ? confidence : 1 - confidence;
+    decision = pSmart >= theta ? "smart" : "fast";
   }
 
-  // 3. Push current judgment to window
-  state.window.push({
-    tier: targetTier,
-    timestamp: Date.now(),
-    confidence: judgeResult.confidence,
-  });
-
-  // Cap window
+  // 3. Push to window (hold entries marked; they break fast streaks).
+  state.window.push({ tier: decision, timestamp: now, confidence, hold });
   const maxSize = config.routing.window.size;
   if (state.window.length > maxSize) {
     state.window = state.window.slice(-maxSize);
   }
 
-  // 4. Check downgrade. Cache-aware routing (SPEC §9.2):
-  //    - same provider family → raised threshold (fewer mid-session switches)
-  //    - warm cache → suppress downgrade entirely until an idle boundary
-  const down = analyzeDowngrade(
-    state.window,
-    state.currentTier,
-    config,
-    effectiveThreshold(config),
-  );
-  if (down.shouldDowngrade && down.targetTier && downgradeAllowedAt(state, config, now)) {
-    const m = findBestModelForTier(down.targetTier, config, modelRegistry, cooldownPredicate(state.modelCooldowns, now));
+  // 4. Immediate upgrade: fast → smart on a decisive smart decision.
+  if (!hold && decision === "smart" && state.currentTier === "fast") {
+    const m = findBestModelForTier("smart", config, modelRegistry, cooldownPredicate(state.modelCooldowns, now));
     if (m) {
-      state.downgradeCount += 1;
-      return { switchTo: m, action: "downgrade" };
+      state.window = []; // fresh start for the new tier
+      state.upgradeCount += 1;
+      return { switchTo: m, action: "upgrade" };
     }
+  }
+
+  // 5. Downgrade: smart → fast on downgradeMemory consecutive fast decisions
+  //    plus the cache-aware idle gate (SPEC §9.2).
+  if (!hold && decision === "fast" && state.currentTier === "smart") {
+    const down = analyzeDowngrade(state.window, state.currentTier, config);
+    if (down.shouldDowngrade && downgradeAllowedAt(state, config, now)) {
+      const m = findBestModelForTier("fast", config, modelRegistry, cooldownPredicate(state.modelCooldowns, now));
+      if (m) {
+        state.downgradeCount += 1;
+        return { switchTo: m, action: "downgrade" };
+      }
+    }
+  }
+
+  // 6. Strict takeover (SPEC §2.4): the running tier's best available model
+  //    must be on the wire. A differing current model (user /model, session
+  //    default, or no model set) is corrected now; equality is a no-op.
+  const runningTier = state.currentTier;
+  const m = findBestModelForTier(runningTier, config, modelRegistry, cooldownPredicate(state.modelCooldowns, now));
+  if (m && (m.provider !== state.currentProvider || m.modelId !== state.currentModelId)) {
+    return { switchTo: m, action: "enforce" };
   }
 
   return { switchTo: null, action: "stay" };
@@ -243,7 +279,7 @@ export function processRoute(
 
 export interface RouteDecision {
   switchTo: ResolvedModel | null;
-  action: "upgrade" | "downgrade" | "stay" | "manual";
+  action: "upgrade" | "downgrade" | "stay" | "manual" | "enforce";
 }
 
 /**
@@ -256,6 +292,11 @@ export async function applyModelSwitch(
   setModel: (m: unknown) => Promise<boolean>,
 ): Promise<boolean> {
   try {
+    // No-op when the requested model is already active: avoids a redundant
+    // setModel per turn under strict takeover (SPEC §2.4).
+    if (state.currentProvider === resolved.provider && state.currentModelId === resolved.modelId) {
+      return true;
+    }
     const model = modelRegistry?.find?.(resolved.provider, resolved.modelId);
     if (!model) {
       // Not verbose-gated: indicates a config/catalog desync the user must fix.
@@ -270,8 +311,17 @@ export async function applyModelSwitch(
       state.currentTier = resolved.tier;
       state.currentModelId = resolved.modelId;
       state.currentProvider = resolved.provider;
+      return true;
     }
-    return ok;
+    // pi.setModel returns false when the provider has no configured auth in
+    // pi's runtime (agent-session.js: hasConfiguredAuth). This failure was
+    // previously silent — the status bar stayed on a bare "…" with no model
+    // name and no retry. Surface it so the user fixes auth instead of
+    // chasing a UI ghost.
+    console.warn(
+      `[ShiftRouter] Model switch FAILED: ${resolved.provider}/${resolved.modelId} (pi.setModel returned false — provider auth not configured? check ~/.pi/agent/models.json + auth.json). Tier stays ${state.currentTier ?? "?"}.`,
+    );
+    return false;
   } catch (err) {
     console.warn(`[ShiftRouter] Model switch failed: ${err}`);
     return false;

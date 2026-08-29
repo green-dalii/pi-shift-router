@@ -68,15 +68,18 @@ export function tierEmoji(tier: Tier): string {
   }
 }
 
-/** Format tier for status bar: "[🧠 kimi-k3]" */
+/** Format tier for status bar: "[🧠 kimi-k3]". `uncertain` appends "?" to the
+ * model name — the router *intends* this model but it isn't confirmed active
+ * (e.g. a model switch was refused because auth is missing). */
 export function formatTierDisplay(
   tier: Tier | null,
   modelId: string | null,
+  uncertain = false,
 ): string {
   if (!tier) return "";
   const emoji = tierEmoji(tier);
   const model = modelId?.split("/").pop() ?? "…";
-  return `[${emoji} ${model}]`;
+  return `[${emoji} ${model}${uncertain && model !== "…" ? "?" : ""}]`;
 }
 
 /**
@@ -87,8 +90,9 @@ export function formatTierDisplayWithSpeed(
   tier: Tier | null,
   modelId: string | null,
   tokensPerSec: number,
+  uncertain = false,
 ): string {
-  const base = formatTierDisplay(tier, modelId);
+  const base = formatTierDisplay(tier, modelId, uncertain);
   if (!base || tokensPerSec <= 0) return base;
   return `${base} • ${tokensPerSec} tok/s`;
 }

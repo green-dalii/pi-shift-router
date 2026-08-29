@@ -10,7 +10,7 @@
  * in index.ts.
  */
 
-import type { ShiftRouterConfig, Tier } from "./types.js";
+import type { ShiftRouterConfig, Tier, RouterState } from "./types.js";
 
 /** Cooldown base delay: 1 minute (SPEC §8.5.2). */
 export const COOLDOWN_BASE_MS = 60_000;
@@ -227,6 +227,42 @@ export function tokensPerSecond(outputTokens: number, elapsedMs: number): number
 export function recordSpeed(speeds: number[], tps: number): void {
   speeds.push(tps);
   while (speeds.length > SPEED_WINDOW_SIZE) speeds.shift();
+}
+
+/**
+ * Throughput fallback (agent_end). The primary path (message_start →
+ * message_end wall-clock) is precise, but some providers/paths never deliver
+ * message_start with a usable assistant role, leaving `streamingStartTime`
+ * null and `recentSpeeds` empty — the status bar loses its "• N tok/s"
+ * indicator. agent_end always carries the full message list, so derive the
+ * LAST assistant message's generation speed from message timestamps + usage.
+ * Only fills when the primary path produced nothing (redundant otherwise).
+ */
+export function recordTurnThroughputFallback(
+  messages: Array<{ role?: string; timestamp?: number; usage?: { output?: number } }>,
+  state: RouterState,
+): boolean {
+  if (state.recentSpeeds.length > 0) return false; // primary path already recorded
+  let lastTps = 0;
+  for (let i = 1; i < messages.length; i++) {
+    const m = messages[i];
+    if (m?.role !== "assistant") continue;
+    const out = m.usage?.output ?? 0;
+    if (out <= 0) continue;
+    const ts = m.timestamp;
+    const prev = messages[i - 1];
+    const start = typeof prev?.timestamp === "number" ? prev.timestamp : undefined;
+    if (typeof ts !== "number" || start === undefined) continue;
+    const elapsedMs = ts - start;
+    if (elapsedMs <= 0) continue;
+    const tps = Math.round((out / elapsedMs) * 1000);
+    if (tps > 0) lastTps = tps;
+  }
+  if (lastTps > 0) {
+    recordSpeed(state.recentSpeeds, lastTps);
+    return true;
+  }
+  return false;
 }
 
 // ── Integration helpers (SPEC §8.5.2) ──────────────────────────────

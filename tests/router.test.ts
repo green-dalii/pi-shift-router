@@ -31,7 +31,8 @@ function makeConfig(overrides: Partial<ShiftRouterConfig> = {}): ShiftRouterConf
     routing: {
       mode: "auto",
       judgeTimeout: 5000,
-      window: { size: 5, threshold: 0.6 },
+      window: { size: 5, minConfidence: 0.5 },
+      economics: { reworkPenalty: 3, downgradeMemory: 2 },
     },
     ux: { quietMode: false, statusBar: true, inlineToast: true },
     ...overrides,
@@ -60,9 +61,11 @@ describe("Upgrade is immediate", () => {
     expect(state.window.length).toBe(0);
   });
 
-  it("fast stays fast on fast judge (no upgrade needed)", () => {
+  it("fast stays fast on confident fast judge (no upgrade needed)", () => {
     const state = createRouterState();
     state.currentTier = "fast";
+    state.currentProvider = "p";
+    state.currentModelId = "fast-model";
     const config = makeConfig();
 
     const d = step(state, config, judge("fast"));
@@ -71,11 +74,13 @@ describe("Upgrade is immediate", () => {
   });
 });
 
-// ─── Downgrade gating ─────────────────────────────────────────────
-describe("Downgrade from smart requires window majority", () => {
+// ─── Downgrade gating (streak semantics, SPEC §2.3) ───────────────
+describe("Downgrade from smart requires downgradeMemory consecutive fast decisions", () => {
   it("smart stays when window has only smart entries", () => {
     const state = createRouterState();
     state.currentTier = "smart";
+    state.currentProvider = "p";
+    state.currentModelId = "smart-model";
     state.window = [
       { tier: "smart", timestamp: 0 },
       { tier: "smart", timestamp: 0 },
@@ -87,29 +92,31 @@ describe("Downgrade from smart requires window majority", () => {
     expect(d.action).toBe("stay");
   });
 
-  it("smart stays when fast ratio < threshold (40% < 60%)", () => {
+  it("smart stays on a single fast decision (streak < downgradeMemory)", () => {
     const state = createRouterState();
     state.currentTier = "smart";
+    state.currentProvider = "p";
+    state.currentModelId = "smart-model";
     state.window = [
-      { tier: "fast",  timestamp: 0 },
-      { tier: "smart", timestamp: 0 },
+      { tier: "fast", timestamp: 0 },
       { tier: "smart", timestamp: 0 },
       { tier: "smart", timestamp: 0 },
     ];
     const config = makeConfig();
 
-    const d = step(state, config, judge("smart"));
+    const d = step(state, config, judge("fast"));
     expect(d.action).toBe("stay");
   });
 
-  it("smart downgrades when fast ratio ≥ 60%", () => {
+  it("smart downgrades after downgradeMemory consecutive fast decisions", () => {
     const state = createRouterState();
     state.currentTier = "smart";
+    state.currentProvider = "p";
+    state.currentModelId = "smart-model";
     state.window = [
-      { tier: "fast",  timestamp: 0 },
-      { tier: "fast",  timestamp: 0 },
-      { tier: "fast",  timestamp: 0 },
-      { tier: "fast",  timestamp: 0 },
+      { tier: "fast", timestamp: 0 },
+      { tier: "fast", timestamp: 0 },
+      { tier: "fast", timestamp: 0 },
     ];
     const config = makeConfig();
 
@@ -121,6 +128,8 @@ describe("Downgrade from smart requires window majority", () => {
   it("fast never downgrades further (already bottom)", () => {
     const state = createRouterState();
     state.currentTier = "fast";
+    state.currentProvider = "p";
+    state.currentModelId = "fast-model";
     const config = makeConfig();
 
     const d = step(state, config, judge("fast"));
@@ -133,6 +142,8 @@ describe("Stay action", () => {
   it("returns no switchTo on stay", () => {
     const state = createRouterState();
     state.currentTier = "fast";
+    state.currentProvider = "p";
+    state.currentModelId = "fast-model";
     const config = makeConfig();
 
     const d = step(state, config, judge("fast"));
@@ -140,9 +151,11 @@ describe("Stay action", () => {
     expect(d.switchTo).toBeNull();
   });
 
-  it("smart stays on smart judge (no window push for same tier)", () => {
+  it("smart stays on smart judge (window entry still pushed)", () => {
     const state = createRouterState();
     state.currentTier = "smart";
+    state.currentProvider = "p";
+    state.currentModelId = "smart-model";
     const config = makeConfig();
 
     const d = step(state, config, judge("smart"));

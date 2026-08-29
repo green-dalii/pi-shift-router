@@ -11,7 +11,7 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.zh-CN.md
 - docs: README.md / README.zh-CN.md / docs/CONFIG.zh-CN.md / docs/MODELS.zh-CN.md / docs/TROUBLESHOOTING.zh-CN.md
 - first-published: v0.4.0
-- latest: v1.3.1
+- latest: v1.4.0
 - last-updated: 2026-08
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
 - search-intents: "自动路由 pi agent 每轮", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排"
@@ -56,7 +56,7 @@ pi-shift-router 是 [pi-coding-agent](https://github.com/earendil-works/pi) 的�
 🦾 [glm-5.2]                    ← 同档 failover
 ```
 
-- **升级立即**，降级要等趋势稳定——不会来回抖。
+- **升级立即**，降级要连续 2 轮 fast——不会来回抖。
 - 每档可配多模型链，429/5xx 指数退避冷却，任务不中断。
 - 零第三方运行时依赖、一个配置文件——配好模型之前是 no-op，之后路由开箱即用（复杂任务自动编排）。
 
@@ -68,13 +68,46 @@ pi install npm:pi-shift-router   # 然后：/router config → /router status
 
 ## 工作原理
 
-每轮开始前只做一次便宜的调用：Fast 档模型（通常是你最便宜的那个）把你的消息判为 `fast`（例行）或 `smart`（重要）。这是路由器唯一的分类——判定之后，选中的档位整轮干活。
+每轮开始前只做一次便宜调用：Fast 档模型（通常是你最便宜的）读你的消息，判为 `fast`（例行）或 `smart`（重要），并给出**置信度**（0–1，多确信）。判定之后，选中的档位整轮干活。
 
-两条规则管住所有切换：
+**先从「错的方向不对称」说起——后面所有规则都从这一点长出来。** 每次切换都有两种错法，代价完全不同：
 
-- **升级立即**。一次 `smart` 判定，下一轮就上强档。重要的事，马上交给最强的模型。
-- **降级要趋势**。最近 5 轮 fast 加权占比达到阈值（默认 ≥60%，低置信投票忽略）才降回来。过早降级会白白丢掉强档的上下文缓存。
-- **Cache-aware 路由保护你的热 prompt 缓存**。Prompt 缓存属于单个模型：中途换档，新模型要以全价重读整个对话。当 Fast 与 Smart 同属一个 Provider（都是 Anthropic、都是 OpenAI……）时，路由器把降级阈值从 0.6 提到 0.9，并在缓存还热时按住不降——让“路由到更便宜的模型”永远不会比不路由更贵。只有空闲超过默认 5 分钟、缓存已过期后，或 fast 趋势压倒性明显时才降级。升级永不受影响；跨 Provider 配置不共享缓存，行为不变。
+- **简单任务升了档**（routine 活花 smart 的钱）：多付一次差价——小、有界、看得见。
+- **复杂任务留在便宜档**：它搞砸，你整轮重来，最后还得花 smart 的钱——外加你的时间。通常比第一种贵好几倍。
+
+一个分不清「简单 / 复杂」的经理，不该在 50/50 处下注。**当任务可能是难的，便宜档才是那个冒险的选择**——所以路由器的闸向「花钱」一侧倾斜：
+
+> **如果这一轮需要 smart 的概率 ≥ θ，就跑 smart；否则跑 fast。** 默认 **θ ≈ 0.33**。
+
+**置信度就是那个概率。** Judge 判 `smart`、置信度 `c` → 概率 `c`；判 `fast`、置信度 `c` → 概率 `1 − c`（**越确信 fast，越说明几乎肯定是简单活**）。看表：
+
+| Judge 判定 | 置信度 | 需要 smart 的概率 | vs θ | 结果 |
+|---|---|---|---|---|
+| `smart` | 0.9 | 0.9 | ≥ | 🧠 smart |
+| `smart` | 0.2 | 0.2 | < | 🦾 fast —— 弱判定被驳回 |
+| `fast` | 0.9 | 0.1 | < | 🦾 fast |
+| `fast` | 0.6 | 0.4 | ≥ | 🧠 smart —— 拿不准是不是简单活 |
+| 任意 | < 0.5 | （无信号） | —— | hold —— 停在当前档位，不猜 |
+
+**0.33 从哪来——保险的数学。** 把差价想成「避免搞砸」的保费：
+
+| 策略 | 期望成本 | 为什么 |
+|---|---|---|
+| 跑 smart | `f + Δ` | 先付保费，没有搞砸风险 |
+| 跑 fast | `f + P·Δ·R` | 省下保费；但任务其实需要 smart（概率 `P`）时，搞砸要付 `R×` 差价 |
+
+`f` = fast 档成本，`Δ` = smart − fast（保费），`R` = `reworkPenalty`，`P` = 需要 smart 的概率。只要平均来看跑 smart 更便宜就升级：
+
+```
+f + P·Δ·R > f + Δ   ⟺   P > 1/R
+```
+
+差价被约掉了：**规则不关心你选的模型贵不贵，只关心「搞砸的代价相对差价有多大」**。默认 `R = 3` → θ ≈ 0.33：有三分之一概率需要 smart，就值得升级。**R 越大闸越低**：`R = 5` → θ = 0.2（更积极——`/router sport`），`R = 2` → θ = 0.5（更保守——`/router eco`）。
+
+**两道护栏防止来回抖：**
+
+- **升级立即**：pSmart ≥ θ 就升。**降级要连续 2 轮** pSmart < θ——一句「谢谢」永远降不下来。
+- **缓存门**。Prompt 缓存属于单个模型——中途换档，新模型要以全价重读整个对话。当 Fast 与 Smart 同属一个 Provider 时，路由器把 θ 再除一档（更少降级），并在缓存还热时拒绝降级。升级永不受影响；跨 Provider 配置不共享缓存，行为不变。
 
 判定调用对输出格式很严格，小模型也能稳定解析：OpenAI 兼容端点用 `response_format: json_object`（非 JSON 直接被打回），Anthropic 用 `{` 前缀预填强制 JSON 开头。判定期间状态栏显示 `🧭 judging…`。判定失败时停在当前档位，不猜。
 
@@ -97,7 +130,7 @@ Judge 与路由共用同一张冷却表（判定失败也会走完整条 fast �
 
 ### 一个编排轮次怎么跑
 
-1. **进入。** 判定说 `smart` → 路由器把主模型切到 Smart 档并注入一条编排指令（你的角色、派发规则、硬上限）。状态栏全程显示实时遥测：规划期为 `[🧠 deepseek] • 42 tok/s 🪄…`，Fast worker 跑起来后为 `🪄 2/5 workers • ~30 tok/s avg`。
+1. **进入。** 判定说 `smart` → 路由器把主模型切到 Smart 档并注入一条编排指令（你的角色、派发规则、硬上限）。状态栏全程显示实时遥测：CTO 规划期为 `[🧠 deepseek] • 42 tok/s`（🪄 只在 worker 真正派发后才出现），Fast worker 跑起来后为 `🪄 Done(2)/Total(3) • ~30 tok/s avg`。
 2. **规划。** Smart 把任务拆成多个阶段，每个阶段带验收标准。
 3. **派发。** 每个阶段通过 `subagent` 工具拉起一个 Fast 子代理——`agent: "worker"`、`context: "fresh"`、模型钉在你** Fast 档**——配一份自包含的任务契约（目标、约束、验收标准、要动的文件）。
 4. **审核。** Smart 按验收标准读每个 worker 的结果。失败阶段带着具体反馈回到 worker——或连续失败 N 次后由 Smart 亲自接管。
@@ -115,11 +148,11 @@ worker 以 `context: "fresh"` 运行——不继承会话历史。任务字符�
 
 循环在 Smart 说完成、或命中上限时停止——两者任一即停。
 
-### 验收审计（托底 review，v1.3.0）
+### 验收审计（托底 review，v1.3.0；v1.4.0 起限定委派域）
 
-因为验收是 Smart 档自己的判断，插件在每个编排轮次结束时（`agent_end`）再加一道**硬兜底审计**：
+因为验收是 Smart 档自己的判断，插件在每个**实际委派过 worker（`spawned ≥ 1`）**的编排轮次结束时（`agent_end`）再加一道**硬兜底审计**。自执行轮（`spawned = 0`——CTO 判断它简单到可以自己做）**完全豁免审计**：零 violation、零警告，仅在 `/router status` 标记 `(self-executed)`。CTO-summary 输出契约只在真正派发过 worker 时才生效。
 
-1. **确定性检查（始终执行、零成本）：** 所有 worker 都已回包（`done == spawned`）、最后一条消息带 **CTO 总结**（输出契约标记）、以及是否命中硬上限。
+1. **确定性检查（零成本）：** 所有 worker 都已回包（`done == spawned`）、最后一条消息带 **CTO 总结**（输出契约标记）、以及是否命中硬上限。
 2. **LLM 审计（默认开启，Fast 档一次小调用）：** 审计 prompt 读取**原始用户目标**（进编排时快照）、CTO 总结与 worker 结果，从三个维度核验：
    - **有据（Grounding）** —— 验收主张有实际结果支撑（没看结果就说 done、忽略 worker 失败、前后矛盾）。
    - **目标对齐（Goal alignment）** —— 交付物确实回应了用户请求（无范围漂移、核心诉求有答）。
@@ -179,7 +212,7 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 
 给 Fast 档、Smart 档各选一个模型；每档多个也行，按优先级组成 fallback 链。保存到用户级或项目级作用域——两边都设时项目级优先。
 
-向导里还有 **🛡️ Cache-aware routing**——当 Fast 与 Smart 同属一个 Provider（如都是 Anthropic）时默认开启。它保护 prompt 缓存：降级阈值从 0.6 提到 0.9，且缓存还热时抑制中途降级，让“路由到更便宜的模型”永远不会比不路由更贵。可在向导里开关，或改配置文件 `routing.cacheAware.enabled`。
+向导里还有 **🛡️ Cache-aware routing**——当 Fast 与 Smart 同属一个 Provider（如都是 Anthropic）时默认开启。它保护 prompt 缓存：有效 smart 闸 θ 除以 `sameFamilyPenalty`（更少降级），且缓存还热时抑制中途降级，让“路由到更便宜的模型”永远不会比不路由更贵。可在向导里开关，或改配置文件 `routing.cacheAware.enabled`。
 
 **3. 验证**
 
@@ -187,7 +220,7 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 /router status
 ```
 
-能看到当前档位、作用域、Judge 阈值和吞吐数据就对了。下一轮发消息触发首次判定。
+能看到当前档位、作用域、经济参数（R / θ）、降级连击要求和吞吐数据就对了。下一轮发消息触发首次判定。
 
 ---
 
@@ -200,6 +233,7 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 | `/router config` | 打开 TUI 配置向导 |
 | `/router quiet` | 关闭内联 toast 提示 |
 | `/router verbose` | 打开详细日志 |
+| `/router eco\|default\|sport` | 换挡经济预设（持久化）：**eco** → R=2（θ=0.5，更省——只有明确需要 smart 的轮才升级），**default** → R=3（θ≈0.33），**sport** → R=5（θ=0.2，更积极——只要有需要 Smart 的苗头就升级）。顶层命令词，pi 可直接 Tab 补齐；当前模式与预设表见 `/router status` |
 | `/router orchestrate auto` | 任务级编排（默认）：复杂任务 → Smart 档作为 CTO 派发给 Fast 子代理；简单任务仍走普通路由 |
 | `/router orchestrate off` | 关闭编排——仅基础两档路由 |
 | `/route-force <档位>` | 下一轮强制走某档 |
@@ -230,7 +264,7 @@ Spend: fast $0.045 (9 calls) · smart $0.42 (3 calls) · total $0.465
 | **怎么定的** | ✅ **一个 LLM 说了算，写在明处**——重要的就升级，例行的就留下 | 7 步规则 + 历史技巧——情况越多，越难理清 | 12 步本地流水线（不用 LLM）——最复杂，也最重 |
 | **档位** | ✅ **就两档 `fast` / `smart`** · 一个心智模型，一晚上读完 | 4 档（`quick` / `general` / `writing` / `frontier`）——档越多，学越多 | 3 档还带本地档（LM Studio / Ollama）——多数时候用不上 |
 | **难任务怎么干** | ✅ **Smart 当 CTO**——定计划、拆给 Fast 去做、逐项验收、来回迭代 | 每次只选一个模型自己干——不编排 | 顺手叫一次强模型帮看——不算团队作战 |
-| **省钱** | ✅ **给你算真省了多少**——每轮都计账，对比“全走 smart 会花多少”（`/router stats`） | 省的是订阅配额，不是钱 | 用公式估成本（论文级，非账单） |
+| **省钱** | ✅ **给你算真省了多少**——每轮都计账，对比“全走 smart 会花多少”（`/router status`） | 省的是订阅配额，不是钱 | 用公式估成本（论文级，非账单） |
 | **挂了怎么办** | ✅ **接着干**——同档自动换人 + 越挂越久的冷却（1m→6h），判定也共享 | 阈值熔断，可能跨档换 | 熔断 + 档内回退 |
 | **缓存** | ✅ **护住你的 prompt 缓存**——更便宜永不更贵 | 维护自己的缓存 | 也护缓存，算法不同 |
 | **上手** | ✅ **约 9 条命令 + 一个可视化编辑器**——5 分钟可上线 | 4 份配置要合并 | 15+ 环境变量——更陡峭 |
@@ -253,11 +287,11 @@ Spend: fast $0.045 (9 calls) · smart $0.42 (3 calls) · total $0.465
 
 ### 会不会过早从 Smart 降级？
 
-只有最近 5 轮 fast 加权占比 ≥ `threshold`（默认 0.6）才降级，低于 `minConfidence`（默认 0.5）的投票直接忽略；想更粘就把 `threshold` 调到 0.8。升级永远立即。
+降级需要**连续 2 轮决定性 fast 判定**（`economics.downgradeMemory`，默认 2）+ cache-aware 空闲门——一轮例行任务降不下来；无信号 hold（置信度 < `minConfidence`）或任何 smart 判定都会重置连击。想更粘/更省调 `economics.reworkPenalty`（默认 3，θ≈0.33）：调高到 5 更省，调低到 2 更粘。升级在决定性 smart 判定时永远立即。
 
 ### 能临时停用而不卸载吗？
 
-`/router off` 停用当前会话，`/router on` 恢复，开关写入配置文件。
+`/router off` 停用、`/router on` 恢复；开关写入配置文件。
 
 ### 什么会触发编排？
 
@@ -275,7 +309,7 @@ Smart 档负责规划与审核，Fast 档负责实现——worker 用 `fresh` �
 
 ## 参考手册
 
-- [配置参考 & 调参指南](docs/CONFIG.zh-CN.md) —— JSON schema、字段默认值、`/router stats` 解读、阈值怎么调
+- [配置参考 & 调参指南](docs/CONFIG.zh-CN.md) —— JSON schema、字段默认值、`/router status` 解读、阈值怎么调
 - [模型选型目录](docs/MODELS.zh-CN.md) —— 编程套餐、本地量化、同 Provider 阶梯、跨 Provider 拼装
 - [故障排查](docs/TROUBLESHOOTING.zh-CN.md) —— 判定解析失败、模型找不到、反复降级等问题
 - [路线图](ROADMAP.md) · [贡献指南](CONTRIBUTING.md)

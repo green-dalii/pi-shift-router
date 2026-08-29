@@ -1,13 +1,13 @@
 /**
- * pi-shift-router — Confidence-weighted sliding window tests
+ * pi-shift-router — Confidence-driven EV routing tests (SPEC §2.3)
  *
- * SPEC: Judge returns { tier, confidence }. The sliding window counts
- * only entries whose confidence meets `window.minConfidence`. The downgrade
- * ratio is the SUM of confidences for fast entries / total entries.
- *
- * Pure functions:
- *   - parseJudgeConfidence(text): number | null   (in judge.ts)
- *   - analyzeDowngrade(...): now weights by confidence
+ * Judge returns { tier, confidence }. The EV decision rule turns confidence
+ * into the probability the task needs the smart tier:
+ *   pSmart = c (smart) or 1−c (fast); θ = 1 / economics.reworkPenalty.
+ * Confidence below `window.minConfidence` = no signal (hold) — such entries
+ * never switch tiers and break a fast streak. analyzeDowngrade then only
+ * counts trailing DECISIVE fast entries (confidence already spent at
+ * decision time).
  */
 
 import { describe, it, expect } from "vitest";
@@ -27,24 +27,25 @@ function makeConfig(overrides: Partial<ShiftRouterConfig["routing"]> = {}): Shif
       judgeTimeout: 5000,
       window: {
         size: 5,
-        threshold: 0.6,
         minConfidence: 0.5,
         ...overrides.window,
       },
+      economics: { reworkPenalty: 3, downgradeMemory: 2 },
     },
     ux: { quietMode: false, statusBar: true, inlineToast: true },
   } as ShiftRouterConfig;
 }
 
-function entry(tier: "fast" | "smart", confidence?: number): WindowEntry {
+function entry(tier: "fast" | "smart", confidence?: number, hold?: boolean): WindowEntry {
   return {
     tier,
     timestamp: 0,
-    confidence: confidence ?? 1.0,
+    ...(confidence !== undefined ? { confidence } : {}),
+    ...(hold ? { hold } : {}),
   };
 }
 
-// ─── Confidence parsing ────────────────────────────────────────────
+// ─── Tier parsing ──────────────────────────────────────────────────
 describe("extractTier parses confidence", () => {
   it("extracts confidence from primary JSON shape", () => {
     const text = '{"tier":"fast","confidence":0.85}';
@@ -57,158 +58,74 @@ describe("extractTier parses confidence", () => {
   });
 });
 
-// ─── analyzeDowngrade: weighted window ──────────────────────────────
-describe("analyzeDowngrade with confidence weighting", () => {
-  it("downgrades when all fast entries are high confidence", () => {
-    const state = {
-      currentTier: "smart" as const,
-      window: [
-        entry("fast", 0.9),
-        entry("fast", 0.9),
-        entry("fast", 0.9),
-      ],
-    };
-    const config = makeConfig();
-    const r = analyzeDowngrade(state.window, state.currentTier, config);
-    // weighted fast = 2.7 / 3 = 0.9 ≥ 0.6
+// ─── analyzeDowngrade: decisive streak ─────────────────────────────
+describe("analyzeDowngrade (decisive fast streak)", () => {
+  it("downgrades when all trailing fast entries are decisive (high confidence)", () => {
+    const window = [entry("fast", 0.9), entry("fast", 0.9), entry("fast", 0.9)];
+    const r = analyzeDowngrade(window, "smart", makeConfig());
+    // trailing streak 3 ≥ downgradeMemory 2
     expect(r.shouldDowngrade).toBe(true);
   });
 
-  it("does not downgrade when most fast entries are low confidence", () => {
-    const state = {
-      currentTier: "smart" as const,
-      window: [
-        entry("fast", 0.3),  // skipped (below minConfidence)
-        entry("fast", 0.3),  // skipped
-        entry("fast", 0.3),  // skipped
-        entry("smart", 0.9),
-      ],
-    };
-    const config = makeConfig();
-    const r = analyzeDowngrade(state.window, state.currentTier, config);
-    // All 3 fast entries below 0.5 minConfidence → ignored → ratio = 0
+  it("does not downgrade on a single fast entry", () => {
+    const window = [entry("fast", 0.9)];
+    const r = analyzeDowngrade(window, "smart", makeConfig());
     expect(r.shouldDowngrade).toBe(false);
   });
 
-  it("weighted ratio: partial confidence yields fractional ratio", () => {
-    const state = {
-      currentTier: "smart" as const,
-      window: [
-        entry("fast", 0.5),
-        entry("fast", 0.5),
-        entry("fast", 0.5),
-        entry("fast", 0.5),
-      ],
-    };
-    const config = makeConfig();
-    const r = analyzeDowngrade(state.window, state.currentTier, config);
-    // 4 * 0.5 / 4 = 0.5 < 0.6 → no downgrade
+  it("low-confidence window entries are holds and break the streak", () => {
+    // Entries below minConfidence are marked hold at decision time; they
+    // must never contribute to a fast streak.
+    const window = [entry("fast", 0.9), entry("fast", 0.9, true), entry("fast", 0.9)];
+    const r = analyzeDowngrade(window, "smart", makeConfig());
     expect(r.shouldDowngrade).toBe(false);
-  });
-
-  it("weighted ratio: 3 of 4 fast above min-confidence hits threshold", () => {
-    const state = {
-      currentTier: "smart" as const,
-      window: [
-        entry("fast", 0.9),
-        entry("fast", 0.9),
-        entry("fast", 0.9),
-        entry("smart", 0.9),
-      ],
-    };
-    const config = makeConfig();
-    const r = analyzeDowngrade(state.window, state.currentTier, config);
-    // 3 * 0.9 / 4 = 0.675 ≥ 0.6
-    expect(r.shouldDowngrade).toBe(true);
   });
 
   it("defaults to confidence 1.0 when not provided (backward compat)", () => {
-    const state = {
-      currentTier: "smart" as const,
-      window: [
-        { tier: "fast" as const, timestamp: 0 },  // no confidence → 1.0
-        { tier: "fast" as const, timestamp: 0 },
-        { tier: "fast" as const, timestamp: 0 },
-      ],
-    };
-    const config = makeConfig();
-    const r = analyzeDowngrade(state.window, state.currentTier, config);
-    // 3 * 1.0 / 3 = 1.0 ≥ 0.6
+    const window = [
+      { tier: "fast" as const, timestamp: 0 },
+      { tier: "fast" as const, timestamp: 0 },
+    ];
+    const r = analyzeDowngrade(window, "smart", makeConfig());
     expect(r.shouldDowngrade).toBe(true);
-  });
-
-  it("window is capped to size (last N entries only)", () => {
-    const state = {
-      currentTier: "smart" as const,
-      window: [
-        entry("smart", 0.9),  // outside window
-        entry("smart", 0.9),  // outside window
-        entry("fast", 0.9),   // in window
-        entry("fast", 0.9),   // in window
-        entry("fast", 0.9),   // in window
-        entry("fast", 0.9),   // in window
-        entry("fast", 0.9),   // in window
-      ],
-    };
-    const config = makeConfig({ window: { size: 5, threshold: 0.6, minConfidence: 0.5 } });
-    const r = analyzeDowngrade(state.window, state.currentTier, config);
-    // window.size = 5 → last 5 entries = [fast×5]
-    // 5 * 0.9 / 5 = 0.9 ≥ 0.6
-    expect(r.shouldDowngrade).toBe(true);
-  });
-
-  it("no downgrade when currentTier is already fast", () => {
-    const state = {
-      currentTier: "fast" as const,
-      window: [
-        entry("fast", 0.9),
-        entry("fast", 0.9),
-        entry("fast", 0.9),
-      ],
-    };
-    const config = makeConfig();
-    const r = analyzeDowngrade(state.window, state.currentTier, config);
-    expect(r.shouldDowngrade).toBe(false);
-    expect(r.targetTier).toBeNull();
-  });
-
-  it("does not downgrade when window is empty", () => {
-    const config = makeConfig();
-    const r = analyzeDowngrade([], "smart", config);
-    expect(r.shouldDowngrade).toBe(false);
-  });
-
-  it("custom threshold raises the bar", () => {
-    const state = {
-      currentTier: "smart" as const,
-      window: [
-        entry("fast", 0.9),
-        entry("fast", 0.9),
-        entry("smart", 0.9),
-      ],
-    };
-    // 2 * 0.9 / 3 = 0.6, threshold 0.8 → not enough
-    const config = makeConfig({ window: { size: 5, threshold: 0.8, minConfidence: 0.5 } });
-    const r = analyzeDowngrade(state.window, state.currentTier, config);
-    expect(r.shouldDowngrade).toBe(false);
   });
 });
 
 // ─── End-to-end via processRoute ───────────────────────────────────
 import { createRouterState, processRoute } from "../src/router.js";
-describe("processRoute respects confidence weighting", () => {
-  it("stays on smart when fast entries are low confidence", () => {
+describe("processRoute respects confidence", () => {
+  it("low-confidence judge verdict holds (no downgrade, no upgrade)", () => {
     const state = createRouterState();
     state.currentTier = "smart";
-    state.window = [
-      entry("fast", 0.3),
-      entry("fast", 0.3),
-      entry("fast", 0.3),
-      entry("fast", 0.3),
-    ];
+    state.currentProvider = "p";
+    state.currentModelId = "s";
     const config = makeConfig();
 
     const d = processRoute({ tier: "fast", source: "llm", confidence: 0.3 }, state, config, { find: () => ({} as any) });
-    expect(d.action).toBe("stay"); // all low-confidence fast → no downgrade
+    expect(d.action).toBe("stay"); // confidence 0.3 < 0.5 → hold
+    expect(state.window[state.window.length - 1]?.hold).toBe(true);
+  });
+
+  it("partial confidence on a fast verdict upgrades (EV rule)", () => {
+    const state = createRouterState();
+    state.currentTier = "fast";
+    state.currentProvider = "p";
+    state.currentModelId = "f";
+    const config = makeConfig();
+
+    // fast c=0.6 → pSmart=0.4 ≥ θ=1/3 → smart decision → upgrade
+    const d = processRoute({ tier: "fast", source: "llm", confidence: 0.6 }, state, config, { find: () => ({} as any) });
+    expect(d.action).toBe("upgrade");
+  });
+
+  it("confident fast verdict stays on the fast chain", () => {
+    const state = createRouterState();
+    state.currentTier = "fast";
+    state.currentProvider = "p";
+    state.currentModelId = "f";
+    const config = makeConfig();
+
+    const d = processRoute({ tier: "fast", source: "llm", confidence: 0.9 }, state, config, { find: () => ({} as any) });
+    expect(d.action).toBe("stay");
   });
 });

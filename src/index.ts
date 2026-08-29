@@ -10,7 +10,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
 import type { Tier, ShiftRouterConfig, RouterState, ProviderEndpoint } from "./types.js";
 import { loadConfig, resolveFastEndpoints } from "./config.js";
-import { findBestModelForTier, formatTierDisplay, formatTierDisplayWithSpeed } from "./tier.js";
+import { findBestModelForTier, formatTierDisplay } from "./tier.js";
+import { formatStatusBarLabel } from "./status-bar.js";
 import { classify } from "./judge.js";
 import {
   createRouterState,
@@ -40,6 +41,7 @@ import {
   formatRemaining,
   tokensPerSecond,
   recordSpeed,
+  recordTurnThroughputFallback,
   findTierForModel,
 } from "./failover.js";
 import { registerCommands } from "./commands.js";
@@ -52,62 +54,17 @@ function allTiersIdentical(config: ShiftRouterConfig): boolean {
   return modelsJson(fast) === modelsJson(smart);
 }
 
-/**
- * Compute the status-bar label for the current router state.
- * Pure function (no I/O) so it's directly testable.
- *
- * Returns undefined when the status bar is disabled (the caller should
- * pass undefined to `ui.setStatus` to clear it).
- */
-export function formatStatusBarLabel(cfg: ShiftRouterConfig, s: RouterState): string | undefined {
-  if (!cfg.ux.statusBar) return undefined;
-  const speed = s.recentSpeeds.length > 0 ? s.recentSpeeds[s.recentSpeeds.length - 1] : 0;
-  if (s.orchestration.active) {
-    const o = s.orchestration;
-    // Cap-hit indicator: the hard caps (maxRounds / escalationThreshold)
-    // are reached and new worker spawns are blocked. Show it so the user
-    // sees the loop is being stopped by the plugin, not silently stuck.
-    const capLabel =
-      o.rounds >= cfg.orchestration.maxRounds || o.escalations >= cfg.orchestration.escalationThreshold
-        ? " ⛔cap"
-        : "";
-    // Workers in flight → dedicated orchestration label. Done/Total =
-    // completed vs started subagent tool-calls this run (one
-    // workflowScript call is one tool_call; inner `runs.all` fan-out is
-    // not separately counted). Throughput is the AVERAGE across completed
-    // workers (stable under concurrency).
-    if (o.spawned > 0) {
-      if (o.workerSpeeds.length > 0) {
-        const sum = o.workerSpeeds.reduce((a, b) => a + b, 0);
-        const avg = Math.round(sum / o.workerSpeeds.length);
-        return `🪄 Done(${o.done})/Total(${o.spawned}) • ~${avg} tok/s avg${capLabel}`;
-      }
-      return `🪄 Done(${o.done})/Total(${o.spawned})${capLabel}`;
-    }
-    // Planning phase (no workers yet) → keep the live tier badge — incl.
-    // tok/s throughput — and append a pending marker. Long CTO planning
-    // phases must not hide throughput telemetry (regression from #7:
-    // orchestration now genuinely triggers, so this path is hot).
-    const planningBase = cfg.enabled
-      ? formatTierDisplayWithSpeed(s.currentTier, s.currentModelId, speed)
-      : speedLabel("⛔", speed);
-    return `${planningBase} 🪄${capLabel}`;
-  }
-  return cfg.enabled
-    ? formatTierDisplayWithSpeed(s.currentTier, s.currentModelId, speed)
-    : speedLabel("⛔", speed);
-}
-
-/** Append a throughput segment when a reading exists; bare label otherwise. */
-function speedLabel(base: string, speed: number): string {
-  return speed > 0 ? `${base} • ${speed} tok/s` : base;
-}
-
 export default function slimRouterExtension(pi: ExtensionAPI) {
   let config: ShiftRouterConfig;
   let state: RouterState;
   let fastEndpoints: ProviderEndpoint[] = [];
   let initialized = false;
+  // One-shot diagnostics flag: warn once per process when message_end arrives
+  // without message_start wall-clock timing (throughput fallback engaged).
+  let throughputTimingWarned = false;
+  // Best-effort registry ref for the status-bar "intended model" fallback
+  // (a null currentModelId shows `[🦾 model?]` instead of `[🦾 …]`).
+  let statusBarRegistry: { find: (provider: string, modelId: string) => unknown } | undefined;
 
   // Track the ACTUAL session model for display purposes. The router only
   // updates state.current* on its own switches; user-driven changes via
@@ -193,7 +150,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
   // ── Status bar ──────────────────────────────────────────────
 
   function updateBar(ui: any, cfg: ShiftRouterConfig, s: RouterState) {
-    ui.setStatus("shift-router", formatStatusBarLabel(cfg, s));
+    ui.setStatus("shift-router", formatStatusBarLabel(cfg, s, statusBarRegistry));
   }
 
   // ── Session start ───────────────────────────────────────────
@@ -223,6 +180,21 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (event, ctx) => {
     if (!initialized) await init(ctx);
+    statusBarRegistry = (ctx as any).modelRegistry as any;
+
+    // Orchestration state must never survive across turns. A clean turn
+    // exits it at agent_end; if it is still active here, the previous turn
+    // was interrupted/aborted — and its loading timer may still be painting
+    // a frozen planning frame every 250ms, overriding every updateBar.
+    // Sweep both so the bar always shows the live state for THIS turn.
+    // Runs before the enabled/prompt early return: a leaked frame must not
+    // survive even into a disabled or empty turn.
+    if (state.orchestration.active) {
+      stopLoading();
+      resetOrchestration(state);
+      if (config.ux.statusBar) updateBar(ctx.ui, config, state);
+    }
+
     if (!config?.enabled || !event.prompt?.trim()) return;
 
     const tDiag = Date.now();
@@ -375,7 +347,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         // tool_call paints the live worker count once workers spawn and
         // stopLoading() freezes on the last frame.
         if (config.ux.statusBar) {
-          const animBase = formatStatusBarLabel(config, state) ?? "🪄 orchestrating";
+          const animBase = formatStatusBarLabel(config, state, statusBarRegistry) ?? "🪄 orchestrating";
           startLoading(ctx.ui, animBase);
         }
         // Inject the orchestrator instruction into this turn's system prompt
@@ -420,13 +392,6 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         if (verbose) console.log(`[ShiftRouter] model switch ${ok ? "ok" : "FAILED"}`);
         if (ok && !config.ux.quietMode && config.ux.inlineToast) {
           ctx.ui.notify(`${formatTierDisplay(state.currentTier, state.currentModelId)}`, "info");
-        }
-      } else if (!state.currentModelId && state.currentTier) {
-        // First turn with no model yet — resolve one for current tier,
-        // skipping models in cooldown.
-        const m = findBestModelForTier(state.currentTier, config, ctx.modelRegistry as any, cooldownPredicate(state.modelCooldowns, Date.now()));
-        if (m) {
-          await applyModelSwitch(m, state, ctx.modelRegistry as any, (model) => pi.setModel(model as any));
         }
       }
     } catch (err) {
@@ -555,6 +520,18 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     if (state.manualOverride.active) return; // user forced a model — don't override
 
     const t0 = Date.now();
+    statusBarRegistry = (ctx as any).modelRegistry as any;
+    // Throughput fallback: message_start may never fire with a usable role
+    // for some providers, so streamingStartTime stays null and recentSpeeds
+    // stays empty (no "• N tok/s" in the bar). agent_end always has the
+    // full messages — derive speed from timestamps + usage when needed, and
+    // REPAINT the bar: recording alone leaves the stale no-speed label up.
+    let throughputRecorded = false;
+    try {
+      throughputRecorded = recordTurnThroughputFallback((event as any).messages ?? [], state);
+    } catch (fallbackErr) {
+      console.warn(`[ShiftRouter] throughput fallback failed: ${fallbackErr}`);
+    }
     const msgCount = (event as any).messages?.length ?? 0;
     const plan = planTurnFailover(
       (event as any).messages ?? [],
@@ -628,6 +605,10 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
 
 
     if (!plan) {
+      // Healthy turn (or non-failover error). Repaint so a speed recorded by
+      // the agent_end fallback actually reaches the bar — message_end may
+      // have painted without one (empty recentSpeeds / no wall-clock timing).
+      if (throughputRecorded && config.ux.statusBar) updateBar(ctx.ui, config, state);
       if (config.ux.routerLogVerbose) {
         console.log(`[ShiftRouter][diag] agent_end exiting (no failover) @${Date.now()} total=${Date.now() - tEnd0}ms`);
       }
@@ -812,6 +793,41 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     // session-boundary gate knows whether the prompt cache is still warm.
     state.lastActivityAt = Date.now();
 
+    // ── Throughput FIRST ──────────────────────────────────────────
+    // The status bar's "• N tok/s" must never be starved by a fault in the
+    // cost-telemetry block below (a throw there previously skipped the speed
+    // record entirely — leaving fast turns without an indicator while smart
+    // turns kept theirs, depending on which message shape tripped it).
+    const startTime = state.streamingStartTime;
+    if (startTime !== null && outputTokens > 0) {
+      const elapsed = Date.now() - startTime;
+      const tps = tokensPerSecond(outputTokens, elapsed);
+      if (tps > 0) {
+        recordSpeed(state.recentSpeeds, tps);
+        if (config.ux.routerLogVerbose) {
+          console.log(
+            `[ShiftRouter] ${outputTokens} tokens in ${elapsed}ms = ${tps} tok/s (total ${state.totalOutputTokens.toLocaleString()})`,
+          );
+        }
+      } else if (config.ux.routerLogVerbose) {
+        console.log(
+          `[ShiftRouter] message_end: tokens=${outputTokens} elapsed=${elapsed}ms startTime=${startTime} msgTs=${msg.timestamp}`,
+        );
+      }
+    } else if (outputTokens > 0 && startTime === null && !throughputTimingWarned) {
+      // Primary wall-clock path unavailable (message_start never delivered a
+      // usable assistant timing). One warn per process; the agent_end
+      // timestamp fallback covers the indicator.
+      throughputTimingWarned = true;
+      console.warn(
+        `[ShiftRouter] throughput: message_end without message_start timing (output=${outputTokens}) — status bar relies on the agent_end timestamp fallback`,
+      );
+    } else if (config.ux.routerLogVerbose) {
+      console.log(
+        `[ShiftRouter] message_end: tokens=${outputTokens} startTime=${startTime} usage=${usage ? JSON.stringify(usage) : "undefined"}`,
+      );
+    }
+
     // ── Cost telemetry (SPEC §9 "Cost telemetry — deep view") ────────
     // Attribute this message's tokens + cost to whichever tier was active
     // when it ran (`state.currentTier` reflects the model picked during
@@ -837,32 +853,6 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       tokens,
       cost: messageCost,
     });
-
-    // Compute throughput from wall-clock elapsed (we used Date.now() at
-    // message_start, so streamingStartTime is reliably set for any assistant
-    // message that ran through streaming).
-    const startTime = state.streamingStartTime;
-    if (startTime !== null && outputTokens > 0) {
-      const elapsed = Date.now() - startTime;
-      const tps = tokensPerSecond(outputTokens, elapsed);
-      if (tps > 0) {
-        recordSpeed(state.recentSpeeds, tps);
-        if (config.ux.routerLogVerbose) {
-          console.log(
-            `[ShiftRouter] ${outputTokens} tokens in ${elapsed}ms = ${tps} tok/s (total ${state.totalOutputTokens.toLocaleString()})`,
-          );
-        }
-      } else if (config.ux.routerLogVerbose) {
-        // tokens>0 but elapsed<=0 — defensive log so we can see time-source issues
-        console.log(
-          `[ShiftRouter] message_end: tokens=${outputTokens} elapsed=${elapsed}ms startTime=${startTime} msgTs=${msg.timestamp}`,
-        );
-      }
-    } else if (config.ux.routerLogVerbose) {
-      console.log(
-        `[ShiftRouter] message_end: tokens=${outputTokens} startTime=${startTime} usage=${usage ? JSON.stringify(usage) : "undefined"}`,
-      );
-    }
 
     // Always reset start time and refresh status bar — guarantees the bar
     // updates even when output_tokens=0 (reasoning-only models, free providers,

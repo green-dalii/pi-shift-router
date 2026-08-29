@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.3.1] — pi-tui runtime dependency + release gates
+
+### Fixed
+
+- **`Cannot find package '@earendil-works/pi-tui'` on npm-installed builds.**
+  pi installs the extension subtree with `--omit=peer --config.auto-install-peers=false`,
+  so a peerDependencies-only declaration was never installed there and the compiled
+  `dist/tui/*` lazy imports failed at runtime. `@earendil-works/pi-tui` is now a real
+  `dependencies` entry (kept in peerDependencies for the host contract), restoring the
+  v0.4.0–v0.8.2 packaging pattern.
+
+### Added
+
+- **Release gates to prevent this regression class.**
+  - `tests/pack-isolation.test.ts` — every runtime import in `dist/` must be covered by
+    `dependencies` (static, runs in `npm test`).
+  - `scripts/check-isolated-load.mjs` (`npm run check:isolated`) — packs the tarball,
+    installs it into a clean tree with pi's exact install flags, then natively imports
+    every dist module. Wired into CI.
+  - `pack-check` enforces that allowlisted host bundles (pi-tui) live in BOTH
+    `dependencies` and `peerDependencies`.
+
 ## [1.3.0] — Orchestration acceptance audit + prompt overhaul
 
 ### Added

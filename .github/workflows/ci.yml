@@ -42,6 +42,9 @@ jobs:
       - name: Pack-check (publish-state validation)
         run: npm run pack:check
 
+      - name: Isolated-subtree load gate (npm-installed user simulation)
+        run: npm run check:isolated
+
   lint:
     name: Lint (placeholder)
     runs-on: ubuntu-latest

@@ -30,9 +30,17 @@ const pkgPath = join(ROOT, "package.json");
 const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
 
 const HOST_PACKAGES = new Set(["@earendil-works/pi-coding-agent"]);
+// Host packages that MUST be physically installed into the isolated extension
+// subtree because the compiled .js dist cannot rely on pi's jiti alias/virtualModules
+// rewrite (which is only reliable for TS-source extensions). npm installs these
+// from the registry when declared in `dependencies`; the host still provides the
+// canonical copy.
+const RUNTIME_HOST_ALLOWLIST = new Set(["@earendil-works/pi-tui"]);
 const runtimeDeps = Object.keys(pkg.dependencies || {});
 const devDeps = Object.keys(pkg.devDependencies || {});
 const peerDeps = Object.keys(pkg.peerDependencies || {});
+const runtimeDepsToSet = new Set(runtimeDeps);
+const peerDepsToSet = new Set(peerDeps);
 
 // ---------- 2. Host packages must be devDeps, not deps ----------
 for (const dep of runtimeDeps) {
@@ -42,6 +50,8 @@ for (const dep of runtimeDeps) {
 			`user's host (pi-coding-agent itself) already provides it. Move to ` +
 			`'devDependencies' for type-checking only.`
 		);
+	} else if (RUNTIME_HOST_ALLOWLIST.has(dep)) {
+		pass(`runtime dep: ${dep} (allowlisted host bundle — isolated-subtree install for compiled dist)`);
 	} else {
 		pass(`runtime dep: ${dep}`);
 	}
@@ -63,11 +73,42 @@ for (const dep of peerDeps) {
 	}
 }
 
+// ---------- 3b. Allowlisted host bundles must be in BOTH deps + peers ----------
+// pi's package-manager installs the extension subtree with --omit=peer and
+// auto-install-peers=false, so a peerDependencies-only host bundle is never
+// installed there. A compiled dist that value-imports such a bundle (pi-tui)
+// fails at runtime with `Cannot find package`. The allowlisted bundle must be
+// a real `dependencies` entry (npm installs it into the subtree) AND stay in
+// peerDependencies (host contract).
+for (const bundle of RUNTIME_HOST_ALLOWLIST) {
+	if (!runtimeDepsToSet.has(bundle)) {
+		fail(
+			`Allowlisted host bundle '${bundle}' must be in 'dependencies' — pi's ` +
+			`package-manager installs the extension subtree with --omit=peer, so a ` +
+			`peerDependencies-only declaration is not installed there and compiled ` +
+			`dist value-imports of it fail at runtime. Add it to 'dependencies'.`
+		);
+	} else {
+		pass(`allowlisted host bundle '${bundle}' declared in dependencies`);
+	}
+	if (!peerDepsToSet.has(bundle)) {
+		fail(`Allowlisted host bundle '${bundle}' must also stay in 'peerDependencies'.`);
+	} else {
+		pass(`allowlisted host bundle '${bundle}' declared in peerDependencies`);
+	}
+}
+
 // ---------- 3. Source files must NOT value-import host packages ----------
 const DIST = join(ROOT, "dist");
+// Dist value-imports of allowlisted host bundles (pi-tui) are legal ONLY
+// because 3b enforces they are real `dependencies` entries — they resolve
+// from the isolated subtree via native Node resolution. The fail-scan below
+// targets host packages that must NEVER be runtime-imported (pi-coding-agent:
+// it is only ever type-imported; its runtime symbols come from the loader).
 const valueImportPatterns = [
 	/^import\s+\{[^}]+\}\s+from\s+["']@earendil-works\/pi-coding-agent["']/m,
 ];
+const allowlistedValueImportPattern = /^import\s+\{[^}]+\}\s+from\s+["']@earendil-works\/pi-tui["']/m;
 
 function* walk(dir) {
 	for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -91,6 +132,11 @@ if (existsSync(DIST)) {
 				);
 				runtimeImportsFound = true;
 			}
+		}
+		if (allowlistedValueImportPattern.test(content)) {
+			// Legal: 3b guarantees the allowlisted bundle is in `dependencies`, so
+			// it IS present in pi's isolated subtree (native resolution works).
+			pass(`allowlisted host bundle value-import in ${file.replace(ROOT + "/", "")} (covered by dependencies)`);
 		}
 	}
 	if (!runtimeImportsFound) {

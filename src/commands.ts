@@ -2,14 +2,15 @@
  * pi-shift-router — Slash commands
  *
  * /router          — Show status, enable/disable
+ * /router status   — Detailed router state
+ * /router config   — Interactive configuration wizard
+ * /router mode     — Gear-shift economics presets (eco | default | sport)
  * /route-force     — Manual override for current turn
- * /route status    — Detailed router state
- * /route-config    — Interactive configuration wizard
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { ShiftRouterConfig, RouterState, Tier, TierEntry, ModelRef } from "./types.js";
-import { TIERS } from "./types.js";
+import type { ShiftRouterConfig, RouterState, Tier, TierEntry, ModelRef, EconomicMode } from "./types.js";
+import { TIERS, ECONOMIC_MODE_PRESETS, LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT } from "./types.js";
 import {
   isValidTier,
   tierEmoji,
@@ -20,12 +21,16 @@ import {
   clearManualOverride,
   setManualOverrideModel,
   shareProviderFamily,
+  effectiveReworkPenalty,
+  effectiveTheta,
+  legacyThetaOverride,
 } from "./router.js";
 import { resetOrchestration } from "./orchestrate.js";
 import { formatStats } from "./stats.js";
 import { formatRemaining } from "./failover.js";
 import {
   getConfigPath,
+  userConfigPath,
   loadModelsStore,
   loadAuthStore,
   flattenModels,
@@ -66,20 +71,53 @@ function formatTierList(config: ShiftRouterConfig): string {
 
 type MenuChoice = "fast" | "smart" | "ux" | "cache" | "done" | "cancel";
 
+/**
+ * Status label for the economics mode. A set preset wins; otherwise the
+ * effective preset is "default" only when reworkPenalty is untouched, else
+ * "custom" (manual R).
+ */
+function economicModeLabel(config: ShiftRouterConfig): string {
+  const mode = config.routing.economics?.mode;
+  if (mode) return mode;
+  const R = config.routing.economics?.reworkPenalty;
+  return R === undefined || R === 3 ? "default" : "custom";
+}
+
+/** " → 0.22 eff (same-family ÷1.5)" suffix when cache-aware division applies. */
+function effectiveThetaEffNote(config: ShiftRouterConfig): string {
+  const effective = effectiveTheta(config);
+  const base = 1 / Math.max(effectiveReworkPenalty(config), 1);
+  if (Math.abs(effective - base) <= 1e-9 || !shareProviderFamily(config)) return "";
+  return ` → ${effective.toFixed(2)} eff (same-family ÷${sameFamilyFactorDisplay(config)})`;
+}
+
 /** Same-family θ divisor for status display (mirrors router.sameFamilyThetaFactor). */
 function sameFamilyFactorDisplay(config: ShiftRouterConfig): string {
   const ca = config.routing.cacheAware;
   if (typeof ca?.sameFamilyPenalty === "number" && ca.sameFamilyPenalty > 1) return String(ca.sameFamilyPenalty);
-  if (typeof ca?.sameFamilyThreshold === "number") return "3";
+  // Legacy knob mirrors router.sameFamilyThetaFactor: the old default 0.9 is
+  // dead (migrates to 1.5); only a differing value implies the strong 3.0.
+  if (typeof ca?.sameFamilyThreshold === "number" && ca.sameFamilyThreshold !== LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT) return "3";
   return "1.5";
 }
 
-/** Effective θ for status display (explicit threshold overrides economics). */
+/** Effective θ for status display (legacy non-default threshold overrides economics). */
 function effectiveThetaDisplay(config: ShiftRouterConfig): string {
-  const legacy = config.routing.window.threshold;
-  if (typeof legacy === "number" && legacy > 0 && legacy < 1) return String(legacy);
-  const R = config.routing.economics?.reworkPenalty ?? 3;
-  return (1 / Math.max(R, 1)).toFixed(2);
+  const legacy = legacyThetaOverride(config);
+  if (legacy !== undefined) return String(legacy);
+  return (1 / Math.max(effectiveReworkPenalty(config), 1)).toFixed(2);
+}
+
+/**
+ * Persist config to whichever file is authoritative (project if it exists,
+ * else user, else project as the default write target). All mutating
+ * commands go through this — an in-memory mutation alone is lost on the
+ * next `onConfigChanged()` reload.
+ */
+async function persistConfig(config: ShiftRouterConfig, cwd: string): Promise<boolean> {
+  const path = getConfigPath();
+  const scope = path !== null && path === userConfigPath() ? "user" : "project";
+  return saveConfig(config, cwd, scope);
 }
 
 /**
@@ -386,7 +424,7 @@ export function registerCommands(
   pi.registerCommand("router", {
     description: "pi-shift-router: show status, enable/disable",
     getArgumentCompletions: (prefix: string) => {
-      const cmds = ["on", "off", "status", "stats", "quiet", "verbose", "config", "orchestrate"].filter((c) => c.startsWith(prefix));
+      const cmds = ["on", "off", "status", "quiet", "verbose", "config", "mode", "orchestrate"].filter((c) => c.startsWith(prefix));
       return cmds.length > 0 ? cmds.map((c) => ({ value: c, label: c })) : null;
     },
     handler: async (args, ctx) => {
@@ -403,6 +441,7 @@ export function registerCommands(
       }
       if (arg === "orchestrate auto") {
         config.orchestration.mode = "auto";
+        await persistConfig(config, ctx.cwd);
         onConfigChanged();
         updateStatus(ctx.ui);
         ctx.ui.notify("pi-shift-router: 🪄 Orchestration AUTO — complex tasks will run as Smart-orchestrated loops, simple tasks stay on the plain router", "info");
@@ -412,6 +451,7 @@ export function registerCommands(
         config.orchestration.mode = "off";
         resetOrchestration(state);
         updateStatus(ctx.ui);
+        await persistConfig(config, ctx.cwd);
         onConfigChanged();
         ctx.ui.notify("pi-shift-router: 🪄 Orchestration OFF — back to plain tier routing", "info");
         return;
@@ -419,6 +459,7 @@ export function registerCommands(
       if (arg === "orchestrate on") {
         // Legacy alias: "on" meant the same judge-driven behavior; map to auto.
         config.orchestration.mode = "auto";
+        await persistConfig(config, ctx.cwd);
         onConfigChanged();
         ctx.ui.notify("pi-shift-router: 🪄 Orchestration AUTO (legacy `on` mapped to auto) — complex tasks orchestrate, simple tasks stay on the plain router", "info");
         return;
@@ -426,6 +467,7 @@ export function registerCommands(
 
       if (arg === "on") {
         config.enabled = true;
+        await persistConfig(config, ctx.cwd);
         onConfigChanged();
         updateStatus(ctx.ui);
         ctx.ui.notify("pi-shift-router: ✅ Enabled", "info");
@@ -433,6 +475,7 @@ export function registerCommands(
       }
       if (arg === "off") {
         config.enabled = false;
+        await persistConfig(config, ctx.cwd);
         onConfigChanged();
         updateStatus(ctx.ui);
         ctx.ui.notify("pi-shift-router: ⛔ Disabled", "info");
@@ -446,18 +489,70 @@ export function registerCommands(
       }
       if (arg === "quiet") {
         config.ux.quietMode = !config.ux.quietMode;
+        await persistConfig(config, ctx.cwd);
+        onConfigChanged();
         ctx.ui.notify(`pi-shift-router: ${config.ux.quietMode ? "🔇 Quiet" : "🔊 Notifications"}`, "info");
         return;
       }
       if (arg === "verbose" || arg === "log") {
         config.ux.routerLogVerbose = !config.ux.routerLogVerbose;
+        await persistConfig(config, ctx.cwd);
+        onConfigChanged();
         ctx.ui.notify(
           `pi-shift-router: ${config.ux.routerLogVerbose ? "📝 Verbose logging ON" : "📝 Verbose logging OFF"}`,
           "info",
         );
         return;
       }
-      if (arg === "status" || arg === "stats") {
+      if (arg === "mode") {
+        const current = config.routing.economics?.mode;
+        const effective = effectiveTheta(config);
+        const base = 1 / Math.max(effectiveReworkPenalty(config), 1);
+        const effNote =
+          Math.abs(effective - base) > 1e-9 && shareProviderFamily(config)
+            ? ` — effective θ ${effective.toFixed(2)} (same-family cache-aware ÷${sameFamilyFactorDisplay(config)})`
+            : "";
+        ctx.ui.notify(
+          [
+            `pi-shift-router: 🚗 Economic mode: ${current ?? "unset → default preset (R=" + effectiveReworkPenalty(config) + ")"}`,
+            `  eco      → R=2  (θ=0.50)  cheaper: only clearly-needed turns run smart`,
+            `  default  → R=3  (θ≈0.33)  the default`,
+            `  sport    → R=5  (θ=0.20)  eager: any real chance of needing Smart escalates`,
+            `  base θ is divided by the same-family cache penalty when Fast and Smart share a provider${effNote}`,
+            `Usage: /router mode eco|default|sport (persisted to config)`,].join("\n"),
+          "info",
+        );
+        return;
+      }
+      const modeMatch = /^mode\s+(eco|default|sport)$/.exec(arg);
+      if (modeMatch) {
+        const mode = modeMatch[1] as EconomicMode;
+        const R = ECONOMIC_MODE_PRESETS[mode];
+        config.routing.economics = { ...(config.routing.economics ?? { reworkPenalty: 3, downgradeMemory: 2 }), mode };
+        await persistConfig(config, ctx.cwd);
+        onConfigChanged();
+        updateStatus(ctx.ui);
+        const theta = (1 / R).toFixed(2);
+        const effective = effectiveTheta(config);
+        const effNote =
+          Math.abs(effective - 1 / R) > 1e-9 && shareProviderFamily(config)
+            ? ` → θ_eff ${effective.toFixed(2)} (same-family ÷${sameFamilyFactorDisplay(config)})`
+            : "";
+        const blurb =
+          mode === "eco"
+            ? "cheaper: only clearly-needed turns run smart"
+            : mode === "sport"
+              ? "eager: any real chance of needing Smart escalates"
+              : "default bar";
+        const legacyBar = legacyThetaOverride(config);
+        ctx.ui.notify(
+          `pi-shift-router: 🚗 Mode ${mode} — R=${R} (θ=${theta}${effNote}) — ${blurb}` +
+            (legacyBar !== undefined ? ` ⚠ legacy window.threshold=${legacyBar} (non-default value) still overrides θ — remove it from config to let the mode take effect` : ""),
+          "info",
+        );
+        return;
+      }
+      if (arg === "status") {
         const counts: Record<string, number> = { fast: 0, smart: 0 };
         for (const e of state.window) counts[e.tier]++;
 
@@ -512,7 +607,7 @@ export function registerCommands(
             `  Orchestration:${sOrch}`,
             `  Last audit:${sAudit}`,
             `  Cache-aware: ${shareProviderFamily(config) ? "🎯 same-family (θ ÷ " + (config.routing.cacheAware?.enabled ? sameFamilyFactorDisplay(config) : "1 — disabled") + ", " + (config.routing.cacheAware?.enabled ? "warm-cache guarded" : "inactive — enable in /router config") + ")" : "— (cross-family)"}`,
-            `  Economics: R=${config.routing.economics?.reworkPenalty ?? 3} (θ=${effectiveThetaDisplay(config)})  downgrade streak ≥ ${config.routing.economics?.downgradeMemory ?? 2} fast`,
+            `  Economics: 🚗 mode ${economicModeLabel(config)}  R=${effectiveReworkPenalty(config)} (θ=${effectiveThetaDisplay(config)}${effectiveThetaEffNote(config)})  downgrade streak ≥ ${config.routing.economics?.downgradeMemory ?? 2} fast${legacyThetaOverride(config) !== undefined ? `  ⚠ legacy window.threshold=${legacyThetaOverride(config)} (non-default value) overrides θ` : ""}`,
             ...(cooldownLines.length > 0
               ? [`  Cooldowns (${cooldownLines.length}):`, ...cooldownLines]
               : [`  Cooldowns: none`]),

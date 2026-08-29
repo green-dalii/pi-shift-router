@@ -70,24 +70,44 @@ pi install npm:pi-shift-router   # then: /router config → /router status
 
 One cheap call per turn: the fast-tier model (usually your cheapest) reads your message, marks it `fast` (routine) or `smart` (consequential), and says **how sure it is** (confidence 0–1). That's the router's only classification — the chosen tier then does the work.
 
-**The whole rule in one sentence: *if the chance this turn needs the smart model is at least θ, run smart; otherwise run fast.*** The default bar is **θ ≈ 0.33**.
+**Start from the asymmetry — everything else follows.** Every switch can be wrong two ways, and they don't cost the same:
 
-| Judge says | confidence | Chance smart is needed (pSmart) | vs θ | Goes to |
+- **Upgrade a simple task** (pay smart rates for something routine): you overpay once — small, bounded, visible.
+- **Keep a hard task on the cheap model**: it fumbles, you redo the whole turn, and you pay for the smart model anyway — plus your time. Usually several times the first mistake.
+
+So a router that can't perfectly tell "simple" from "hard" shouldn't bet at 50/50. **When a task might be hard, the cheap option is the risky one.** The bar is tilted toward spending:
+
+> **Run smart whenever the chance this turn needs it is ≥ θ; otherwise run fast.** Default **θ ≈ 0.33**.
+
+**Confidence *is* that chance.** The judge says `smart` with confidence `c` → chance `c`. It says `fast` with confidence `c` → chance `1 − c` (a confident `fast` means "almost certainly simple"). So:
+
+| Judge says | confidence | chance smart is needed | vs θ | result |
 |---|---|---|---|---|
 | `smart` | 0.9 | 0.9 | ≥ | 🧠 smart |
 | `smart` | 0.2 | 0.2 | < | 🦾 fast — weak verdict overridden |
 | `fast` | 0.9 | 0.1 | < | 🦾 fast |
-| `fast` | 0.6 | 0.4 | ≥ | 🧠 smart — not-sure-it's-simple |
-| any | < 0.5 | — no signal | — | hold — stay on the current tier |
+| `fast` | 0.6 | 0.4 | ≥ | 🧠 smart — "not sure it's simple" |
+| any | < 0.5 | (no signal) | — | hold — stay put, don't guess |
 
-Where does the confidence go? If the judge says `smart` with confidence `c`, the chance smart is needed is `c` itself. If it says `fast`, the chance is `1 − c` (a *confident* `fast` means a *low* chance smart is needed). That's `pSmart`, the number in the table.
+**Where 0.33 comes from — the insurance math.** Treat the price difference as a premium you pay to avoid a fumble:
 
-Why is the bar 0.33 and not 0.5? **Because being wrong about "it's simple" is expensive.** If the cheap model fumbles a hard task, you re-run it — your time plus the retry costs far more than the money you saved by staying cheap. So whenever the judge is genuinely unsure, the router leans smart. The exact bar is **θ = 1 / `reworkPenalty`**: `reworkPenalty` (default 3) is your estimate of *how many times the price difference a botched downgrade costs you*. Set 5 for cheaper routing (θ=0.2), 2 to stay on Smart longer (θ=0.5).
+| strategy | expected cost | why |
+|---|---|---|
+| run smart | `f + Δ` | pays the premium up front; no fumble risk |
+| run fast | `f + P·Δ·R` | skips the premium; if the task really needs smart (prob `P`), the fumble costs `R×` the price difference |
 
-Two mechanical details:
+`f` = fast-tier cost, `Δ` = smart − fast (the premium), `R` = `reworkPenalty`, `P` = chance smart is needed. Run smart whenever it's cheaper on average:
 
-- **Upgrade** (fast → smart) is immediate whenever pSmart ≥ θ. **Downgrade** (smart → fast) needs **2 consecutive turns** where pSmart < θ — a single "thanks" never drops you — plus the cache guard below.
-- **Cache guard.** Prompt caches belong to a model: switch tiers mid-session and the next model re-reads the whole conversation at full input price. When Fast and Smart share a provider (both Anthropic, both OpenAI…), the router divides θ by `sameFamilyPenalty` (fewer downgrades) and refuses to downgrade while the cache is warm (within the 5-minute idle window). Routing to a cheaper model never costs more than staying put. Upgrades are never affected; cross-provider setups don't share a cache, so nothing changes there.
+```
+f + P·Δ·R > f + Δ   ⟺   P > 1/R
+```
+
+The price difference cancels: **the rule doesn't care how expensive your models are — only how badly a fumble hurts relative to the price difference.** Default `R = 3` → θ ≈ 0.33: a one-in-three chance of needing smart is enough. **Higher R lowers the bar**: `R = 5` → θ = 0.2 (eager — `/router mode sport`), `R = 2` → θ = 0.5 (conservative — `/router mode eco`).
+
+**Two guards stop it from bouncing:**
+
+- **Upgrade is immediate** once pSmart ≥ θ; **downgrade needs 2 consecutive turns** below θ — one "thanks" never drops you.
+- **Cache guard.** A prompt cache belongs to a model — switching tiers mid-session makes the next model re-read the whole conversation at full price. When Fast and Smart share a provider, the router divides θ further (fewer downgrades) and refuses to downgrade while the cache is warm. Upgrades are never affected; cross-provider setups share no cache, so nothing changes there.
 
 The judge output format is strict so small models parse it reliably: OpenAI-compatible endpoints get `response_format: json_object` (non-JSON is rejected at the API), Anthropic gets a `{` prefill to force JSON output. The status bar shows `🧭 judging…` while it runs. If the judge fails, the router holds its current tier — it never guesses.
 
@@ -110,7 +130,7 @@ Turn-level routing picks *which model* runs a turn. Task-level orchestration pic
 
 ### How an orchestrated turn runs
 
-1. **Enter.** Judge says `smart` → the router switches the main agent to the Smart model and injects an orchestrator instruction (your role, delegation rules, hard caps). The status bar shows live telemetry throughout: `[🧠 deepseek] • 42 tok/s 🪄…` while planning, `🪄 2/5 workers • ~30 tok/s avg` once Fast workers are running.
+1. **Enter.** Judge says `smart` → the router switches the main agent to the Smart model and injects an orchestrator instruction (your role, delegation rules, hard caps). The status bar shows live telemetry throughout: `[🧠 deepseek] • 42 tok/s` while the CTO plans (the wand 🪄 appears only once workers are actually spawned), then `🪄 Done(2)/Total(3) • ~30 tok/s avg` while Fast workers run.
 2. **Plan.** The Smart agent decomposes the task into phases, each with acceptance criteria.
 3. **Delegate.** For each phase it spawns a Fast subagent via the `subagent` tool — `agent: "worker"`, `context: "fresh"`, model pinned from your **Fast tier** — with a self-contained task contract (goal, constraints, acceptance criteria, files to touch).
 4. **Review.** It reads each worker's result against the phase's acceptance criteria. Failed phases go back to a worker with concrete feedback — or the Smart agent takes over the phase itself after N failures.
@@ -128,13 +148,18 @@ The plugin enforces two numbers, independent of what the Smart agent wants:
 
 The loop stops when either the Smart agent says done or a cap is hit.
 
-### Acceptance audit (safety net under the CTO's review, v1.3.0)
+### Acceptance audit (safety net under the CTO's review, v1.3.0, domain-restricted v1.4.0)
 
 Because review is the Smart agent's own judgment, the plugin adds a **hard
-fallback audit** at the end of every orchestrated turn (`agent_end`):
+fallback audit** at the end of every orchestrated turn that actually
+**delegated to workers** (`spawned ≥ 1`, at `agent_end`). A self-executed
+turn (`spawned = 0` — the CTO judged it simple enough to do itself) is
+**exempt from the audit entirely**: no violations, no warnings, just a
+`(self-executed)` marker in `/router status`. The CTO-summary output
+contract only engages when workers were actually spawned.
 
-1. **Deterministic checks (always run, free):** every spawned worker reported
-   back (`done == spawned`), the final message carries a **CTO summary**
+1. **Deterministic checks (free):** every spawned worker reported back
+   (`done == spawned`), the final message carries a **CTO summary**
    (the output-contract markers), and whether the run ended at a hard cap.
 2. **LLM audit (on by default, one small fast-tier call):** the auditor prompt
    reads the **original user goal** (captured when orchestration entered),
@@ -225,6 +250,7 @@ You should see your current tier, scope, economics (R / θ), downgrade-streak re
 | `/router config` | Launch the TUI configuration wizard |
 | `/router quiet` | Toggle inline toast notifications |
 | `/router verbose` | Toggle verbose logging |
+| `/router mode eco\|default\|sport` | Gear-shift economics presets (persisted): **eco** → R=2 (θ=0.5, cheaper — only clearly-needed turns run smart), **default** → R=3 (θ≈0.33), **sport** → R=5 (θ=0.2, eager — any real chance of needing Smart escalates). No arg shows the current mode + preset table |
 | `/router orchestrate auto` | Task-level orchestration (default): complex tasks → Smart CTO delegates to Fast subagents; simple tasks stay on the plain router |
 | `/router orchestrate off` | Disable orchestration — plain two-tier routing only |
 | `/route-force <tier>` | Pin a tier for the next turn |
@@ -257,7 +283,7 @@ The baseline asks: *what would this session have cost if every turn ran on your 
 | **How it decides** | ✅ **One LLM prompt, auditable as plain text** — if it's important, it upgrades; if it's routine, it stays | 7-step rules + history tricks — more cases, harder to reason about | 12-step local pipeline (no LLM) — most complex, heaviest to run |
 | **Tiers** | ✅ **2 tiers — `fast` vs `smart`** · One mental model, whole codebase in an evening | 4 tiers (`quick` / `general` / `writing` / `frontier`) — more knobs, more to learn | 3 tiers including a local one (LM Studio / Ollama) — adds a local mode you'll rarely need |
 | **Hard task?** | ✅ **The smart model orchestrates as CTO** — plans, splits work to fast engineers, reviews, iterates | Per-turn routing only — no orchestration | One helper call on the strong model — not a team |
-| **Cost** | ✅ **Shows dollars saved** — every turn counted vs “what if all ran on smart?” (`/router stats`) | Saves subscription quota, not dollars | Estimates cost with a formula (research-grade, not your bill) |
+| **Cost** | ✅ **Shows dollars saved** — every turn counted vs “what if all ran on smart?” (`/router status`) | Saves subscription quota, not dollars | Estimates cost with a formula (research-grade, not your bill) |
 | **When provider fails** | ✅ **Keeps working** — same-tier fallback with smart cooldown (1m→6h), shared with the judge | Circuit breaker, may switch tiers on failure | Circuit breaker, falls back within tier only |
 | **Cache** | ✅ **Protects your prompt cache** — cheaper never costs more | Keeps its own prompt cache | Also protects cache, different math |
 | **Setup** | ✅ **~9 commands + one visual editor** — 5 min to ship | 4 files to merge, similar surface | 15+ env vars — steeper curve |
@@ -282,7 +308,7 @@ Downgrades need **two consecutive decisive fast decisions** (`economics.downgrad
 
 ### Can I disable it without uninstalling?
 
-`/router off` disables it for the session, `/router on` re-enables it; the switch persists in the config file.
+`/router off` disables it and `/router on` re-enables it; the switch persists in the config file.
 
 ### What triggers orchestration?
 
@@ -300,7 +326,7 @@ The Smart tier plans and reviews; the Fast tier implements — workers run `fres
 
 ## Reference
 
-- [Configuration & tuning](docs/CONFIG.md) — JSON schema, defaults, `/router stats`, threshold calibration
+- [Configuration & tuning](docs/CONFIG.md) — JSON schema, defaults, `/router status`, economics / θ calibration
 - [Model pairings](docs/MODELS.md) — coding plans, local quantized models, same-provider ladder, cross-provider
 - [Troubleshooting](docs/TROUBLESHOOTING.md) — judge parse failures, missing models, repeated downgrades
 - [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md)

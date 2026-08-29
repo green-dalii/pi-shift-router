@@ -158,24 +158,48 @@ describe("effectiveTheta", () => {
     expect(effectiveTheta(config, false)).toBeCloseTo(1 / 3, 5);
   });
 
-  it("legacy explicit window.threshold overrides as a raw θ", () => {
+  it("legacy explicit window.threshold overrides as a raw θ (non-default value)", () => {
+    const config = makeConfig({
+      routing: {
+        ...DEFAULT_CONFIG.routing,
+        window: { size: 5, threshold: 0.5, minConfidence: 0.5 },
+      },
+    });
+    expect(effectiveTheta(config)).toBe(0.5);
+  });
+
+  it("legacy window.threshold == 0.6 (old default) is dead — θ comes from economics", () => {
+    // Smooth migration: v1.3's default was threshold 0.6. Old configs that
+    // carry that value (wizard snapshots) must NOT be reinterpreted as a
+    // conservative θ=0.6 override; they get the new default θ = 1/R.
     const config = makeConfig({
       routing: {
         ...DEFAULT_CONFIG.routing,
         window: { size: 5, threshold: 0.6, minConfidence: 0.5 },
+        cacheAware: { ...DEFAULT_CONFIG.routing.cacheAware!, enabled: false },
       },
     });
-    expect(effectiveTheta(config)).toBe(0.6);
+    expect(effectiveTheta(config)).toBeCloseTo(1 / 3, 5);
   });
 
-  it("legacy sameFamilyThreshold implies the strong factor 3.0", () => {
+  it("legacy sameFamilyThreshold implies the strong factor 3.0 (non-default value)", () => {
+    const config = makeConfig({
+      routing: {
+        ...DEFAULT_CONFIG.routing,
+        cacheAware: { enabled: true, sameFamilyThreshold: 0.7, idleBoundaryMs: IDLE_BOUNDARY },
+      },
+    });
+    expect(effectiveTheta(config, true)).toBeCloseTo((1 / 3) / 3, 5);
+  });
+
+  it("legacy sameFamilyThreshold == 0.9 (old default) is dead — penalty defaults to 1.5", () => {
     const config = makeConfig({
       routing: {
         ...DEFAULT_CONFIG.routing,
         cacheAware: { enabled: true, sameFamilyThreshold: 0.9, idleBoundaryMs: IDLE_BOUNDARY },
       },
     });
-    expect(effectiveTheta(config, true)).toBeCloseTo((1 / 3) / 3, 5);
+    expect(effectiveTheta(config, true)).toBeCloseTo((1 / 3) / 1.5, 5);
   });
 });
 

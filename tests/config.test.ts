@@ -2,8 +2,9 @@
  * pi-shift-router — Configuration tests
  *
  * Pure-function tests for validateConfig() and flattenModels().
- * File-IO functions (loadConfig, saveConfig) are not tested here —
- * they require filesystem mocks which are out of scope for unit tests.
+ * File-IO roundtrip (loadConfig → saveConfig → reload) is covered by
+ * the "saveConfig → reload roundtrip" describe at the bottom, which
+ * uses a sandbox-safe /tmp directory.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -16,6 +17,8 @@ import {
   mergeCustomProviders,
   resolveFastEndpoints,
   loadModelsStore,
+  loadConfig,
+  saveConfig,
   invalidateModelsStoreCache,
   invalidateConfigCache,
 } from "../src/config.js";
@@ -506,5 +509,38 @@ describe("invalidateModelsStoreCache (stale-list fix)", () => {
     invalidateModelsStoreCache();
     const store = await loadModelsStore({ builtin: join(TMP_DIR, "nonexistent.json"), custom: TMP_CUSTOM });
     expect(Object.keys(store)).toContain("_only_custom");
+  });
+});
+
+// ─── Persistence roundtrip (the /router command save pattern) ─────
+describe("saveConfig → reload roundtrip", () => {
+  const DIR = "/tmp/pi-shift-router-rt";
+  beforeEach(async () => {
+    await rm(DIR, { recursive: true, force: true });
+    await mkdir(DIR, { recursive: true });
+    invalidateConfigCache();
+  });
+  afterEach(async () => {
+    await rm(DIR, { recursive: true, force: true });
+    invalidateConfigCache();
+  });
+
+  it("mutate → saveConfig → reload keeps economics.mode (commands persist, not just memory)", async () => {
+    const c = await loadConfig(DIR);
+    expect(c.routing.economics.mode).toBeUndefined();
+    c.routing.economics = { ...c.routing.economics, mode: "eco" };
+    const saved = await saveConfig(c, DIR, "project");
+    expect(saved).toBe(true);
+    const reloaded = await loadConfig(DIR);
+    expect(reloaded.routing.economics.mode).toBe("eco");
+    expect(reloaded.routing.economics.reworkPenalty).toBe(3); // defaults intact
+  });
+
+  it("mode is round-tripped through the file even when the old value was a number", async () => {
+    const c = await loadConfig(DIR);
+    c.routing.economics = { ...c.routing.economics, mode: "sport" };
+    await saveConfig(c, DIR, "project");
+    const reloaded = await loadConfig(DIR);
+    expect(reloaded.routing.economics.mode).toBe("sport");
   });
 });

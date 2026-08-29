@@ -7,6 +7,7 @@
  */
 
 import type { ShiftRouterConfig, Tier, WindowEntry, RouterState, JudgeResult } from "./types.js";
+import { ECONOMIC_MODE_PRESETS, LEGACY_THRESHOLD_DEFAULT, LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT } from "./types.js";
 import { findBestModelForTier, type ResolvedModel } from "./tier.js";
 import { createCooldowns, cooldownPredicate, findTierForModel } from "./failover.js";
 
@@ -77,20 +78,43 @@ export function shareProviderFamily(config: ShiftRouterConfig): boolean {
 }
 
 /**
+ * Effective rework penalty R (SPEC §2.3). A named `economics.mode` preset
+ * (`/router mode eco|default|sport`) is authoritative when present;
+ * otherwise the raw `reworkPenalty` applies (legacy default 3).
+ */
+export function effectiveReworkPenalty(config: ShiftRouterConfig): number {
+  const mode = config.routing.economics?.mode;
+  if (mode && mode in ECONOMIC_MODE_PRESETS) return ECONOMIC_MODE_PRESETS[mode];
+  return config.routing.economics?.reworkPenalty ?? 3;
+}
+
+/**
+ * Genuinely active legacy θ override, or undefined. The pre-v1.4.0 default
+ * `0.6` is treated as **unset** (smooth migration: old wizard snapshots must
+ * not be reinterpreted as a much more conservative θ); only a value that
+ * differs from the old default is a deliberate customization and wins.
+ */
+export function legacyThetaOverride(config: ShiftRouterConfig): number | undefined {
+  const t = config.routing.window.threshold;
+  if (typeof t === "number" && t > 0 && t < 1 && t !== LEGACY_THRESHOLD_DEFAULT) return t;
+  return undefined;
+}
+
+/**
  * Effective θ (the smart-probability bar) for the EV decision rule (SPEC §2.3).
  *
  * Base: θ = 1 / economics.reworkPenalty. A legacy explicit `window.threshold`
- * (user-set before v1.4.0) overrides as a raw θ. Cache-aware same-family
- * routing divides θ by the same-family penalty so fewer fast decisions fire
- * (fewer downgrades → warm prompt cache survives).
+ * (user-set before v1.4.0, non-default value) overrides as a raw θ.
+ * Cache-aware same-family routing divides θ by the same-family penalty so
+ * fewer fast decisions fire (fewer downgrades → warm prompt cache survives).
  */
 export function effectiveTheta(
   config: ShiftRouterConfig,
   cacheAware: boolean = shareProviderFamily(config),
 ): number {
-  const legacy = config.routing.window.threshold;
-  if (typeof legacy === "number" && legacy > 0 && legacy < 1) return legacy;
-  const R = config.routing.economics?.reworkPenalty ?? 3;
+  const legacy = legacyThetaOverride(config);
+  if (legacy !== undefined) return legacy;
+  const R = effectiveReworkPenalty(config);
   let theta = 1 / Math.max(R, 1);
   if (cacheAware && config.routing.cacheAware?.enabled) {
     theta /= sameFamilyThetaFactor(config);
@@ -100,13 +124,20 @@ export function effectiveTheta(
 
 /**
  * Same-family θ divisor. New knob: `sameFamilyPenalty` (default 1.5).
- * Legacy `sameFamilyThreshold` (old ratio bar) implies the strong default 3.0
- * so configs that explicitly enabled strong conservatism keep that intent.
+ * Legacy `sameFamilyThreshold` (old ratio bar) implies the strong default
+ * 3.0 — but only when it differs from the old default 0.9 (smooth migration:
+ * wizard snapshots of the v1.3 default must not silently turn the strong
+ * conservatism on).
  */
 function sameFamilyThetaFactor(config: ShiftRouterConfig): number {
   const ca = config.routing.cacheAware;
   if (typeof ca?.sameFamilyPenalty === "number" && ca.sameFamilyPenalty > 1) return ca.sameFamilyPenalty;
-  if (typeof ca?.sameFamilyThreshold === "number") return 3.0;
+  if (
+    typeof ca?.sameFamilyThreshold === "number" &&
+    ca.sameFamilyThreshold !== LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT
+  ) {
+    return 3.0;
+  }
   return 1.5;
 }
 
@@ -280,8 +311,17 @@ export async function applyModelSwitch(
       state.currentTier = resolved.tier;
       state.currentModelId = resolved.modelId;
       state.currentProvider = resolved.provider;
+      return true;
     }
-    return ok;
+    // pi.setModel returns false when the provider has no configured auth in
+    // pi's runtime (agent-session.js: hasConfiguredAuth). This failure was
+    // previously silent — the status bar stayed on a bare "…" with no model
+    // name and no retry. Surface it so the user fixes auth instead of
+    // chasing a UI ghost.
+    console.warn(
+      `[ShiftRouter] Model switch FAILED: ${resolved.provider}/${resolved.modelId} (pi.setModel returned false — provider auth not configured? check ~/.pi/agent/models.json + auth.json). Tier stays ${state.currentTier ?? "?"}.`,
+    );
+    return false;
   } catch (err) {
     console.warn(`[ShiftRouter] Model switch failed: ${err}`);
     return false;

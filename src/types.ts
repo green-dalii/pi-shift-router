@@ -65,6 +65,34 @@ export interface UXConfig {
 }
 
 /** Routing behaviour config */
+/** Named economics presets for `/router mode` (SPEC §2.3). */
+export type EconomicMode = "eco" | "default" | "sport";
+
+/**
+ * R (reworkPenalty) per named mode — the only knob the gear presets touch.
+ * θ = 1/R, and the turn runs smart iff pSmart ≥ θ, so HIGHER R → LOWER θ →
+ * more eager escalation (stickier on Smart); LOWER R → HIGHER θ → only
+ * clearly-needed turns run smart (cheaper).
+ * eco: R=2 (θ=0.5) — conservative/cheap: only clearly-needed turns upgrade
+ * default: R=3 (θ≈0.33)
+ * sport: R=5 (θ=0.2) — eager/sticky: any real chance of needing Smart escalates
+ */
+export const ECONOMIC_MODE_PRESETS: Record<EconomicMode, number> = {
+  eco: 2,
+  default: 3,
+  sport: 5,
+};
+
+/**
+ * Pre-v1.4.0 defaults for the two LEGACY knobs. A config carrying exactly
+ * these values is a wizard snapshot of the old defaults, not a deliberate
+ * customization — it must migrate silently to the new rule (dead), not be
+ * reinterpreted under new semantics. Only a *different* value is honored as
+ * an override (and surfaced in /router status).
+ */
+export const LEGACY_THRESHOLD_DEFAULT = 0.6;
+export const LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT = 0.9;
+
 export interface RoutingConfig {
   mode: "auto" | "manual" | "off";
   /** LLM Judge timeout in ms */
@@ -81,8 +109,10 @@ export interface RoutingConfig {
    * price-deltas a wrong downgrade costs (rework multiplier); θ = 1/R.
    * `downgradeMemory` = consecutive decisive fast decisions required to
    * downgrade from smart to fast.
+   * `mode` = named preset (`/router mode`); when present it is authoritative
+   * over `reworkPenalty` (which stays as the legacy/manual fallback).
    */
-  economics: { reworkPenalty: number; downgradeMemory: number };
+  economics: { reworkPenalty: number; downgradeMemory: number; mode?: EconomicMode };
   /**
    * Cache-aware routing (SPEC §9.2). When fast and smart resolve to the
    * same provider family, a mid-session model switch forfeits the prompt

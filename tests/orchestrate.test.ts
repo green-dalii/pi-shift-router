@@ -342,6 +342,8 @@ describe("orchestration lifecycle", () => {
     const state: RouterState = createRouterState();
     const cfg = makeConfig({ orchestration: { ...DEFAULT_CONFIG.orchestration, mode: "auto", escalationThreshold: 2 } });
     enterOrchestration(state);
+    state.orchestration.spawned = 2;
+    state.orchestration.done = 0;
     recordWorkerOutcome(state, cfg, false);
     recordWorkerOutcome(state, cfg, false); // escalations=1, cap not hit
     expect(formatStatusBarLabel(cfg, state)).toContain("🪄");
@@ -360,7 +362,7 @@ describe("orchestration lifecycle", () => {
 // `formatStatusBarLabel` is a pure function extracted from updateBar so
 // we can verify the label transitions correctly through the orchestration
 // lifecycle.
-import { formatStatusBarLabel } from "../src/index.js";
+import { formatStatusBarLabel } from "../src/status-bar.js";
 
 describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
   function makeState(): RouterState {
@@ -385,14 +387,15 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
     expect(formatStatusBarLabel(cfg, s)).toBeUndefined();
   });
 
-  it("appends 🪄 pending marker to tier badge when active and no workers spawned (keeps tok/s visible)", () => {
+  it("planning phase (active, no workers spawned) shows the plain tier badge — NO wand", () => {
     const s = makeState();
     enterOrchestration(s);
     const label = formatStatusBarLabel(makeConfig(), s);
-    // Planning phase: badge + throughput stay visible, wand marks pending.
-    // Default state = fast tier, no model resolved yet → "[🦾 …]".
+    // The wand is reserved for delegation in flight (spawned > 0). A
+    // planning frame — or a leaked state from an interrupted turn — must
+    // not read as "orchestrating".
     expect(label).toMatch(/\[🦾 …\]/);
-    expect(label).toMatch(/🪄$/);
+    expect(label).not.toMatch(/🪄/);
   });
 
   it("planning-phase label includes tok/s when speed telemetry exists", () => {
@@ -401,7 +404,7 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
     s.recentSpeeds.push(42);
     s.currentTier = "smart";
     s.currentModelId = "opencode/deepseek";
-    expect(formatStatusBarLabel(makeConfig(), s)).toBe("[🧠 deepseek] • 42 tok/s 🪄");
+    expect(formatStatusBarLabel(makeConfig(), s)).toBe("[🧠 deepseek] • 42 tok/s");
   });
 
   it("returns '🪄 Done(1)/Total(3)' when workers have been spawned", () => {
@@ -415,7 +418,7 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
   it("returns tier badge after exitOrchestration (the bug fix)", () => {
     const s = makeState();
     enterOrchestration(s);
-    expect(formatStatusBarLabel(makeConfig(), s)).toMatch(/🪄$/);
+    expect(formatStatusBarLabel(makeConfig(), s)).not.toMatch(/🪄/); // planning = no wand
     exitOrchestration(s);
     // After exit, the orchestration state is inactive → plain tier badge.
     const label = formatStatusBarLabel(makeConfig(), s);
@@ -430,12 +433,12 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
     expect(formatStatusBarLabel(makeConfig(), s)).not.toMatch(/🪄/);
   });
 
-  it("⛔ + pending marker wins over pure ⛔ when router disabled and orchestration planning", () => {
+  it("disabled router shows pure ⛔ during planning (no wand)", () => {
     const cfg = makeConfig({ enabled: false });
     const s = makeState();
     enterOrchestration(s);
-    // Planning phase keeps whatever base applies, plus the wand marker.
-    expect(formatStatusBarLabel(cfg, s)).toBe("⛔ 🪄");
+    // Planning phase has no wand — the ⛔ badge is the whole label.
+    expect(formatStatusBarLabel(cfg, s)).toBe("⛔");
     exitOrchestration(s);
     expect(formatStatusBarLabel(cfg, s)).toBe("⛔");
   });

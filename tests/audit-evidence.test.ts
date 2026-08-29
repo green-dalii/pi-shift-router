@@ -108,7 +108,10 @@ describe("audit domain — self-executed orchestration turns (spawned = 0)", () 
     expect(audit.violations).toEqual([]);
   });
 
-  it("still flags a missing CTO summary (output contract)", async () => {
+  it("does NOT flag a missing CTO summary on a self-executed turn", async () => {
+    // The CTO-summary output contract only engages when workers were actually
+    // spawned (spawned >= 1). A self-executed turn with no summary is a normal
+    // smart answer, not an unclosed delegation — no violation, no warning.
     const audit = await auditOrchestration({
       ...base,
       messages: msgs("it works, trust me"),
@@ -120,12 +123,35 @@ describe("audit domain — self-executed orchestration turns (spawned = 0)", () 
       timeoutMs: 100,
       llmCall: async () => ({ verdict: "pass" as const, issues: [] }),
     });
-    expect(audit.violations.some((v) => v.includes("CTO summary"))).toBe(true);
+    expect(audit.selfExecuted).toBe(true);
+    expect(audit.violations).toEqual([]);
   });
 });
 
 // ─── Audit domain: delegated turns unchanged ──────────────────────
 describe("audit domain — delegated runs still run the LLM pass", () => {
+  it("still flags a missing CTO summary on a DELEGATED run (output contract)", async () => {
+    // Workers were spawned (spawned >= 1) → the CTO owes an acceptance report
+    // over their results; a missing summary stays a real violation.
+    const audit = await auditOrchestration({
+      spawned: 1,
+      done: 1,
+      rounds: 1,
+      escalations: 0,
+      maxRounds: 3,
+      escalationThreshold: 2,
+      messages: msgs("it works, trust me"),
+      enabled: true,
+      goal: "verify",
+      ctoSummary: "it works, trust me",
+      workerResults: "worker output",
+      endpoints: ENDPOINT,
+      timeoutMs: 100,
+      llmCall: async () => ({ verdict: "pass" as const, issues: [] }),
+    });
+    expect(audit.violations.some((v) => v.includes("CTO summary"))).toBe(true);
+  });
+
   it("calls the LLM with extracted worker results", async () => {
     let seenWorkers = "";
     const spy = async (_goal: string | undefined, _cto: string, workers: string) => {

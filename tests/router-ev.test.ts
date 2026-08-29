@@ -20,6 +20,8 @@ import {
   processRoute,
   applyModelSwitch,
   analyzeDowngrade,
+  effectiveReworkPenalty,
+  effectiveTheta,
 } from "../src/router.js";
 import type { ShiftRouterConfig, JudgeResult, Tier } from "../src/types.js";
 
@@ -205,17 +207,123 @@ describe("θ derivation (economics + legacy migration)", () => {
     expect(step(s2, cfg, judge("fast", 0.9)).action).toBe("stay");
   });
 
-  it("explicit window.threshold acts as a raw θ override", () => {
+  it("explicit window.threshold acts as a raw θ override (non-default value)", () => {
     const cfg = makeConfig({
-      routing: { mode: "auto", judgeTimeout: 5000, window: { size: 5, threshold: 0.6, minConfidence: 0.5 } },
+      routing: { mode: "auto", judgeTimeout: 5000, window: { size: 5, threshold: 0.5, minConfidence: 0.5 } },
     });
     const state = createRouterState();
     state.currentTier = "fast";
     state.currentProvider = "p";
     state.currentModelId = "fast-model";
-    // smart c=0.5 → pSmart=0.5 < 0.6 → fast decision → no upgrade
-    const d = step(state, cfg, judge("smart", 0.5));
+    // smart c=0.4 → pSmart=0.4 < 0.5 → fast decision → no upgrade
+    const d = step(state, cfg, judge("smart", 0.4));
     expect(d.action).toBe("stay");
+  });
+
+  it("legacy window.threshold == 0.6 (old default) is dead — θ from economics, not an override", () => {
+    const cfg = makeConfig({
+      routing: { mode: "auto", judgeTimeout: 5000, window: { size: 5, threshold: 0.6, minConfidence: 0.5 } },
+    });
+    expect(effectiveTheta(cfg)).toBeCloseTo(1 / 3, 5);
+  });
+
+  it("legacy window.threshold == 0.6 never beats a mode preset (dead)", () => {
+    const cfg = makeConfig({
+      routing: {
+        mode: "auto",
+        judgeTimeout: 5000,
+        window: { size: 5, threshold: 0.6, minConfidence: 0.5 },
+        economics: { reworkPenalty: 3, downgradeMemory: 2, mode: "sport" },
+      },
+    });
+    expect(effectiveTheta(cfg)).toBeCloseTo(0.2, 5);
+  });
+
+  it("mode presets drive the rework penalty: eco→R=2, default→R=3, sport→R=5", () => {
+    const econ = (mode: "eco" | "default" | "sport") =>
+      makeConfig({
+        routing: {
+          mode: "auto",
+          judgeTimeout: 5000,
+          window: { size: 5, minConfidence: 0.5 },
+          economics: { reworkPenalty: 3, downgradeMemory: 2, mode },
+        },
+      });
+    expect(effectiveReworkPenalty(econ("eco"))).toBe(2);
+    expect(effectiveReworkPenalty(econ("default"))).toBe(3);
+    expect(effectiveReworkPenalty(econ("sport"))).toBe(5);
+  });
+
+  it("θ follows the mode preset: eco→0.50, default→≈0.33, sport→0.20", () => {
+    const econ = (mode: "eco" | "default" | "sport") =>
+      makeConfig({
+        routing: {
+          mode: "auto",
+          judgeTimeout: 5000,
+          window: { size: 5, minConfidence: 0.5 },
+          economics: { reworkPenalty: 3, downgradeMemory: 2, mode },
+        },
+      });
+    expect(effectiveTheta(econ("eco"))).toBeCloseTo(0.5, 2);
+    expect(effectiveTheta(econ("default"))).toBeCloseTo(1 / 3, 2);
+    expect(effectiveTheta(econ("sport"))).toBeCloseTo(0.2, 2);
+  });
+
+  it("mode is authoritative over reworkPenalty, which remains the legacy fallback", () => {
+    const withMode = makeConfig({
+      routing: {
+        mode: "auto",
+        judgeTimeout: 5000,
+        window: { size: 5, minConfidence: 0.5 },
+        economics: { reworkPenalty: 7, downgradeMemory: 2, mode: "eco" },
+      },
+    });
+    expect(effectiveReworkPenalty(withMode)).toBe(2); // preset wins
+    const legacyOnly = makeConfig({
+      routing: {
+        mode: "auto",
+        judgeTimeout: 5000,
+        window: { size: 5, minConfidence: 0.5 },
+        economics: { reworkPenalty: 7, downgradeMemory: 2 },
+      },
+    });
+    expect(effectiveReworkPenalty(legacyOnly)).toBe(7); // no mode → raw value
+  });
+
+  it("legacy window.threshold still beats any mode preset (non-default value)", () => {
+    const cfg = makeConfig({
+      routing: {
+        mode: "auto",
+        judgeTimeout: 5000,
+        window: { size: 5, threshold: 0.4, minConfidence: 0.5 },
+        economics: { reworkPenalty: 3, downgradeMemory: 2, mode: "sport" },
+      },
+    });
+    expect(effectiveTheta(cfg)).toBeCloseTo(0.4, 5);
+  });
+
+  it("mode presets change routing end-to-end: eco stays on a half-sure fast, sport upgrades", () => {
+    const cfg = (mode: "eco" | "standard" | "sport") =>
+      makeConfig({
+        routing: {
+          mode: "auto",
+          judgeTimeout: 5000,
+          window: { size: 5, minConfidence: 0.5 },
+          economics: { reworkPenalty: 3, downgradeMemory: 2, mode },
+        },
+      });
+    const eco = createRouterState();
+    eco.currentTier = "fast";
+    eco.currentProvider = "p";
+    eco.currentModelId = "fast-model";
+    // fast c=0.7 → pSmart=0.3 < θ=0.5 → stay (conservative bar)
+    expect(step(eco, cfg("eco"), judge("fast", 0.7)).action).toBe("stay");
+    const sport = createRouterState();
+    sport.currentTier = "fast";
+    sport.currentProvider = "p";
+    sport.currentModelId = "fast-model";
+    // fast c=0.7 → pSmart=0.3 ≥ θ=0.2 → upgrade (eager bar)
+    expect(step(sport, cfg("sport"), judge("fast", 0.7)).action).toBe("upgrade");
   });
 
   it("cache-aware same-family lowers effective θ (fewer fast decisions)", () => {
@@ -235,14 +343,14 @@ describe("θ derivation (economics + legacy migration)", () => {
     expect(d.action).toBe("upgrade");
   });
 
-  it("legacy sameFamilyThreshold implies strong same-family conservatism", () => {
+  it("legacy sameFamilyThreshold implies strong same-family conservatism (non-default value)", () => {
     const legacy = makeConfig({
       routing: {
         mode: "auto",
         judgeTimeout: 5000,
         window: { size: 5, minConfidence: 0.5 },
         economics: { reworkPenalty: 3, downgradeMemory: 2 },
-        cacheAware: { enabled: true, sameFamilyThreshold: 0.9, idleBoundaryMs: 300000 },
+        cacheAware: { enabled: true, sameFamilyThreshold: 0.7, idleBoundaryMs: 300000 },
       },
     });
     // fast c=0.95 → pSmart=0.05; θ=0.33/3=0.11 → 0.05 < 0.11 → fast decision (downgrade eligible)

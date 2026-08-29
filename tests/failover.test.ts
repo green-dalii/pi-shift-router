@@ -20,6 +20,7 @@ import {
   findFailoverModel,
   tokensPerSecond,
   recordSpeed,
+  recordTurnThroughputFallback,
   COOLDOWN_BASE_MS,
   COOLDOWN_MAX_MS,
 } from "../src/failover.js";
@@ -488,5 +489,69 @@ describe("processRoute respects model cooldowns", () => {
     const state = createRouterState();
     expect(state.modelCooldowns).toBeInstanceOf(Map);
     expect(state.modelCooldowns.size).toBe(0);
+  });
+});
+
+// ─── agent_end throughput fallback ────────────────────────────────
+describe("recordTurnThroughputFallback", () => {
+  const msgs = (list: Array<[string, number, number]>) =>
+    list.map(([role, ts, output]) => ({
+      role,
+      timestamp: ts,
+      ...(role === "assistant" ? { usage: { output } } : {}),
+    }));
+
+  it("records the last assistant message's speed when recentSpeeds is empty", () => {
+    const state = createRouterState();
+    const ok = recordTurnThroughputFallback(
+      msgs([
+        ["user", 1000, 0],
+        ["assistant", 5000, 400], // 100 tok/s
+        ["toolResult", 5200, 0],
+        ["assistant", 8000, 300], // 100 tok/s (300/3s)
+      ]),
+      state,
+    );
+    expect(ok).toBe(true);
+    expect(state.recentSpeeds.length).toBe(1);
+    expect(state.recentSpeeds[0]).toBe(107); // last assistant: 300 tok / 2.8s
+  });
+
+  it("does NOT override when message_end already recorded a speed", () => {
+    const state = createRouterState();
+    recordSpeed(state.recentSpeeds, 250);
+    const ok = recordTurnThroughputFallback(
+      msgs([
+        ["user", 1000, 0],
+        ["assistant", 5000, 400],
+      ]),
+      state,
+    );
+    expect(ok).toBe(false);
+    expect(state.recentSpeeds).toEqual([250]);
+  });
+
+  it("skips messages without output tokens or timestamps", () => {
+    const state = createRouterState();
+    const ok = recordTurnThroughputFallback(
+      [
+        { role: "user", timestamp: 1000 },
+        { role: "assistant", timestamp: 5000, usage: { output: 0 } },
+        { role: "assistant", timestamp: undefined, usage: { output: 100 } },
+        { role: "assistant" }, // no timestamp at all
+      ],
+      state,
+    );
+    expect(ok).toBe(false);
+    expect(state.recentSpeeds).toEqual([]);
+  });
+
+  it("needs a preceding message timestamp to estimate elapsed", () => {
+    const state = createRouterState();
+    const ok = recordTurnThroughputFallback(
+      [{ role: "assistant", timestamp: 5000, usage: { output: 100 } }],
+      state,
+    );
+    expect(ok).toBe(false);
   });
 });

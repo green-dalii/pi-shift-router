@@ -142,7 +142,12 @@ export function deterministicAudit(input: {
   }
   const finalText = extractFinalAssistantText(input.messages);
   const ctoSummary = hasCtoSummary(finalText);
-  if (!ctoSummary) {
+  // The CTO-summary output contract is a DELEGATION-run requirement: only when
+  // workers were actually spawned (spawned >= 1) does the CTO owe an acceptance
+  // report over their results. A self-executed turn (spawned = 0) that ends
+  // without the marker is a normal smart answer — not an unclosed loop — so it
+  // never produces a violation or a warning.
+  if (input.spawned > 0 && !ctoSummary) {
     violations.push("no CTO summary in the final assistant message (acceptance not reported)");
   }
   const capHit =

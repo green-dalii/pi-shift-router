@@ -41,11 +41,11 @@ pi-shift-router.json
 │   ├── judgeTimeout           ms；默认 5000
 │   ├── window
 │   │   ├── size               滑动窗口长度；默认 5
-│   │   ├── threshold          fast 档加权占比阈值，触发降级；默认 0.6
+│   │   ├── threshold          旧版 θ 覆盖（仅 ≠0.6 生效；0.6=旧默认值已死）
 │   │   └── minConfidence      低于该置信度的投票被忽略；默认 0.5
 │   └── cacheAware
 │       ├── enabled            提高降级阈值 + 保护热缓存；默认 true（仅同家族生效）
-│       ├── sameFamilyThreshold  启用后的降级阈值；默认 0.9
+│       ├── sameFamilyThreshold  旧版旋钮（仅 ≠0.9 蕴含强惩罚 3.0；0.9=旧默认值已死）
 │       └── idleBoundaryMs     视为“缓存已过期”的空闲间隔；默认 300000（5 分钟）
 └── ux
     ├── quietMode              关闭 inline toast；默认 false
@@ -90,17 +90,22 @@ tiers:
 | `enabled` | `true` | 总开关。`/router off` 停用。 |
 | `tiers.<tier>.models[]` | `[]` | 按 `priority` 排序。首个命中；其余项作运行时备用。 |
 | `routing.judgeTimeout` | `5000` | ms。Judge 调用超时。 |
-| `routing.window.size` / `threshold` | `5` / `0.6` | 滑动窗口降级门。 |
-| `routing.window.minConfidence` | `0.5` | 低于该置信度的投票被忽略。 |
-| `routing.cacheAware.enabled` | `true` | fast 与 smart 同 Provider 时，提高降级阈值并在 prompt 缓存仍热时抑制中途切换（SPEC §9.2）。跨家族配置不生效（无共享缓存）。 |
-| `routing.cacheAware.sameFamilyThreshold` | `0.9` | 启用 cache-aware 时使用的降级阈值（替代 `window.threshold`）。 |
+| `routing.window.size` | `5` | 判定记忆窗口长度（保留用于降级连胜分析与展示）。 |
+| `routing.window.minConfidence` | `0.5` | Judge 置信度低于此 = 无信号（hold：绝不切换，且打断 fast 连胜）。 |
+| `routing.window.threshold` | 旧版 | v1.4.0 之前的旧旋钮。**平滑迁移：旧默认值 `0.6` 已死**——配置里带着它（例如向导快照）会静默回落到新规则 `θ = 1/reworkPenalty`，而不是被重解释成保守的 θ=0.6。只有**不等于** `0.6` 的值才作为**原始 θ** 覆盖（并在 `/router status` 中显示）。优先用 `economics.reworkPenalty` / `/router mode`。 |
+| `routing.economics.mode` | 未设置 | `/router mode` 的命名预设：`eco`（R=2，θ=0.5，更省——只有明确需要 smart 的轮才升级）、`default`（R=3，θ≈0.33）、`sport`（R=5，θ=0.2，更积极——只要有需要 Smart 的苗头就升级）。R 越大 → θ 越低 → 越倾向 Smart（θ = 1/R）。设置后**优先于** `reworkPenalty`；删除它（或改文件）回到手动 R。旧版 `window.threshold`（仅非 0.6 的值）仍然压过两者。 |
+| `routing.economics.reworkPenalty` | `3` | 错误降级的代价（以价差计）。θ = 1/R：期望成本智能闸（SPEC §2.3）。设了 `economics.mode` 时被忽略。 |
+| `routing.economics.downgradeMemory` | `2` | smart → fast 降级所需的连续 decisive fast 判定次数。 |
+| `routing.cacheAware.enabled` | `true` | fast 与 smart 同 Provider 时，把 θ 除以 `sameFamilyPenalty`（更少降级）并在 prompt 缓存仍热时抑制中途切换（SPEC §9.2）。跨家族配置不生效（无共享缓存）。 |
+| `routing.cacheAware.sameFamilyPenalty` | `1.5` | 启用 cache-aware 且同家族时的 θ 除数（更少降级 → 缓存存活）。 |
+| `routing.cacheAware.sameFamilyThreshold` | 旧版 | v1.4.0 之前的旋钮。**平滑迁移：旧默认值 `0.9` 已死**（向导快照回落到 `sameFamilyPenalty` 1.5）；只有**不等于** `0.9` 的值才蕴含强默认惩罚 3.0，保留显式调过它的旧配置的保守意图。 |
 | `routing.cacheAware.idleBoundaryMs` | `300000` | 空闲超过该时长视为 prompt 缓存已过期，恢复允许降级。 |
 | `ux.quietMode` / `statusBar` / `inlineToast` / `routerLogVerbose` | 各自 | 界面 / 日志开关。 |
 | `orchestration.mode` | `"auto"` | 任务级编排模式。`"auto"`（默认）：由 Judge 驱动——简单任务（fast 判定）走普通路由；复杂任务（smart 判定）升级为 Smart 编排执行（需安装 `pi-subagents` 扩展；未安装时退化为普通 smart 档运行）。`"off"`（`/router orchestrate off`）：永不编排——行为与现有路由完全一致。没有“总是”模式。 |
 | `orchestration.maxRounds` | `3` | 每任务 delegate→review 轮数硬上限；达到即停，无论 Smart 想继续多少轮。 |
 | `orchestration.escalationThreshold` | `2` | 某阶段 worker 失败 ≥N 次 → Smart 亲自接管该阶段。 |
 | `orchestration.requireSmartModel` | `true` | 为 true 且 Smart 模型不可解析时跳过编排，按现有 smart 档运行（不崩溃）。 |
-| `orchestration.audit.enabled` | `true` | 编排轮次结束后运行验收审计（托底 review）。确定性检查始终执行；为 true 时再让 Fast 档跑一次 LLM 审计，核验 CTO 的验收主张是否建立在 worker 结果之上。绝不阻断已完成轮次——发现的问题通过 `console.warn` + toast 与 `/router status` → `Last audit` 呈现。 |
+| `orchestration.audit.enabled` | `true` | 每个**实际委派过 worker（spawned ≥ 1）**的编排轮结束后运行验收审计（托底 review）。确定性检查（worker 全部返回、CTO summary、cap 标记）始终在委派轮执行；为 true 时再让 Fast 档跑一次 LLM 审计，核验 CTO 的验收主张是否建立在 worker 结果之上。自执行轮（spawned = 0）完全豁免——零 violation、零警告，仅在 `/router status` 标记 `self-executed`。绝不阻断已完成轮次——发现的问题通过 `console.warn` + toast 与 `/router status` → `Last audit` 呈现。 |
 | `orchestration.audit.timeoutMs` | `5000` | 审计 LLM 调用超时（尽力而为；失败降级为警告，不崩溃）。 |
 
 ## 调参指南
@@ -109,13 +114,13 @@ tiers:
 
 | 你的会话看起来像… | 试试… | 为什么 |
 |---|---|---|
-| 很多例行任务（CRUD、测试、文档）；架构很少 | `threshold: 0.5`, `minConfidence: 0.7` | 激进降级 —— 减少误调 Smart 的次数 |
-| 重架构 / 规划 / 代码审查 | `threshold: 0.8`, `minConfidence: 0.4` | 保守降级 —— 多留在 Smart |
-| 混合 —— 有时连续 20 轮快任务，有时规划 | 默认值（`reworkPenalty: 3`, `minConfidence: 0.5`） | 平衡 |
+| 很多例行任务（CRUD、测试、文档）；架构很少 | `/router mode eco`（R=2, θ=0.5） | 更省/保守：只有明确需要 smart 的轮才升级 |
+| 重架构 / 规划 / 代码审查 | `/router mode sport`（R=5, θ=0.2） | 更积极/粘 Smart：只要有需要 Smart 的苗头就升级——错误降级比省下的差价贵 |
+| 混合 —— 有时连续 20 轮快任务，有时规划 | 默认（`default`，R=3, θ≈0.33） | 平衡：边界判定倾向 smart |
 | Judge 倾向过度自信（多数投票 ≥0.9） | `minConfidence: 0.7` | 剔除过度自信投票 |
 | Judge 倾向不确定（许多投票 0.3–0.6） | `minConfidence: 0.3` | 不丢弃不确定投票 |
 | Primary fast 模型频繁 429 | 在 `tiers.fast.models[1]` 加一个 Provider | 多一个备用，v0.6.0 运行时 failover 自动接管 |
-| 重 streaming / 长 agent 运行 | 监控 `/router stats` tokens/sec | 查看每轮实际吞吐 |
+| 重 streaming / 长 agent 运行 | 监控 `/router status` tokens/sec | 查看每轮实际吞吐 |
 
 ### 旋钮详解
 
@@ -123,16 +128,15 @@ tiers:
 
 **`routing.window.size`** — 滑动窗口长度。默认 `5`。越大越稳定（反应越慢），越小越敏捷（可能抖动）。
 
-**`routing.economics.reworkPenalty`** (0–1) — fast 投票加权比阈值，触发降级。默认 `0.6`。
-- `0.5`：fast 略占多数即降级
-- `0.6`：平衡（默认）
-- `0.8`：fast 显著占多数才降级
-- `1.0`：永不降级（禁用滑动窗口）
+**`routing.economics.reworkPenalty`** (≥1) — 一次错误降级的返工代价（以几个价差计）。**θ = 1 / reworkPenalty** 是期望成本智能闸（SPEC §2.3）：Judge 置信度读作 `pSmart`（smart 判定：`c`；fast 判定：`1−c`），`pSmart ≥ θ` 时跑 smart。因为返工比省下的差价贵，边界判定倾向 smart。**注意方向：R 越大 → θ 越低 → 越倾向 Smart**。
+- `5` → θ=0.2（`/router mode sport`）：积极/粘——大部分边界情况都升级，多在 Smart 停留
+- `3` → θ≈0.33（默认 `default`）：平衡
+- `2` → θ=0.5（`/router mode eco`）：保守/省——只有明确需要 smart 的轮才跑 smart
 
 **`routing.window.minConfidence`** (0–1) — 低于此置信度的投票被丢弃。默认 `0.5`。设为 `0` 恢复 v0.6.0 的等权计数；设为 `0.7+` 仅计清晰投票。
 
 **`routing.cacheAware`** — cache-aware 路由（SPEC §9.2）。Prompt 缓存属于单个模型：会话中途换 tier 会丢掉热缓存（缓存读按基础输入价 0.1x–0.5x 计费），所以路由到更便宜模型可能反而更贵。当 `enabled: true` **且** fast 与 smart 共享 Provider 家族（自动检测）时：
-- 降级阈值提高到 `sameFamilyThreshold`（0.6 → 0.9）——减少中途降级，以及
+- 有效 θ 除以 `sameFamilyPenalty`（默认 1.5）——更少降级，以及
 - 距最后一条消息 `idleBoundaryMs`（默认 5 分钟）内抑制降级——缓存仍热；只有空闲超过缓存 TTL 后才恢复降级。
 升级（fast → smart）永不受影响。跨家族配置不受影响。开关：`/router config → 🧠 Cache-aware routing`。
 
@@ -140,7 +144,7 @@ tiers:
 
 **`ux.routerLogVerbose`** — 设为 `true`（或 `/router verbose`）在控制台看决策日志。校准 threshold 时很有用。
 
-## 读 /router stats
+## 读 /router status
 
 > **原生模型切换仅同步显示（方案 A）。** pi 自带的 `/model` 或 `Ctrl+P`
 > 切换器只更新状态栏——路由器保留每轮模型决定权，所以原生切换在下一轮就
@@ -148,13 +152,33 @@ tiers:
 > `/router off`。（v1.2.0+，已作为明确契约记录。）
 
 ```text
-Tier: smart / p/claude-opus-5
-Window: 3 entries (confidence: high=2 mid=1 low=0 none=0)
-Transitions: ↑upgrade=1 ↓downgrade=0
-Tokens: total 12,345 | speed current=23 avg=25 tok/s
-Cooldowns: none
+pi-shift-router — Mode: AUTO ✅
+Current: [🦾 deepseek-v4-flash]
+
+Tiers:
+  🦾 Fast — MiniMax-M3, meta/muse-spark-1.2-contributor, deepseek-v4-flash, ...
+  🧠 Smart — deepseek-v4-flash, meta/muse-spark-1.2-contributor
+
+Session:
+  Turns: 12   Upgrades: ↑2   Downgrades: ↓1
+  Manual override: ✗
+  Orchestration: 🪄 auto (idle)
+  Last audit: ✓ clean (self-executed)
+  Cache-aware: 🎯 same-family (θ ÷ 1.5, warm-cache guarded)
+  Economics: 🚗 mode default  R=3 (θ=0.33 → 0.22 eff (same-family ÷1.5))  downgrade streak ≥ 2 fast
+  Cooldowns: none
+
+Stats:
+  ...
+
+Detail:
+  Window: [f, f, s]  (3 entries)
+  Counts: S=1 F=2
+
+Config: /…/.pi/pi-shift-router.json
 ```
 
-- **`high` / `mid` / `low` / `none`** — 窗口置信度分布。如果 `none` 多，说明 Judge 没返回 confidence（旧版本或 prompt 没刷新）。重跑 `/router config` 刷新。
-- **`avg tok/s`** — 最近几轮吞吐。用于发现 Provider 降速。
-- **`upgrade` / `downgrade`** — 档位切换次数。降级太频繁 → 提高 threshold；太少 → 降低。
+- **`Economics`** — 关键行：当前**模式**（`eco` / `default` / `sport` / `custom`）、**R**（返工倍率）、基础 θ `1/R`，以及——Fast 与 Smart 共享 Provider 时——经同家族缓存除数后的**有效 θ**。降级太频繁 → 降低 R（`/router mode eco` 或更大 R）；太少 → 提高 R（`sport`）。仍生效的旧版 `window.threshold`（非默认值）会在此处标记。
+- **`Cache-aware`** — 同家族配置把 θ 除以 `sameFamilyPenalty` 并抑制热缓存降级；跨家族显示 `—`。
+- **`Last audit`** — 最近一次委派轮的验收审计。`(self-executed)` 表示该轮自执行、被豁免。
+- **`Cooldowns`** — 触发 failover 签名后处于指数退避的模型及重试倒计时。

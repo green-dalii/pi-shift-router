@@ -96,6 +96,14 @@ needed — `reworkPenalty` is the whole economics knob. When cache-aware routing
 is active on the same provider family, the effective bar lowers (fewer
 downgrades) to protect the warm prompt cache.
 
+**Gear presets (`/router mode`).** R is the only knob the presets touch:
+`eco` (R=2, θ=0.5 — cheaper: only clearly-needed turns run smart),
+`default` (R=3, θ≈0.33), `sport` (R=5, θ=0.2 — eager: any real chance
+of needing Smart escalates). Recall θ = 1/R: higher R lowers the bar. The command sets
+`economics.mode`, which is authoritative over a manual `reworkPenalty` (legacy
+fallback); a legacy `window.threshold` still overrides both. The preset is
+persisted to the config file, so a mode survives restarts.
+
 ---
 
 ### 2.4 Model Authority (Strict Takeover)
@@ -152,10 +160,14 @@ Window lifecycle:
   - On upgrade, the window is cleared.
 ```
 
-`window.threshold` (legacy) — when explicitly set in user config it acts as a raw
-θ override; prefer `economics.reworkPenalty`. `cacheAware.sameFamilyThreshold`
-(legacy) is superseded by `cacheAware.sameFamilyPenalty` (multiplier on
-reworkPenalty; a legacy threshold present implies the strong default 3.0).
+`window.threshold` (legacy) — **smooth migration:** the old default `0.6` is
+dead (configs carrying it fall back to `θ = 1/reworkPenalty`); only a value
+that differs from `0.6` acts as a raw θ override. Prefer `economics.reworkPenalty`.
+`cacheAware.sameFamilyThreshold` (legacy) is superseded by
+`cacheAware.sameFamilyPenalty` (multiplier on reworkPenalty); the old default
+`0.9` is dead too — only a differing value implies the strong default 3.0.
+Migrated-away legacy knobs are surfaced in `/router status` when a non-default
+value is still active.
 
 ### 3.3 Worked Example
 
@@ -271,7 +283,12 @@ interface ShiftRouterConfig {
   routing: {
     mode: "auto" | "manual" | "off";
     judgeTimeout: number;                                  // ms, default 5000
-    window: { size: number; threshold: number };           // default {5, 0.6}
+    window: { size: number; minConfidence: number; threshold?: number };
+                                                            // size 5, minConfidence 0.5;
+                                                            // threshold LEGACY (0.6 = dead)
+    economics: { reworkPenalty: number; downgradeMemory: number; mode?: "eco" | "default" | "sport" };
+                                                            // R default 3 (θ = 1/R); mode
+                                                            // preset authoritative when set
   };
   ux: {
     quietMode: boolean;
@@ -448,7 +465,7 @@ For advanced users debugging routing decisions:
 | Judge respects user explicit intent | ✅ | v0.5.0 | 4-signal prompt |
 | **Runtime failover (exponential backoff)** | ✅ | v0.6.0 | See §8.5; 4xx/5xx split + 6h cap refined in v0.9.0 |
 | Confidence-weighted sliding window | ✅ | v0.7.0 | `minConfidence` gate, weighted downgrade ratio |
-| Token throughput + `/router stats` + Tuning Guide | ✅ | v0.8.0 | `src/stats.ts`, 5-sample speed window |
+| Token throughput + `/router status` + Tuning Guide | ✅ | v0.8.0 | `src/stats.ts`, 5-sample speed window |
 | Judge cooldown sharing (429 no longer re-hit) | ✅ | v0.8.3 | `classify()` `onFailure` callback → `markModelFailed` |
 | **Cost telemetry — deep view** | ✅ | v0.9.0 | Per-tier spend + savings baseline; SPEC §9.1 |
 | Cooldown backoff rescale (4×, 6h cap, 4xx/5xx split) | ✅ | v0.9.0 | §8.5.2; 4xx starts at 16m, 5xx at 1m |
@@ -547,7 +564,7 @@ On failover, show a toast notification (unless `quietMode`):
 
 ### 9.1 Cost telemetry — deep view (delivered v0.9.0)
 
-`/router stats` exposes per-tier spend (USD + token counts) plus a hypothetical baseline.
+`/router status` exposes per-tier spend (USD + token counts) plus a hypothetical baseline.
 
 **Data source**: pi-agent's `message_end.usage` carries `input`, `output`, `cacheRead`, `cacheWrite`, and `cost.total` (USD) for every assistant message. The router attributes each message to whichever tier was active when it ran (`state.currentTier` at message_start).
 
@@ -555,7 +572,7 @@ On failover, show a toast notification (unless `quietMode`):
 
 **Fallback**: when pricing is missing for every model used (e.g. fully-local session with no `models-store.json` pricing), the baseline shows `unavailable` instead of a misleading savings number.
 
-**Display** (excerpt from `/router stats`):
+**Display** (excerpt from `/router status`):
 
 ```
 Spend: fast $0.045 (12 calls) · smart $0.42 (3 calls) · total $0.465
@@ -841,10 +858,12 @@ user goal** + worker results: **grounding** (acceptance claim backed by
 results), **goal alignment** (delivered work addresses the request), and
 **delivered quality** (no placeholder/empty/aborted results passed off as
 done). **Self-executed orchestration turns (`spawned = 0`, the sanctioned
-"if it's actually simple, just do it yourself" path) run only the
-CTO-summary deterministic check and are marked `self-executed` in
-`/router status` — no LLM audit, no worker-grounding violations** (their
-evidence is the CTO's own tool trail, visible to the user in the transcript).
+"if it's actually simple, just do it yourself" path) are exempt from the
+audit entirely — no violations, no warnings** (their evidence is the CTO's
+own tool trail, visible to the user in the transcript). They are still
+marked `self-executed` in `/router status` for transparency. The
+CTO-summary output contract only engages when workers were actually
+spawned (`spawned ≥ 1`).
 Evidence extraction reads pi's native message schema
 (`role: "toolResult"` + `toolName`), filtering worker results to
 `toolName === "subagent"`. The audit never blocks the finished turn — it
@@ -907,18 +926,21 @@ wiring in `agent_end`; goal snapshot in `OrchestrationState.goal`.
    large (smart, orchestrate).
 3. **Orchestration observability.** Status bar animates during Judge
    (`🧭 judging` + cycling dots — a static badge read as "hung" during the
-   1-2s API call) and during orchestration. Labels (v1.1.0): planning phase
-   keeps the live badge + throughput with a pending marker
-   (`[🧠 deepseek] • 42 tok/s 🪄…`); once workers run, a dedicated label
-   shows completion count plus AVERAGE per-worker throughput across
-   completed workers — `🪄 2/5 workers • ~30 tok/s avg` — stable under
-   concurrency (not latest-single-completion, which jumps). `tool_call`
-   records spawn wall-clock per `toolCallId`; `tool_result` pairs it back,
-   computes tokens/sec from `usage.output`, and pushes into
+   1-2s API call) and during orchestration. Label contract (v1.4.0): the
+   wand 🪄 is reserved for delegation IN FLIGHT — planning shows the plain
+   tier badge with throughput (`[🧠 deepseek] • 42 tok/s`, no wand), and
+   only spawned workers get the dedicated label with completion count plus
+   AVERAGE per-worker throughput across completed workers —
+   `🪄 Done(2)/Total(3) • ~30 tok/s avg` — stable under concurrency (not
+   latest-single-completion, which jumps). `tool_call` records spawn
+   wall-clock per `toolCallId`; `tool_result` pairs it back, computes
+   tokens/sec from `usage.output`, and pushes into
    `orchestration.workerSpeeds` while folding `usage.cost.total` into
    `orchestration.spend`. Router-off turns keep telemetry too:
    `⛔ • 55 tok/s`. `/router status` shows workers `done/spawned` while
-   active.
+   active. A leaked orchestration state (interrupted turn that skipped
+   agent_end) is swept at the start of the next turn, so a stale planning
+   frame can never keep painting over the live badge.
 
 **Open design decisions (to be settled before code):**
 

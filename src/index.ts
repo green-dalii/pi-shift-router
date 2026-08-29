@@ -421,13 +421,6 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         if (ok && !config.ux.quietMode && config.ux.inlineToast) {
           ctx.ui.notify(`${formatTierDisplay(state.currentTier, state.currentModelId)}`, "info");
         }
-      } else if (!state.currentModelId && state.currentTier) {
-        // First turn with no model yet — resolve one for current tier,
-        // skipping models in cooldown.
-        const m = findBestModelForTier(state.currentTier, config, ctx.modelRegistry as any, cooldownPredicate(state.modelCooldowns, Date.now()));
-        if (m) {
-          await applyModelSwitch(m, state, ctx.modelRegistry as any, (model) => pi.setModel(model as any));
-        }
       }
     } catch (err) {
       // Error containment: if anything after the Judge call throws

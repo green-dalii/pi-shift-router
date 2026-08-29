@@ -17,7 +17,7 @@
 
 ## 只能手改 JSON 的项（高级，不在 TUI 里）
 
-- `routing.judgeTimeout`、`routing.window.minConfidence`、`routing.window.threshold`
+- `routing.judgeTimeout`、`routing.window.minConfidence`、`routing.economics.reworkPenalty`
 - `ux.quietMode`、`ux.routerLogVerbose`
 
 手改后重跑一次 `/router config` 重新加载，或重启 pi。
@@ -111,7 +111,7 @@ tiers:
 |---|---|---|
 | 很多例行任务（CRUD、测试、文档）；架构很少 | `threshold: 0.5`, `minConfidence: 0.7` | 激进降级 —— 减少误调 Smart 的次数 |
 | 重架构 / 规划 / 代码审查 | `threshold: 0.8`, `minConfidence: 0.4` | 保守降级 —— 多留在 Smart |
-| 混合 —— 有时连续 20 轮快任务，有时规划 | 默认值（`threshold: 0.6`, `minConfidence: 0.5`） | 平衡 |
+| 混合 —— 有时连续 20 轮快任务，有时规划 | 默认值（`reworkPenalty: 3`, `minConfidence: 0.5`） | 平衡 |
 | Judge 倾向过度自信（多数投票 ≥0.9） | `minConfidence: 0.7` | 剔除过度自信投票 |
 | Judge 倾向不确定（许多投票 0.3–0.6） | `minConfidence: 0.3` | 不丢弃不确定投票 |
 | Primary fast 模型频繁 429 | 在 `tiers.fast.models[1]` 加一个 Provider | 多一个备用，v0.6.0 运行时 failover 自动接管 |
@@ -123,7 +123,7 @@ tiers:
 
 **`routing.window.size`** — 滑动窗口长度。默认 `5`。越大越稳定（反应越慢），越小越敏捷（可能抖动）。
 
-**`routing.window.threshold`** (0–1) — fast 投票加权比阈值，触发降级。默认 `0.6`。
+**`routing.economics.reworkPenalty`** (0–1) — fast 投票加权比阈值，触发降级。默认 `0.6`。
 - `0.5`：fast 略占多数即降级
 - `0.6`：平衡（默认）
 - `0.8`：fast 显著占多数才降级

@@ -69,19 +69,29 @@ export function extractFinalAssistantText(messages: unknown[]): string {
 
 /**
  * Best-effort extraction of subagent worker results from an agent_end
- * transcript. Returns one text block per tool-result message (truncated to
+ * transcript (pi's native `role: "toolResult"` + `toolName` schema, with
+ * OpenAI-style `role: "tool"` fixtures kept for tests/back-compat).
+ * Returns one text block per subagent result (truncated to
  * `maxCharsPerResult`), so the auditor can check acceptance grounding.
+ * Non-subagent tool results (the CTO's own read/bash/grep) are excluded —
+ * they are direct evidence, not delegated worker results.
  */
 export function extractWorkerResults(messages: unknown[], maxCharsPerResult = 2000): string {
   const blocks: string[] = [];
   for (const raw of messages) {
-    const m = raw as { role?: string; toolCallId?: string; content?: unknown } | undefined;
+    const m = raw as { role?: string; toolCallId?: string; toolName?: string; content?: unknown } | undefined;
     if (!m || typeof m !== "object") continue;
-    const looksLikeToolResult =
-      m.role === "tool" ||
-      (m.role === "user" && typeof m.toolCallId === "string") ||
-      (m.role === "assistant" && m.toolCallId !== undefined && Array.isArray(m.content));
-    if (!looksLikeToolResult) continue;
+    let isWorker = false;
+    if (m.role === "toolResult") {
+      // pi-native: only subagent results count as worker evidence.
+      isWorker = m.toolName === "subagent";
+    } else if (m.role === "tool") {
+      // OpenAI-style synthetic fixtures (no toolName available).
+      isWorker = true;
+    } else if (m.role === "user" && typeof m.toolCallId === "string") {
+      isWorker = true;
+    }
+    if (!isWorker) continue;
     let text = "";
     if (Array.isArray(m.content)) {
       text = m.content
@@ -301,6 +311,15 @@ export async function auditOrchestration(input: {
     ...base,
     violations: [...base.violations],
   };
+  // Self-executed orchestration turns (spawned = 0) are OUTSIDE the audit's
+  // domain: the delegation-closure invariants never engaged, and the grounding
+  // evidence would be the CTO's own tool trail (visible in the transcript), not
+  // worker results. They get the deterministic CTO-summary check only — no LLM
+  // pass, no worker-grounding violations (SPEC §9.3).
+  if (input.spawned === 0) {
+    audit.selfExecuted = true;
+    return audit;
+  }
   const llmEnabled = input.enabled && !!input.llmCall && input.endpoints && input.endpoints.length > 0;
   if (!llmEnabled) return audit;
 

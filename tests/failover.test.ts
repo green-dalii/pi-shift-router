@@ -439,11 +439,13 @@ describe("processRoute respects model cooldowns", () => {
   it("upgrade picks fallback when primary is cooled", () => {
     const state = createRouterState();
     state.currentTier = "fast";
+    state.currentProvider = "minimax";
+    state.currentModelId = "M3";
     markModelFailed(state.modelCooldowns, "smart-p", "smart-m", NOW);
     const config = makeConfig();
 
     const d = processRoute({ tier: "smart", source: "llm" }, state, config, registry, NOW);
-    // All smart models are cooled → no switch available → stay (keep current)
+    // All smart models are cooled → no switch available → stay (keep current fast)
     expect(d.action).toBe("stay");
     expect(d.switchTo).toBeNull();
   });

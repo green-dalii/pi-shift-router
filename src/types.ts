@@ -70,27 +70,36 @@ export interface RoutingConfig {
   /** LLM Judge timeout in ms */
   judgeTimeout: number;
   /**
-   * Sliding window for downgrade gating. Entries whose confidence is
-   * below `minConfidence` are ignored. Downgrade fires when
-   * `Σ confidence_for_fast / window_size` ≥ `threshold`.
+   * Decision memory. Entries whose confidence is below `minConfidence` are
+   * treated as no-signal holds (never switch, break a fast streak).
+   * `threshold` is the LEGACY explicit θ override (raw pSmart bar) — prefer
+   * `economics.reworkPenalty`. When absent, θ = 1/reworkPenalty (SPEC §2.3).
    */
-  window: { size: number; threshold: number; minConfidence?: number };
+  window: { size: number; threshold?: number; minConfidence?: number };
+  /**
+   * Expected-cost economics (SPEC §2.3). `reworkPenalty` encodes how many
+   * price-deltas a wrong downgrade costs (rework multiplier); θ = 1/R.
+   * `downgradeMemory` = consecutive decisive fast decisions required to
+   * downgrade from smart to fast.
+   */
+  economics: { reworkPenalty: number; downgradeMemory: number };
   /**
    * Cache-aware routing (SPEC §9.2). When fast and smart resolve to the
    * same provider family, a mid-session model switch forfeits the prompt
-   * cache (cache reads bill at 0.1x–0.5x base input) — downgrading to a
-   * cheaper model can cost 3.5x more, not less. When enabled:
-   *   - the downgrade threshold is raised to `sameFamilyThreshold` so
-   *     fewer mid-session downgrades fire, and
+   * cache (cache reads bill at 0.1x–0.5x base input). When enabled:
+   *   - effective θ is divided by `sameFamilyPenalty` (fewer downgrades),
    *   - downgrades are suppressed within `idleBoundaryMs` of the last
    *     message (the cache is warm); they only fire after an idle gap
    *     long enough that the cache has already expired.
+   * `sameFamilyThreshold` is the LEGACY knob — when present it implies the
+   * strong default penalty 3.0.
    * Default disabled; `shareProviderFamily()` auto-detection turns it on
    * when both tiers use the same provider.
    */
   cacheAware?: {
     enabled: boolean;
-    sameFamilyThreshold: number;
+    sameFamilyThreshold?: number;
+    sameFamilyPenalty?: number;
     idleBoundaryMs: number;
   };
 }
@@ -167,6 +176,8 @@ export interface OrchestrationAudit {
   hasCtoSummary: boolean;
   /** The task ended at a hard cap (maxRounds / escalationThreshold reached). */
   capHit: boolean;
+  /** True when the orchestrated turn self-executed (spawned = 0, no LLM audit). */
+  selfExecuted?: boolean;
   /** Deterministic violation strings (empty when the turn was clean). */
   violations: string[];
   /** LLM audit verdict (optional — only when the audit LLM call succeeded). */
@@ -237,10 +248,11 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
   routing: {
     mode: "auto",
     judgeTimeout: 5000,
-    window: { size: 5, threshold: 0.6, minConfidence: 0.5 },
+    window: { size: 5, minConfidence: 0.5 },
+    economics: { reworkPenalty: 3, downgradeMemory: 2 },
     cacheAware: {
       enabled: true,
-      sameFamilyThreshold: 0.9,
+      sameFamilyPenalty: 1.5,
       idleBoundaryMs: 5 * 60_000,
     },
   },
@@ -292,15 +304,17 @@ export interface ModelsStore {
   [provider: string]: ProviderEntry;
 }
 
-/** Window entry — one Judge result */
+/** Window entry — one Judge result / routing decision */
 export interface WindowEntry {
   tier: Tier;
   timestamp: number;
   /**
    * Confidence of this classification (defaults to 1.0 when missing).
-   * Used by the confidence-weighted sliding window.
+   * Display/debug only — decisions are EV-driven (SPEC §2.3).
    */
   confidence?: number;
+  /** True = judge confidence below minConfidence (no signal, breaks streaks). */
+  hold?: boolean;
 }
 
 /** Auth store shape — maps provider name to API key */

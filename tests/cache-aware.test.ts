@@ -1,15 +1,17 @@
 /**
- * pi-shift-router — Cache-aware routing tests (SPEC §9.2)
+ * pi-shift-router — Cache-aware routing tests (SPEC §9.2 + §2.3)
  *
  * When fast and smart resolve to the same provider family, a mid-session
  * downgrade forfeits the warm prompt cache (reads bill 0.1x–0.5x of base
- * input). Cache-aware routing raises the downgrade threshold and suppresses
- * downgrades while the cache is warm, only allowing them after an idle
- * boundary long enough that the cache has already expired.
+ * input). Cache-aware routing LOWERS the effective θ (fewer fast decisions →
+ * fewer downgrades) and suppresses downgrades while the cache is warm,
+ * only allowing them after an idle boundary long enough that the cache has
+ * already expired.
  *
  * Covered here:
  *   - shareProviderFamily: same-provider detection
- *   - effectiveThreshold: raised threshold when cache-aware is on
+ *   - effectiveTheta: θ = 1/reworkPenalty; ÷ sameFamilyPenalty when on;
+ *     legacy sameFamilyThreshold implies the strong factor 3.0
  *   - downgradeAllowedAt: session-boundary gate
  *   - processRoute end-to-end: downgrade suppressed on warm cache,
  *     allowed after idle boundary, unchanged when disabled
@@ -21,7 +23,7 @@ import {
   processRoute,
   analyzeDowngrade,
   shareProviderFamily,
-  effectiveThreshold,
+  effectiveTheta,
   downgradeAllowedAt,
   type RouteDecision,
 } from "../src/router.js";
@@ -45,11 +47,11 @@ function makeRegistry() {
   return { find: (provider: string, modelId: string) => ({ provider, modelId }) };
 }
 
-function judge(tier: Tier): JudgeResult {
-  return { tier, source: "llm" };
+function judge(tier: Tier, confidence = 1.0): JudgeResult {
+  return { tier, confidence, source: "llm" };
 }
 
-/** Fill the window with N fast judgments (confidence 1.0) so the downgrade ratio = 1.0. */
+/** Fill the window with N fast decisions (confidence 1.0). */
 function fillFastWindow(state: ReturnType<typeof createRouterState>, n: number, now: number): void {
   for (let i = 0; i < n; i++) {
     state.window.push({ tier: "fast", timestamp: now - 1000, confidence: 1.0 });
@@ -114,35 +116,35 @@ describe("shareProviderFamily", () => {
   });
 });
 
-// ─── effectiveThreshold ───────────────────────────────────────────
-describe("effectiveThreshold", () => {
-  it("returns the configured window threshold when cache-aware is off", () => {
+// ─── effectiveTheta ───────────────────────────────────────────────
+describe("effectiveTheta", () => {
+  it("θ = 1/reworkPenalty when cache-aware is off", () => {
     const config = makeConfig({
       routing: {
         ...DEFAULT_CONFIG.routing,
         cacheAware: { ...DEFAULT_CONFIG.routing.cacheAware!, enabled: false },
       },
     });
-    expect(effectiveThreshold(config, true)).toBe(0.6); // shareProviderFamily true but enabled=false
+    expect(effectiveTheta(config, true)).toBeCloseTo(1 / 3, 5); // shareProviderFamily true but enabled=false
   });
 
-  it("returns the raised same-family threshold when cache-aware is on", () => {
+  it("divides θ by sameFamilyPenalty when cache-aware is on (same family)", () => {
     const config = makeConfig({
       routing: {
         ...DEFAULT_CONFIG.routing,
-        cacheAware: { enabled: true, sameFamilyThreshold: 0.9, idleBoundaryMs: IDLE_BOUNDARY },
+        cacheAware: { enabled: true, sameFamilyPenalty: 2, idleBoundaryMs: IDLE_BOUNDARY },
       },
     });
-    expect(effectiveThreshold(config, true)).toBe(0.9);
+    expect(effectiveTheta(config, true)).toBeCloseTo(1 / 6, 5);
   });
 
-  it("is enabled by default on same-family configs (SPEC §9.2)", () => {
-    const config = makeConfig(); // DEFAULT_CONFIG: cacheAware.enabled = true
+  it("is on by default for same-family configs (SPEC §9.2): θ = 1/3 ÷ 1.5", () => {
+    const config = makeConfig(); // DEFAULT_CONFIG: cacheAware.enabled = true, sameFamilyPenalty 1.5
     expect(shareProviderFamily(config)).toBe(true);
-    expect(effectiveThreshold(config)).toBe(0.9);
+    expect(effectiveTheta(config)).toBeCloseTo((1 / 3) / 1.5, 5);
   });
 
-  it("returns the configured threshold when providers differ even if enabled", () => {
+  it("keeps the base θ when providers differ even if cache-aware is enabled", () => {
     const config = makeConfig({
       tiers: {
         fast: { label: "Fast", models: [{ provider: "openai", model: "gpt-5.6-luna", priority: 1 }], description: "" },
@@ -150,16 +152,36 @@ describe("effectiveThreshold", () => {
       },
       routing: {
         ...DEFAULT_CONFIG.routing,
+        cacheAware: { enabled: true, sameFamilyPenalty: 2, idleBoundaryMs: IDLE_BOUNDARY },
+      },
+    });
+    expect(effectiveTheta(config, false)).toBeCloseTo(1 / 3, 5);
+  });
+
+  it("legacy explicit window.threshold overrides as a raw θ", () => {
+    const config = makeConfig({
+      routing: {
+        ...DEFAULT_CONFIG.routing,
+        window: { size: 5, threshold: 0.6, minConfidence: 0.5 },
+      },
+    });
+    expect(effectiveTheta(config)).toBe(0.6);
+  });
+
+  it("legacy sameFamilyThreshold implies the strong factor 3.0", () => {
+    const config = makeConfig({
+      routing: {
+        ...DEFAULT_CONFIG.routing,
         cacheAware: { enabled: true, sameFamilyThreshold: 0.9, idleBoundaryMs: IDLE_BOUNDARY },
       },
     });
-    expect(effectiveThreshold(config, false)).toBe(0.6);
+    expect(effectiveTheta(config, true)).toBeCloseTo((1 / 3) / 3, 5);
   });
 });
 
 // ─── downgradeAllowedAt ───────────────────────────────────────────
 describe("downgradeAllowedAt", () => {
-  const cacheAware = { enabled: true, sameFamilyThreshold: 0.9, idleBoundaryMs: IDLE_BOUNDARY };
+  const cacheAware = { enabled: true, sameFamilyPenalty: 1.5, idleBoundaryMs: IDLE_BOUNDARY };
   const now = 1_000_000_000_000;
 
   it("always allows when cache-aware is disabled", () => {
@@ -204,53 +226,49 @@ describe("downgradeAllowedAt", () => {
   });
 });
 
-// ─── analyzeDowngrade with threshold override ─────────────────────
-describe("analyzeDowngrade threshold override", () => {
-  it("respects the override threshold", () => {
+// ─── analyzeDowngrade streak semantics ────────────────────────────
+describe("analyzeDowngrade (trailing decisive fast streak)", () => {
+  it("requires downgradeMemory consecutive trailing fast entries", () => {
     const config = makeConfig();
-    const window = [
-      { tier: "fast" as Tier, timestamp: 1, confidence: 1.0 },
-      { tier: "fast" as Tier, timestamp: 1, confidence: 1.0 },
+    const win = [
+      { tier: "smart" as Tier, timestamp: 1 },
+      { tier: "fast" as Tier, timestamp: 1 },
+      { tier: "fast" as Tier, timestamp: 1 },
     ];
-    // ratio = 1.0; base threshold 0.6 would downgrade, override 0.9 does too (1.0 ≥ 0.9)
-    expect(analyzeDowngrade(window, "smart", config, 0.9).shouldDowngrade).toBe(true);
-    // override 1.1 → no downgrade
-    expect(analyzeDowngrade(window, "smart", config, 1.1).shouldDowngrade).toBe(false);
+    expect(analyzeDowngrade(win, "smart", config).shouldDowngrade).toBe(true); // streak 2
+    expect(analyzeDowngrade([{ tier: "fast" as Tier, timestamp: 1 }], "smart", config).shouldDowngrade).toBe(false); // streak 1
   });
 
-  it("defaults to the configured threshold when override is undefined", () => {
-    const config = makeConfig({
-      routing: { ...DEFAULT_CONFIG.routing, window: { size: 5, threshold: 0.95 } },
-    });
-    const window = [
-      { tier: "fast" as Tier, timestamp: 1, confidence: 1.0 },
-      { tier: "fast" as Tier, timestamp: 1, confidence: 0.5 }, // == minConfidence → still considered
+  it("a hold entry breaks the streak", () => {
+    const config = makeConfig();
+    const win = [
+      { tier: "fast" as Tier, timestamp: 1 },
+      { tier: "fast" as Tier, timestamp: 1, hold: true },
     ];
-    // ratio = (1.0 + 0.5) / 2 = 0.75 < 0.95 → no downgrade
-    expect(analyzeDowngrade(window, "smart", config).shouldDowngrade).toBe(false);
-    // A 2×1.0 window → ratio 1.0 ≥ 0.95 → downgrade
-    expect(
-      analyzeDowngrade(
-        [
-          { tier: "fast" as Tier, timestamp: 1, confidence: 1.0 },
-          { tier: "fast" as Tier, timestamp: 1, confidence: 1.0 },
-        ],
-        "smart",
-        config,
-      ).shouldDowngrade,
-    ).toBe(true);
+    expect(analyzeDowngrade(win, "smart", config).shouldDowngrade).toBe(false);
+  });
+
+  it("never downgrades from fast", () => {
+    expect(analyzeDowngrade([{ tier: "fast" as Tier, timestamp: 1 }], "fast", makeConfig()).shouldDowngrade).toBe(false);
   });
 });
 
 // ─── processRoute end-to-end ──────────────────────────────────────
 describe("processRoute with cache-aware routing", () => {
   const now = 1_000_000_000_000;
-  const cacheAware = { enabled: true, sameFamilyThreshold: 0.9, idleBoundaryMs: IDLE_BOUNDARY };
+  const cacheAware = { enabled: true, sameFamilyPenalty: 1.5, idleBoundaryMs: IDLE_BOUNDARY };
+
+  function smartState() {
+    const state = createRouterState();
+    state.currentTier = "smart";
+    state.currentProvider = "anthropic";
+    state.currentModelId = "claude-opus-5";
+    return state;
+  }
 
   it("suppresses a mid-session downgrade while the cache is warm", () => {
     const config = makeConfig({ routing: { ...DEFAULT_CONFIG.routing, cacheAware } });
-    const state = createRouterState();
-    state.currentTier = "smart";
+    const state = smartState();
     state.lastActivityAt = now - 10_000; // warm cache
     fillFastWindow(state, 5, now);
 
@@ -261,8 +279,7 @@ describe("processRoute with cache-aware routing", () => {
 
   it("allows the downgrade after the idle boundary", () => {
     const config = makeConfig({ routing: { ...DEFAULT_CONFIG.routing, cacheAware } });
-    const state = createRouterState();
-    state.currentTier = "smart";
+    const state = smartState();
     state.lastActivityAt = now - (IDLE_BOUNDARY + 1000); // cache expired
     fillFastWindow(state, 5, now);
 
@@ -271,15 +288,14 @@ describe("processRoute with cache-aware routing", () => {
     expect(d.switchTo?.tier).toBe("fast");
   });
 
-  it("downgrades normally (base threshold) when cache-aware is disabled", () => {
+  it("downgrades normally when cache-aware is disabled", () => {
     const config = makeConfig({
       routing: {
         ...DEFAULT_CONFIG.routing,
         cacheAware: { ...DEFAULT_CONFIG.routing.cacheAware!, enabled: false },
       },
     });
-    const state = createRouterState();
-    state.currentTier = "smart";
+    const state = smartState();
     state.lastActivityAt = now - 10_000; // warm, but disabled → no gate
     fillFastWindow(state, 5, now);
 
@@ -287,17 +303,16 @@ describe("processRoute with cache-aware routing", () => {
     expect(d.action).toBe("downgrade");
   });
 
-  it("downgrades normally with cache-aware on but a weak fast majority", () => {
-    // 3/5 fast → ratio 0.6, below the raised 0.9 threshold → stay
+  it("stays when the fast streak is interrupted by smart decisions", () => {
     const config = makeConfig({ routing: { ...DEFAULT_CONFIG.routing, cacheAware } });
-    const state = createRouterState();
-    state.currentTier = "smart";
+    const state = smartState();
     state.lastActivityAt = now - (IDLE_BOUNDARY + 1000); // cache cold, gate passes
     for (let i = 0; i < 3; i++) state.window.push({ tier: "fast", timestamp: now - 1000, confidence: 1.0 });
     for (let i = 0; i < 2; i++) state.window.push({ tier: "smart", timestamp: now - 1000, confidence: 1.0 });
 
     const d = step(state, config, judge("fast"), now);
-    expect(d.action).toBe("stay"); // raised threshold requires 90% fast
+    // window = [f,f,f,s,s] + current fast → trailing fast streak = 1 < 2 → stay
+    expect(d.action).toBe("stay");
   });
 
   it("does not block upgrades even when cache-aware is on", () => {
@@ -306,16 +321,14 @@ describe("processRoute with cache-aware routing", () => {
     state.currentTier = "fast";
     state.lastActivityAt = now - 10_000; // warm cache
 
-    const d = step(state, config, judge("smart"), now);
+    const d = step(state, config, judge("smart", 0.95), now);
     expect(d.action).toBe("upgrade");
     expect(d.switchTo?.tier).toBe("smart");
   });
 
-  it("still downgrades at the raised threshold when the cache is cold", () => {
-    // 5/5 fast → ratio 1.0 ≥ 0.9 → downgrade after boundary
+  it("still downgrades at a sustained fast streak when the cache is cold", () => {
     const config = makeConfig({ routing: { ...DEFAULT_CONFIG.routing, cacheAware } });
-    const state = createRouterState();
-    state.currentTier = "smart";
+    const state = smartState();
     state.lastActivityAt = now - (IDLE_BOUNDARY + 1000);
     fillFastWindow(state, 5, now);
 

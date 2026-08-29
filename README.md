@@ -70,11 +70,12 @@ pi install npm:pi-shift-router   # then: /router config → /router status
 
 One cheap call per turn: the fast-tier model (usually your cheapest) reads your message and marks it `fast` (routine) or `smart` (consequential). That's the router's only classification — after it, the chosen tier does the work.
 
-Two rules govern every switch:
+One economics rule governs every switch (SPEC §2.3):
 
-- **Upgrade is instant.** One `smart` vote and the strong tier takes over on the next turn. When the work matters, you're there now.
-- **Downgrade needs a trend.** You come back down only once the last five turns weigh heavily toward `fast` (default ≥60%, low-confidence votes ignored). Dropping early throws away the strong tier's context cache for nothing.
-- **Cache-aware routing protects your warm prompt cache.** Prompt caches belong to a model: switch tiers mid-session and the next model re-reads the whole conversation at full input price. When your Fast and Smart tiers share a provider (both Anthropic, both OpenAI…), the router raises the downgrade threshold to 0.9 (from 0.6) and holds off downgrading while the cache is warm — so routing to a cheaper model never costs more than staying put. It only downgrades once an idle gap (default 5 min) has let the cache expire, or when the fast trend is overwhelming. Upgrades are never affected; cross-provider setups don't share a cache, so nothing changes there.
+- **Judge confidence becomes probability.** The judge returns `{tier, confidence}`; the router reads it as `pSmart = confidence` (smart verdict) or `1 − confidence` (fast verdict) — the probability the turn needs the strong tier.
+- **Expected-cost bar θ = 1 / reworkPenalty.** A wrong downgrade (fast fumbles a complex task → rework) costs more than the price delta, so borderline verdicts lean smart. Default `reworkPenalty: 3` → θ ≈ 0.33: a `fast` verdict with confidence below ~0.67 upgrades; a `smart` verdict with confidence below ~0.33 is overridden to fast. Confidence below `minConfidence` (0.5) is no signal — the router holds its current tier.
+- **Upgrade is immediate** on any decisive smart decision; **downgrade needs 2 consecutive decisive fast decisions** (plus the cache gate) so a single "thanks" never drops you.
+- **Cache-aware routing protects your warm prompt cache.** Prompt caches belong to a model: switch tiers mid-session and the next model re-reads the whole conversation at full input price. When your Fast and Smart tiers share a provider (both Anthropic, both OpenAI…), the router divides θ by `sameFamilyPenalty` (fewer downgrades) and holds off downgrading while the cache is warm — so routing to a cheaper model never costs more than staying put. Upgrades are never affected; cross-provider setups don't share a cache, so nothing changes there.
 
 The judge output format is strict so small models parse it reliably: OpenAI-compatible endpoints get `response_format: json_object` (non-JSON is rejected at the API), Anthropic gets a `{` prefill to force JSON output. The status bar shows `🧭 judging…` while it runs. If the judge fails, the router holds its current tier — it never guesses.
 
@@ -191,7 +192,7 @@ Orchestration is **on by default** (`auto` mode); this installs the subagent mac
 
 Pick a model for the Fast tier and one for the Smart tier — several per tier also works and forms a fallback chain. Save to user or project scope; when both exist, project wins.
 
-The wizard also exposes **🛡️ Cache-aware routing** — on by default when your Fast and Smart tiers share a provider (e.g. both Anthropic). It protects your prompt cache: the downgrade threshold rises to 0.9 (from 0.6) and mid-session downgrades are suppressed while the cache is warm, so routing to a cheaper model never costs more than staying put. Toggle it there, or via the config file (`routing.cacheAware.enabled`).
+The wizard also exposes **🛡️ Cache-aware routing** — on by default when your Fast and Smart tiers share a provider (e.g. both Anthropic). It protects your prompt cache: the effective smart bar θ is divided by `sameFamilyPenalty` (fewer downgrades) and mid-session downgrades are suppressed while the cache is warm, so routing to a cheaper model never costs more than staying put. Toggle it there, or via the config file (`routing.cacheAware.enabled`).
 
 **3. Verify**
 
@@ -199,7 +200,7 @@ The wizard also exposes **🛡️ Cache-aware routing** — on by default when y
 /router status
 ```
 
-You should see your current tier, scope, judge threshold, and throughput. Your next message triggers the first classification.
+You should see your current tier, scope, economics (R / θ), downgrade-streak requirement, and throughput. Your next message triggers the first classification.
 
 ---
 
@@ -218,13 +219,13 @@ You should see your current tier, scope, judge threshold, and throughput. Your n
 | `/route-force <provider>/<model>` | Pin a specific model for the next turn |
 | `/route-force auto` | Clear manual override |
 
-> **Native model picks vs router authority.** Using pi's own model switcher
-> (`/model`, `Ctrl+P` cycling) only **syncs the status-bar display** — the
-> router keeps per-turn model authority. On the next turn `before_agent_start`
-> re-routes via the Judge (upgrade / downgrade / first-turn / failover paths),
-> so a native pick can be overridden within one turn. To pin a model for
-> exactly one turn use `/route-force`; to take full manual control run
-> `/router off` (status bar shows `⛔`).
+> **Native model picks vs router authority (strict takeover).** The router owns
+> model selection while enabled (SPEC §2.4): on every turn `before_agent_start`
+> guarantees the active model is the routed tier's best available model. Using
+> pi's own switcher (`/model`, `Ctrl+P`) runs for the current turn, then the
+> next routing point re-asserts the tier chain. To take full manual control run
+> `/router off` (status bar shows `⛔`); `/route-force` pins a tier/model for
+> the session.
 
 `/router status` also reports **cost telemetry** — per-tier spend and how much routing saves you:
 
@@ -265,7 +266,7 @@ Yes. Each tier is an ordered list of `{provider, model, priority}` — combine f
 
 ### Will it downgrade Smart too early?
 
-Only when the last five turns weigh ≥ `threshold` (default 0.6) toward `fast`; votes below `minConfidence` (default 0.5) are ignored. Raise `threshold` to 0.8 to stay on Smart longer. Upgrades are always instant.
+Downgrades need **two consecutive decisive fast decisions** (`economics.downgradeMemory`, default 2) plus the cache-aware idle gate — a single routine turn never drops you, and a hold (confidence < `minConfidence`) or any smart decision resets the streak. Tune `economics.reworkPenalty` (default 3, θ ≈ 0.33): raise it to 5 for cheaper routing, lower it to 2 to stay on Smart longer. Upgrades are always immediate on a decisive smart decision.
 
 ### Can I disable it without uninstalling?
 

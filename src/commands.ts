@@ -40,8 +40,8 @@ import {
 
 function formatWindow(window: RouterState["window"]): string {
   if (window.length === 0) return "(empty)";
-  const badge: Record<string, string> = { fast: "f", smart: "s" };
-  return "[" + window.map((e) => badge[e.tier] ?? "?").join(", ") + "]";
+  const badge: Record<string, string> = { fast: "f", smart: "s", hold: "·" };
+  return "[" + window.map((e) => (e.hold ? badge.hold : badge[e.tier] ?? "?")).join(", ") + "]";
 }
 
 function tierEntries(config: ShiftRouterConfig): TierEntry[] {
@@ -65,6 +65,22 @@ function formatTierList(config: ShiftRouterConfig): string {
 // ─── `/route-config` wizard ──────────────────────────────────────
 
 type MenuChoice = "fast" | "smart" | "ux" | "cache" | "done" | "cancel";
+
+/** Same-family θ divisor for status display (mirrors router.sameFamilyThetaFactor). */
+function sameFamilyFactorDisplay(config: ShiftRouterConfig): string {
+  const ca = config.routing.cacheAware;
+  if (typeof ca?.sameFamilyPenalty === "number" && ca.sameFamilyPenalty > 1) return String(ca.sameFamilyPenalty);
+  if (typeof ca?.sameFamilyThreshold === "number") return "3";
+  return "1.5";
+}
+
+/** Effective θ for status display (explicit threshold overrides economics). */
+function effectiveThetaDisplay(config: ShiftRouterConfig): string {
+  const legacy = config.routing.window.threshold;
+  if (typeof legacy === "number" && legacy > 0 && legacy < 1) return String(legacy);
+  const R = config.routing.economics?.reworkPenalty ?? 3;
+  return (1 / Math.max(R, 1)).toFixed(2);
+}
 
 /**
  * Map a wizard option label to its menu action.
@@ -312,7 +328,7 @@ async function routeConfigWizard(
   async function editCacheAware(): Promise<void> {
     const cache = config.routing.cacheAware ?? {
       enabled: true,
-      sameFamilyThreshold: 0.9,
+      sameFamilyPenalty: 1.5,
       idleBoundaryMs: 5 * 60_000,
     };
     const lines = [
@@ -475,7 +491,8 @@ export function registerCommands(
         const sAudit = state.lastAudit
           ? (state.lastAudit.violations.length > 0
               ? ` ⛔ ${state.lastAudit.violations.length} issue(s)${state.lastAudit.llm ? ` (LLM: ${state.lastAudit.llm.verdict})` : ""}`
-              : ` ✓ clean${state.lastAudit.llm ? ` (LLM: ${state.lastAudit.llm.verdict})` : ""}`)
+              : ` ✓ clean${state.lastAudit.llm ? ` (LLM: ${state.lastAudit.llm.verdict})` : ""}`) +
+            (state.lastAudit.selfExecuted ? " (self-executed)" : "")
           : " —";
         const totalTurns = state.window.length + state.upgradeCount + state.downgradeCount;
 
@@ -494,7 +511,8 @@ export function registerCommands(
             `  Manual override:${sManual}`,
             `  Orchestration:${sOrch}`,
             `  Last audit:${sAudit}`,
-            `  Cache-aware: ${shareProviderFamily(config) ? "🎯 same-family (threshold " + (config.routing.cacheAware?.enabled ? config.routing.cacheAware.sameFamilyThreshold : config.routing.window.threshold) + ", " + (config.routing.cacheAware?.enabled ? "warm-cache guarded" : "inactive — enable in /router config") + ")" : "— (cross-family)"}`,
+            `  Cache-aware: ${shareProviderFamily(config) ? "🎯 same-family (θ ÷ " + (config.routing.cacheAware?.enabled ? sameFamilyFactorDisplay(config) : "1 — disabled") + ", " + (config.routing.cacheAware?.enabled ? "warm-cache guarded" : "inactive — enable in /router config") + ")" : "— (cross-family)"}`,
+            `  Economics: R=${config.routing.economics?.reworkPenalty ?? 3} (θ=${effectiveThetaDisplay(config)})  downgrade streak ≥ ${config.routing.economics?.downgradeMemory ?? 2} fast`,
             ...(cooldownLines.length > 0
               ? [`  Cooldowns (${cooldownLines.length}):`, ...cooldownLines]
               : [`  Cooldowns: none`]),

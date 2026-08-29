@@ -70,11 +70,12 @@ pi install npm:pi-shift-router   # 然后：/router config → /router status
 
 每轮开始前只做一次便宜的调用：Fast 档模型（通常是你最便宜的那个）把你的消息判为 `fast`（例行）或 `smart`（重要）。这是路由器唯一的分类——判定之后，选中的档位整轮干活。
 
-两条规则管住所有切换：
+一条经济学规则管住所有切换（SPEC §2.3）：
 
-- **升级立即**。一次 `smart` 判定，下一轮就上强档。重要的事，马上交给最强的模型。
-- **降级要趋势**。最近 5 轮 fast 加权占比达到阈值（默认 ≥60%，低置信投票忽略）才降回来。过早降级会白白丢掉强档的上下文缓存。
-- **Cache-aware 路由保护你的热 prompt 缓存**。Prompt 缓存属于单个模型：中途换档，新模型要以全价重读整个对话。当 Fast 与 Smart 同属一个 Provider（都是 Anthropic、都是 OpenAI……）时，路由器把降级阈值从 0.6 提到 0.9，并在缓存还热时按住不降——让“路由到更便宜的模型”永远不会比不路由更贵。只有空闲超过默认 5 分钟、缓存已过期后，或 fast 趋势压倒性明显时才降级。升级永不受影响；跨 Provider 配置不共享缓存，行为不变。
+- **置信度即概率**。Judge 返回 `{tier, confidence}`；路由器把它读成 `pSmart = confidence`（smart 判定）或 `1 − confidence`（fast 判定）——本轮需要强档的概率。
+- **期望成本闸 θ = 1 / reworkPenalty**。错误降档（fast 搞砸复杂任务 → 返工）比差价更贵，所以边界模糊时一律倾向 smart。默认 `reworkPenalty: 3` → θ≈0.33：`fast` 判定置信度低于约 0.67 会升级；`smart` 判定置信度低于约 0.33 会被驳回为 fast。置信度低于 `minConfidence`（0.5）视为无信号——路由器停在当前档位。
+- **升级立即**：任何决定性 smart 判定立刻升级；**降级需要连续 2 轮决定性 fast 判定**（外加缓存门），一句“谢谢”永远降不下来。
+- **Cache-aware 路由保护你的热 prompt 缓存**。Prompt 缓存属于单个模型：中途换档，新模型要以全价重读整个对话。当 Fast 与 Smart 同属一个 Provider（都是 Anthropic、都是 OpenAI……）时，路由器把 θ 除以 `sameFamilyPenalty`（更少降级），并在缓存还热时按住不降——让“路由到更便宜的模型”永远不会比不路由更贵。升级永不受影响；跨 Provider 配置不共享缓存，行为不变。
 
 判定调用对输出格式很严格，小模型也能稳定解析：OpenAI 兼容端点用 `response_format: json_object`（非 JSON 直接被打回），Anthropic 用 `{` 前缀预填强制 JSON 开头。判定期间状态栏显示 `🧭 judging…`。判定失败时停在当前档位，不猜。
 
@@ -179,7 +180,7 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 
 给 Fast 档、Smart 档各选一个模型；每档多个也行，按优先级组成 fallback 链。保存到用户级或项目级作用域——两边都设时项目级优先。
 
-向导里还有 **🛡️ Cache-aware routing**——当 Fast 与 Smart 同属一个 Provider（如都是 Anthropic）时默认开启。它保护 prompt 缓存：降级阈值从 0.6 提到 0.9，且缓存还热时抑制中途降级，让“路由到更便宜的模型”永远不会比不路由更贵。可在向导里开关，或改配置文件 `routing.cacheAware.enabled`。
+向导里还有 **🛡️ Cache-aware routing**——当 Fast 与 Smart 同属一个 Provider（如都是 Anthropic）时默认开启。它保护 prompt 缓存：有效 smart 闸 θ 除以 `sameFamilyPenalty`（更少降级），且缓存还热时抑制中途降级，让“路由到更便宜的模型”永远不会比不路由更贵。可在向导里开关，或改配置文件 `routing.cacheAware.enabled`。
 
 **3. 验证**
 
@@ -187,7 +188,7 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 /router status
 ```
 
-能看到当前档位、作用域、Judge 阈值和吞吐数据就对了。下一轮发消息触发首次判定。
+能看到当前档位、作用域、经济参数（R / θ）、降级连击要求和吞吐数据就对了。下一轮发消息触发首次判定。
 
 ---
 
@@ -253,7 +254,7 @@ Spend: fast $0.045 (9 calls) · smart $0.42 (3 calls) · total $0.465
 
 ### 会不会过早从 Smart 降级？
 
-只有最近 5 轮 fast 加权占比 ≥ `threshold`（默认 0.6）才降级，低于 `minConfidence`（默认 0.5）的投票直接忽略；想更粘就把 `threshold` 调到 0.8。升级永远立即。
+降级需要**连续 2 轮决定性 fast 判定**（`economics.downgradeMemory`，默认 2）+ cache-aware 空闲门——一轮例行任务降不下来；无信号 hold（置信度 < `minConfidence`）或任何 smart 判定都会重置连击。想更粘/更省调 `economics.reworkPenalty`（默认 3，θ≈0.33）：调高到 5 更省，调低到 2 更粘。升级在决定性 smart 判定时永远立即。
 
 ### 能临时停用而不卸载吗？
 

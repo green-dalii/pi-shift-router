@@ -5,13 +5,13 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 - license: MIT
 - language: TypeScript
 - runtime: Node.js >= 24
-- dependencies: 零运行时依赖
+- dependencies: 零第三方运行时依赖（宿主导入 @earendil-works/pi-tui，声明为依赖以便隔离子树安装）
 - npm: https://www.npmjs.com/package/pi-shift-router
 - repo: https://github.com/green-dalii/pi-shift-router
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.zh-CN.md
 - docs: README.md / README.zh-CN.md / docs/CONFIG.zh-CN.md / docs/MODELS.zh-CN.md / docs/TROUBLESHOOTING.zh-CN.md
 - first-published: v0.4.0
-- latest: v1.3.0
+- latest: v1.3.1
 - last-updated: 2026-08
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
 - search-intents: "自动路由 pi agent 每轮", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排"
@@ -31,7 +31,7 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Pi Agent](https://img.shields.io/badge/pi--agent-extension-purple)](https://pi.dev/packages/pi-shift-router)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-green)](https://nodejs.org)
-[![deps](https://img.shields.io/badge/dependencies-zero-brightgreen)](package.json)
+[![deps](https://img.shields.io/badge/deps-host--pi--tui--only-blue)](package.json)
 [![size](https://img.shields.io/badge/install%20size-~409kB-blue)](https://packagephobia.com/package/pi-shift-router)
 [![CI](https://img.shields.io/github/actions/workflow/status/green-dalii/pi-shift-router/ci.yml)](https://github.com/green-dalii/pi-shift-router/actions)
 [![Stars](https://img.shields.io/github/stars/green-dalii/pi-shift-router.svg)](https://github.com/green-dalii/pi-shift-router)
@@ -58,7 +58,7 @@ pi-shift-router 是 [pi-coding-agent](https://github.com/earendil-works/pi) 的�
 
 - **升级立即**，降级要等趋势稳定——不会来回抖。
 - 每档可配多模型链，429/5xx 指数退避冷却，任务不中断。
-- 零运行时依赖、一个配置文件——配好模型之前是 no-op，之后路由开箱即用（复杂任务自动编排）。
+- 零第三方运行时依赖、一个配置文件——配好模型之前是 no-op，之后路由开箱即用（复杂任务自动编排）。
 
 ```bash
 pi install npm:pi-shift-router   # 然后：/router config → /router status

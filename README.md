@@ -5,12 +5,12 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 - license: MIT
 - language: TypeScript
 - runtime: Node.js >= 24
-- dependencies: zero runtime deps
+- dependencies: zero third-party runtime deps (host-provided @earendil-works/pi-tui declared as dep for isolated-subtree install)
 - npm: https://www.npmjs.com/package/pi-shift-router
 - repo: https://github.com/green-dalii/pi-shift-router
 - docs: README.md / README.zh-CN.md / docs/CONFIG.md / docs/MODELS.md / docs/TROUBLESHOOTING.md
 - first-published: v0.4.0
-- latest: v1.3.0
+- latest: v1.3.1
 - last-updated: 2026-08
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
 - search-intents: "auto-route pi agent turns", "LLM as classifier", "two-tier model routing", "model failover on 429", "cost vs quality model selection", "pi-coding-agent extension", "model cooldown exponential backoff", "JSON-mode classifier", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "auto switch models in pi agent", "task-level orchestration pi", "Smart CTO delegates to Fast subagents", "pi agent subagent orchestration"
@@ -31,7 +31,7 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Pi Agent](https://img.shields.io/badge/pi--agent-extension-purple)](https://pi.dev/packages/pi-shift-router)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-green)](https://nodejs.org)
-[![deps](https://img.shields.io/badge/dependencies-zero-brightgreen)](package.json)
+[![deps](https://img.shields.io/badge/deps-host--pi--tui--only-blue)](package.json)
 [![size](https://img.shields.io/badge/install%20size-~409kB-blue)](https://packagephobia.com/package/pi-shift-router)
 [![CI](https://img.shields.io/github/actions/workflow/status/green-dalii/pi-shift-router/ci.yml)](https://github.com/green-dalii/pi-shift-router/actions)
 [![Stars](https://img.shields.io/github/stars/green-dalii/pi-shift-router.svg)](https://github.com/green-dalii/pi-shift-router)

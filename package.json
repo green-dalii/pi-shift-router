@@ -1,6 +1,6 @@
 {
   "name": "pi-shift-router",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Task-level router + orchestrator for pi-coding-agent: LLM Judge routes each turn to a fast execution tier or a smart judgment tier, with multi-model fallback chains, exponential-backoff failover, and cache-aware routing; complex tasks escalate to a Smart CTO that delegates implementation to Fast subagents. Zero runtime dependencies.",
   "keywords": [
     "pi-package",
@@ -74,7 +74,8 @@
     "test:coverage": "vitest run --coverage",
     "clean": "rm -rf node_modules dist",
     "pack:check": "npm pack --dry-run && node scripts/pack-check.mjs",
-    "prepublishOnly": "npm run test && npm run build && npm run pack:check"
+    "prepublishOnly": "npm run test && npm run build && npm run pack:check",
+    "check:isolated": "node scripts/check-isolated-load.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-tui": "*"
@@ -86,5 +87,8 @@
     "@vitest/coverage-v8": "^2.1.9",
     "typescript": "^5.8.0",
     "vitest": "^2.1.0"
+  },
+  "dependencies": {
+    "@earendil-works/pi-tui": "*"
   }
 }

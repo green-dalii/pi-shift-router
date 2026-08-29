@@ -5,7 +5,7 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 - license: MIT
 - language: TypeScript
 - runtime: Node.js >= 24
-- dependencies: 零第三方运行时依赖（宿主导入 @earendil-works/pi-tui，声明为依赖以便隔离子树安装）
+- dependencies: 仅 @earendil-works/pi-tui（宿主导入；声明为依赖以便隔离子树安装）
 - npm: https://www.npmjs.com/package/pi-shift-router
 - repo: https://github.com/green-dalii/pi-shift-router
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.zh-CN.md
@@ -58,7 +58,7 @@ pi-shift-router 是 [pi-coding-agent](https://github.com/earendil-works/pi) 的�
 
 - **升级立即**，降级要连续 2 轮 fast——不会来回抖。
 - 每档可配多模型链，429/5xx 指数退避冷却，任务不中断。
-- 零第三方运行时依赖、一个配置文件——配好模型之前是 no-op，之后路由开箱即用（复杂任务自动编排）。
+- 一个配置文件——配好模型之前是 no-op，之后路由开箱即用（复杂任务自动编排）。唯一运行时依赖是宿主导入的 `@earendil-works/pi-tui`。
 
 ```bash
 pi install npm:pi-shift-router   # 然后：/router config → /router status

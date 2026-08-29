@@ -5,7 +5,7 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 - license: MIT
 - language: TypeScript
 - runtime: Node.js >= 24
-- dependencies: zero third-party runtime deps (host-provided @earendil-works/pi-tui declared as dep for isolated-subtree install)
+- dependencies: @earendil-works/pi-tui only (host-provided; declared as a dependency for isolated-subtree install)
 - npm: https://www.npmjs.com/package/pi-shift-router
 - repo: https://github.com/green-dalii/pi-shift-router
 - docs: README.md / README.zh-CN.md / docs/CONFIG.md / docs/MODELS.md / docs/TROUBLESHOOTING.md
@@ -58,7 +58,7 @@ For complex tasks, the router graduates from *turn-level* routing to *task-level
 
 - **Upgrades are instant**; downgrades need 2 consecutive "fast" turns — no mid-session bouncing.
 - Per-tier fallback chains plus exponential-backoff cooldown on 429/5xx — turns keep flowing.
-- Zero runtime dependencies, one config file — a no-op until you pick models; then routing just works (and complex tasks orchestrate automatically).
+- One config file — a no-op until you pick models; then routing just works (and complex tasks orchestrate automatically). The only runtime dependency is the host-provided `@earendil-works/pi-tui`.
 
 ```bash
 pi install npm:pi-shift-router   # then: /router config → /router status

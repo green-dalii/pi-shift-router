@@ -68,19 +68,56 @@ User sends message
 
 ### 2.3 Transition Rules
 
+Transitions are driven by an **expected-cost (EV) decision rule** over the Judge's
+verdict + confidence — not by raw vote counting. The two error directions have
+asymmetric cost: a wrong **downgrade** (fast fumbles a complex task) costs the
+price-delta times a rework multiplier and is worse than a wrong **upgrade**
+(simple task on smart, bounded extra spend). This asymmetry is encoded in a
+single knob.
+
 ```
-   Fast (execution)  ←───────────────→  Smart (judgment)
-         ↑                                     ↑
-    immediate on                        window majority
-    "smart" judge                       (≥60% of last 5)
+θ (smart bar) = 1 / economics.reworkPenalty      (default R=3 → θ≈0.33)
+
+pSmart = confidence          if Judge says smart
+       = 1 − confidence      if Judge says fast
+
+if confidence < window.minConfidence  → hold (no signal, never switch)
+else if pSmart ≥ θ                     → run smart
+else                                   → run fast
 ```
 
 | Direction | Condition | Rationale |
 |-----------|-----------|-----------|
-| **↑ fast → smart** | **Immediate** | Quality first. A single "smart" judge triggers the upgrade. |
-| **↓ smart → fast** | **Window majority** | Cache protection. Requires ≥60% of the last 5 turns to be "fast". |
+| **↑ fast → smart** | Single decisive smart decision (pSmart ≥ θ) | Upgrades cost only the price delta — cheap enough to act immediately on a confident-enough signal. An **uncertain fast verdict** (`pSmart ≥ θ`) also upgrades: not-sure-it's-simple leans smart because rework is pricier. |
+| **↓ smart → fast** | `downgradeMemory` consecutive decisive fast decisions (default 2) + cache-aware idle gate | Downgrades are the expensive direction (rework risk + cache forfeit). Two independent judge agreements dampen noise; holds break the streak. |
 
-The window is cleared on upgrade. Downgrades accumulate entries normally.
+Price cancels out of the rule: `θ = Δ/(Δ·R) = 1/R`, so no pricing lookup is
+needed — `reworkPenalty` is the whole economics knob. When cache-aware routing
+is active on the same provider family, the effective bar lowers (fewer
+downgrades) to protect the warm prompt cache.
+
+---
+
+### 2.4 Model Authority (Strict Takeover)
+
+The router **owns model selection** while enabled. The model on the wire must
+match the routed tier's chain — a tier label without model enforcement is
+fiction (a `fast` decision running on a smart-tier model is a price/behavior
+mismatch).
+
+- Every `before_agent_start`, after the routing decision, the router guarantees:
+  the active model = best available model (priority order, cooldown-aware) of
+  the **running tier** (the tier the turn actually executes on, after any
+  upgrade/downgrade). If the current model differs → `setModel`; if it is
+  already that model → no-op (no redundant `setModel`).
+- `session_start` remains read-only (no `setModel`); the first takeover happens
+  during the first turn's `before_agent_start`.
+- `/model` (native picker) is overridden at the next routing point: the model
+  the user picked runs for the current turn, then the router re-asserts the
+  tier chain. Restoring fully native `/model` behavior = `/router off`.
+- Persistent manual overrides are the explicit escape hatches:
+  `/router smart` / `/router fast` (manual override for the session, bypasses
+  takeover) and `/router off` (router disabled entirely → native model control).
 
 ---
 
@@ -96,17 +133,29 @@ Two-tier design reduces the window problem to a single question: **when is it sa
 ### 3.2 Window
 
 ```
-Window size = config.routing.window.size           (default 5)
-Threshold    = config.routing.window.threshold     (default 0.6)
+Window size = config.routing.window.size           (default 5, history cap)
+minConfidence = config.routing.window.minConfidence (default 0.5)
+downgradeMemory = config.routing.economics.downgradeMemory (default 2)
+
+Per-turn decision (EV rule, see §2.3):
+  pSmart = c (smart) or 1−c (fast); θ = 1 / economics.reworkPenalty
+  confidence < minConfidence → hold (no signal, no switch, breaks fast streak)
+  pSmart ≥ θ → smart; else fast
 
 Downgrade condition (smart → fast):
-  window.filter(tier === "fast").length / window.length ≥ threshold
+  trailing decisive entries are all fast AND count ≥ downgradeMemory
+  AND downgradeAllowedAt(state, config)  (cache-aware idle gate)
 
 Window lifecycle:
-  - Each processRoute pushes the current judge result.
+  - Each processRoute pushes a decisive entry (hold entries also pushed, marked).
   - When size is exceeded, the oldest entries are discarded.
   - On upgrade, the window is cleared.
 ```
+
+`window.threshold` (legacy) — when explicitly set in user config it acts as a raw
+θ override; prefer `economics.reworkPenalty`. `cacheAware.sameFamilyThreshold`
+(legacy) is superseded by `cacheAware.sameFamilyPenalty` (multiplier on
+reworkPenalty; a legacy threshold present implies the strong default 3.0).
 
 ### 3.3 Worked Example
 
@@ -781,17 +830,27 @@ spent) is the plugin's hard cap. The loop stops when either one says stop —
 Smart's judgment decides *what* is wrong, the plugin's caps decide *how long*
 we keep paying for it.
 
-**Acceptance audit (v1.3.0, safety-net review)** — because the *content* judgment is
-Smart's alone, the plugin adds a post-turn safety net: deterministic checks
-(workers all reported back; final message carries a CTO summary; hard-cap
-flag) always run, and an optional small fast-tier LLM audit (`orchestration.audit.enabled`, default true) checks three dimensions against the **captured
+**Acceptance audit (v1.3.0, safety-net review; v1.4.0 domain-restricted)** — because
+the *content* judgment is Smart's alone, the plugin adds a post-turn safety net.
+**The audit's domain is DELEGATED orchestration runs (`spawned ≥ 1`)** — its
+invariants (workers spawned ↔ results reported; acceptance grounded in worker
+outputs) only engage when delegation actually happened. Deterministic checks
+(workers all reported back; final message carries a CTO summary; hard-cap flag)
+always run, and an optional small fast-tier LLM audit (`orchestration.audit.enabled`, default true) checks three dimensions against the **captured
 user goal** + worker results: **grounding** (acceptance claim backed by
 results), **goal alignment** (delivered work addresses the request), and
 **delivered quality** (no placeholder/empty/aborted results passed off as
-done). The audit never blocks the finished turn — it flags via warn/toast and
-`/router status` → `Last audit`. Files: `src/audit.ts` (pure deterministics +
-`callAuditLLM`), `src/prompts/auditor.md`, wiring in `agent_end`; goal
-snapshot in `OrchestrationState.goal`.
+done). **Self-executed orchestration turns (`spawned = 0`, the sanctioned
+"if it's actually simple, just do it yourself" path) run only the
+CTO-summary deterministic check and are marked `self-executed` in
+`/router status` — no LLM audit, no worker-grounding violations** (their
+evidence is the CTO's own tool trail, visible to the user in the transcript).
+Evidence extraction reads pi's native message schema
+(`role: "toolResult"` + `toolName`), filtering worker results to
+`toolName === "subagent"`. The audit never blocks the finished turn — it
+flags via warn/toast and `/router status` → `Last audit`. Files:
+`src/audit.ts` (pure deterministics + `callAuditLLM`), `src/prompts/auditor.md`,
+wiring in `agent_end`; goal snapshot in `OrchestrationState.goal`.
 
 **Backward compatibility contract (must not break existing behavior):**
 

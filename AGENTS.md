@@ -58,6 +58,12 @@ GitHub branch protection is enabled on `main` with at least one required review 
 4. **Open a PR** with `gh pr create` against `main`. The PR body must summarize the change, link any related issues (`Closes #N` / `Refs #N`), and note any breaking changes or follow-up work. Requires explicit user approval.
 5. **Wait for review.** The agent must NOT self-approve or auto-merge. Wait for the user (or another reviewer) to leave a review. The agent may post a review comment summarizing its own audit findings (e.g., via `gh pr comment`) so the human reviewer has full context.
 6. **Merge via GitHub** using `gh pr merge --squash --delete-branch` after the user explicitly approves the merge. Squash keeps history linear and the PR title becomes the commit subject.
+
+**CI gate — never merge red. The agent MUST verify CI status before merging.** After pushing a branch (and after the squash commit lands), run `gh pr checks <PR>` (and `gh run list`) and wait until **every required check passes** before `gh pr merge`. A red or pending CI is a hard merge blocker:
+- **Never merge with failing checks** — not even for "small" or "doc-only" changes. The user reported the exact failure this rule prevents: a PR was merged while CI was failing (tests/pack-isolation failed because the workflow ran Test before Build), and the broken workflow shipped to `main` and npm.
+- If CI fails, fix the cause and re-run before merging. Inspect the failing job's log (`gh run view <run-id> --log-failed`) — do not guess.
+- "Local checks pass" is NOT sufficient: CI runs from a fresh checkout (gitignored artifacts like `dist/` do not exist there) and may differ from the local environment. If CI and local disagree, CI wins and local must be reconciled (e.g. run the same step order: `npm ci → typecheck → build → test → coverage → pack:check → check:isolated`).
+- The merge must also be preceded by the normal review step (step 5); the CI gate is additional, not a replacement.
 7. **Verify on `main`.** `git pull`, run `shazam_verify`, confirm working tree is clean. The `src/index.ts` (or any other) uncommitted changes that existed before the PR flow must NOT survive onto `main` — they live on the branch.
 
 **Edge cases:**
@@ -75,10 +81,11 @@ GitHub branch protection is enabled on `main` with at least one required review 
 Every public release (`npm publish`) goes through a fixed 8-step sequence. The agent must follow the order; skipping a step is a release-process bug.
 
 1. **Verify locally.** Run, in order:
-   - `node --experimental-vm-modules node_modules/vitest/vitest.mjs run` — all tests pass (currently 204 tests across 11 files).
+   - `node --experimental-vm-modules node_modules/vitest/vitest.mjs run` — all tests pass (currently 373 tests across 17 files).
    - `node node_modules/typescript/lib/tsc.js` — TypeScript strict compile passes.
    - `node scripts/copy-assets.mjs` — syncs `src/prompts/` into `dist/prompts/`.
-   - `node scripts/pack-check.mjs` — `pack:check` passes (engines.node, files, etc.).
+   - `node scripts/pack-check.mjs` — `pack:check` passes (engines.node, files, allowlisted host deps, etc.).
+   - `node scripts/check-isolated-load.mjs` — `check:isolated` passes (pack → isolated install with pi's flags → native load of every dist module).
    - `shazam_verify` (a shell function defined in the pi-agent harness; the agent invokes it via the `shazam_verify` tool). If any of these fail, abort the release and fix the issue first.
 2. **Bump version in `package.json`.** Semver:
    - `patch` (0.0.X) — bug fixes, docs-only changes, prompt-only changes, test-only changes.

@@ -45,8 +45,10 @@ describe("pack isolation (compiled dist must resolve in pi's isolated subtree)",
   const deps = pkg.dependencies ?? {};
 
   it("dist is built", () => {
-    expect(existsSync(join(distDir, "index.js"))).toBe(true);
-    expect(modules.length).toBeGreaterThan(10);
+    // dist/ is gitignored; the packaging gates read the compiled artifact.
+    // CI runs `npm run build` before `npm test`; locally run `npm run build` first.
+    expect(existsSync(join(distDir, "index.js")), "dist/ is missing — run `npm run build` first (dist/ is gitignored; tests/pack-isolation reads the compiled artifact)").toBe(true);
+    expect(modules.length, `only ${modules.length} dist modules found — run ` + "`npm run build` first").toBeGreaterThan(10);
   });
 
   it("every runtime external import in dist is covered by `dependencies`", () => {

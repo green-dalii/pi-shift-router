@@ -24,6 +24,20 @@ v0.8.0 修复（commit `de6073a`+）。根因：`JSON.stringify(undefined)` 返�
 
 配置的 model ID 在 Provider 中不存在。更新 ID 或重跑 `/router config`（向导只会列出真实存在的模型）。
 
+## Provider 返回 402 / "Insufficient Balance"，但路由器不切换
+
+症状：每轮都死在同一个模型上，报错类似
+`Error: 402: {"message":"Insufficient Balance", ...}` ——路由器一直
+重试已耗尽的账户，而不是链上下一个模型。**v1.4.1 已修复**：检测层
+现在识别 HTTP 402 与关键字 `insufficient balance` / `余额不足`
+（v1.4.1 之前状态码列表只覆盖 429 + 5xx，余额耗尽错误被静默忽略，
+坏模型永远钉死）。
+
+若你还在旧版本上看到这个错误，升级到 **pi-shift-router ≥ 1.4.1**
+（`npm install -g pi-shift-router@latest` 或 `pi install npm:pi-shift-router`）。
+失败模型会进入 16m 冷却（同 4xx 桶，与 429 相同处理），路由器自动选
+同一档的下一个健康模型。
+
 ## 总是被降级到 Fast
 
 Judge 误分类（`/router verbose` 查看）或阈值太激进。调高：

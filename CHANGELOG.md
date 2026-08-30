@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.4.1] — Failover on 402 Insufficient Balance; hero refresh
+
+### Fixed
+
+- **Failover now recognizes 402 / "Insufficient Balance".** Previously, a model
+  returning HTTP 402 (e.g. OpenRouter-style `Error: 402: {"message":"Insufficient Balance",…}`)
+  or the Chinese variant `余额不足` was silently pinned — every turn re-tried the
+  dead account while the router kept selecting it. `detectFailoverError` now
+  matches 402 in the HTTP status regex and adds `insufficient balance` / `余额不足`
+  to the keyword signatures. 402 inherits the same 4xx 16m-start backoff as 429
+  via `code.startsWith('4')` in `markModelFailed` (no backoff change).
+
+### Changed
+
+- Refreshed hero illustration.
+
 ## [1.4.0] — EV economics routing, gear presets, doc-aware judge
 
 ### Added

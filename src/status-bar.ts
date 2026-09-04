@@ -15,6 +15,7 @@
 import type { RouterState, ShiftRouterConfig, Tier } from "./types.js";
 import { formatTierDisplayWithSpeed } from "./tier.js";
 import { findBestModelForTier } from "./tier.js";
+import { medianSpeed } from "./failover.js";
 
 /** Append a throughput segment when a reading exists; bare label otherwise. */
 function speedLabel(base: string, speed: number): string {
@@ -34,15 +35,19 @@ export function formatStatusBarLabel(
   modelRegistry?: { find: (provider: string, modelId: string) => unknown },
 ): string | undefined {
   if (!cfg.ux.statusBar) return undefined;
-  const speed = s.recentSpeeds.length > 0 ? s.recentSpeeds[s.recentSpeeds.length - 1] : 0;
+  // Median of the sliding window, not the last sample: a single artifact
+  // reading (late message_start / clock noise) can spike ~10x; the median is
+  // spike-proof while still tracking genuine rate changes (v1.4.2).
+  const speed = medianSpeed(s.recentSpeeds);
 
   // Delegation in flight → dedicated orchestration label. Done/Total =
   // completed vs started subagent tool-calls this run (one workflowScript
   // call is one tool_call; inner runs.all fan-out is not separately counted).
-  // Throughput is the AVERAGE across completed workers (stable under
-  // concurrency). Cap-hit indicator: the hard caps (maxRounds /
-  // escalationThreshold) are reached and new spawns are blocked — show it so
-  // the user sees the loop is being stopped by the plugin, not stuck.
+  // Throughput is the MEDIAN across completed workers — spike-proof, same
+  // rationale as the plain-turn label. Cap-hit indicator: the hard caps
+  // (maxRounds / escalationThreshold) are reached and new spawns are blocked
+  // — show it so the user sees the loop is being stopped by the plugin, not
+  // stuck.
   if (s.orchestration.active && s.orchestration.spawned > 0) {
     const o = s.orchestration;
     const capLabel =
@@ -50,8 +55,8 @@ export function formatStatusBarLabel(
         ? " ⛔cap"
         : "";
     if (o.workerSpeeds.length > 0) {
-      const avg = Math.round(o.workerSpeeds.reduce((a, b) => a + b, 0) / o.workerSpeeds.length);
-      return `🪄 Done(${o.done})/Total(${o.spawned}) • ~${avg} tok/s avg${capLabel}`;
+      const med = medianSpeed(o.workerSpeeds);
+      return `🪄 Done(${o.done})/Total(${o.spawned}) • ~${med} tok/s${capLabel}`;
     }
     return `🪄 Done(${o.done})/Total(${o.spawned})${capLabel}`;
   }

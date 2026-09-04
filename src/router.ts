@@ -225,9 +225,15 @@ export function processRoute(
   }
 
   // 2. EV decision (SPEC §2.3). Confidence below minConfidence = no signal.
-  const confidence = judgeResult.confidence ?? 1.0;
+  //    A judge-OUTAGE result (source "fallback") is also no signal: it
+  //    carries no measured confidence, and defaulting the missing value to
+  //    1.0 fabricates a decisive fast verdict (pSmart = 0) that poisons the
+  //    window and silently downgrades smart sessions during outages.
+  //    "When the Judge is unavailable, hold position — never guess."
+  const judgeUnavailable = judgeResult.source === "fallback";
+  const confidence = judgeUnavailable ? 0 : (judgeResult.confidence ?? 1.0);
   const minConf = config.routing.window.minConfidence ?? 0.5;
-  const hold = confidence < minConf;
+  const hold = judgeUnavailable || confidence < minConf;
   let decision: Tier = hold ? state.currentTier : (targetTier === "smart" ? "smart" : "fast");
   if (!hold) {
     const theta = effectiveTheta(config);

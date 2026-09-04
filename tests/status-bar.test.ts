@@ -68,13 +68,31 @@ describe("formatStatusBarLabel", () => {
     expect(formatStatusBarLabel(makeConfig(), state, registry)).toBe("🪄 Done(2)/Total(3)");
   });
 
-  it("delegation shows average worker throughput when readings exist", () => {
+  it("delegation shows median worker throughput when readings exist", () => {
     const state = createRouterState();
     state.orchestration.active = true;
     state.orchestration.spawned = 2;
     state.orchestration.done = 2;
     state.orchestration.workerSpeeds = [20, 30];
-    expect(formatStatusBarLabel(makeConfig(), state, registry)).toBe("🪄 Done(2)/Total(2) • ~25 tok/s avg");
+    expect(formatStatusBarLabel(makeConfig(), state, registry)).toBe("🪄 Done(2)/Total(2) • ~25 tok/s");
+  });
+
+  it("plain turn shows the MEDIAN of recent speeds, not the last sample (spike-proof)", () => {
+    const state = createRouterState();
+    state.currentTier = "fast";
+    state.currentModelId = "p/fast-model";
+    // One artifact spike (~10x) among honest ~40 tok/s readings.
+    state.recentSpeeds = [40, 42, 380, 41, 40];
+    expect(formatStatusBarLabel(makeConfig(), state, registry)).toBe("[🦾 fast-model] • 41 tok/s");
+  });
+
+  it("delegation label also uses the median of worker speeds (spike-proof)", () => {
+    const state = createRouterState();
+    state.orchestration.active = true;
+    state.orchestration.spawned = 3;
+    state.orchestration.done = 3;
+    state.orchestration.workerSpeeds = [40, 380, 42];
+    expect(formatStatusBarLabel(makeConfig(), state, registry)).toBe("🪄 Done(3)/Total(3) • ~42 tok/s");
   });
 
   it("cap hit is surfaced on the delegation label", () => {

@@ -228,11 +228,39 @@ export function formatRemaining(ms: number): string {
 export const SPEED_WINDOW_SIZE = 5;
 
 /**
+ * Throughput display smoothing (v1.4.2): the status bar shows the MEDIAN of
+ * the sliding window, not the last sample. A single artifact reading (see
+ * MIN_STREAM_ELAPSED_MS) can spike ~10x above the honest rate; the median is
+ * immune to isolated outliers while still tracking genuine rate changes
+ * within the 5-sample window.
+ *
+ * Even-count windows average the two middle values; empty windows read 0.
+ */
+export function medianSpeed(samples: number[]): number {
+  if (samples.length === 0) return 0;
+  const sorted = [...samples].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[mid]
+    : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+/**
+ * Measurement-noise floor for elapsed time (ms). A provider that delivers
+ * message_start late (or a clock artifact) can yield "2000 tokens in 40ms"
+ * — tens of thousands of tok/s — which is a start-time misalignment, not a
+ * real rate. Real streaming always spans at least a network round-trip, so
+ * anything under this floor is discarded rather than recorded.
+ */
+export const MIN_STREAM_ELAPSED_MS = 50;
+
+/**
  * Compute tokens-per-second from elapsed ms and output tokens.
- * Returns 0 when elapsed ≤ 0 or output_tokens ≤ 0.
+ * Returns 0 when elapsed < MIN_STREAM_ELAPSED_MS (measurement artifact) or
+ * output_tokens <= 0.
  */
 export function tokensPerSecond(outputTokens: number, elapsedMs: number): number {
-  if (elapsedMs <= 0 || outputTokens <= 0) return 0;
+  if (elapsedMs < MIN_STREAM_ELAPSED_MS || outputTokens <= 0) return 0;
   return Math.round((outputTokens / elapsedMs) * 1000);
 }
 
@@ -246,16 +274,24 @@ export function recordSpeed(speeds: number[], tps: number): void {
  * Throughput fallback (agent_end). The primary path (message_start →
  * message_end wall-clock) is precise, but some providers/paths never deliver
  * message_start with a usable assistant role, leaving `streamingStartTime`
- * null and `recentSpeeds` empty — the status bar loses its "• N tok/s"
- * indicator. agent_end always carries the full message list, so derive the
- * LAST assistant message's generation speed from message timestamps + usage.
+ * null — the status bar loses its "• N tok/s" indicator. agent_end always
+ * carries the full message list, so derive the LAST assistant message's
+ * generation speed from message timestamps + usage.
+ *
+ * v1.4.2 (Bug A fix): the guard is TURN-SCOPED, not session-scoped. The old
+ * guard (`recentSpeeds.length > 0`) read a window that persists across turns,
+ * so after the first successful primary recording ANYWHERE in the session,
+ * this fallback was permanently disabled — providers with broken
+ * message_start timing never got a TPS reading again. The caller now passes
+ * whether the primary path recorded during THIS turn.
  * Only fills when the primary path produced nothing (redundant otherwise).
  */
 export function recordTurnThroughputFallback(
   messages: Array<{ role?: string; timestamp?: number; usage?: { output?: number } }>,
   state: RouterState,
+  primaryRecordedThisTurn: boolean,
 ): boolean {
-  if (state.recentSpeeds.length > 0) return false; // primary path already recorded
+  if (primaryRecordedThisTurn) return false; // primary path recorded this turn
   let lastTps = 0;
   for (let i = 1; i < messages.length; i++) {
     const m = messages[i];
@@ -268,7 +304,7 @@ export function recordTurnThroughputFallback(
     if (typeof ts !== "number" || start === undefined) continue;
     const elapsedMs = ts - start;
     if (elapsedMs <= 0) continue;
-    const tps = Math.round((out / elapsedMs) * 1000);
+    const tps = tokensPerSecond(out, elapsedMs);
     if (tps > 0) lastTps = tps;
   }
   if (lastTps > 0) {

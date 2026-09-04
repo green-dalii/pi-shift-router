@@ -454,14 +454,14 @@ describe("formatStatusBarLabel — orchestration lifecycle bug fix", () => {
     expect(formatStatusBarLabel(cfg, makeState())).toBe("⛔");
   });
 
-  it("workers label shows AVERAGE tok/s across completed workers", () => {
+  it("workers label shows MEDIAN tok/s across completed workers (spike-proof, v1.4.2)", () => {
     const s = makeState();
     enterOrchestration(s);
     s.orchestration.spawned = 5;
     s.orchestration.done = 2;
-    // Completed workers ran at 20 and 40 tok/s -> avg 30.
+    // Completed workers ran at 20 and 40 tok/s -> median 30 (even count).
     s.orchestration.workerSpeeds.push(20, 40);
-    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 Done(2)/Total(5) • ~30 tok/s avg");
+    expect(formatStatusBarLabel(makeConfig(), s)).toBe("🪄 Done(2)/Total(5) • ~30 tok/s");
   });
 
   it("workers label has no throughput segment until first worker completes", () => {

@@ -21,6 +21,8 @@ import {
   tokensPerSecond,
   recordSpeed,
   recordTurnThroughputFallback,
+  medianSpeed,
+  MIN_STREAM_ELAPSED_MS,
   COOLDOWN_BASE_MS,
   COOLDOWN_MAX_MS,
 } from "../src/failover.js";
@@ -538,7 +540,7 @@ describe("recordTurnThroughputFallback", () => {
       ...(role === "assistant" ? { usage: { output } } : {}),
     }));
 
-  it("records the last assistant message's speed when recentSpeeds is empty", () => {
+  it("records the last assistant message's speed when the primary path recorded nothing this turn", () => {
     const state = createRouterState();
     const ok = recordTurnThroughputFallback(
       msgs([
@@ -548,24 +550,44 @@ describe("recordTurnThroughputFallback", () => {
         ["assistant", 8000, 300], // 100 tok/s (300/3s)
       ]),
       state,
+      false,
     );
     expect(ok).toBe(true);
     expect(state.recentSpeeds.length).toBe(1);
     expect(state.recentSpeeds[0]).toBe(107); // last assistant: 300 tok / 2.8s
   });
 
-  it("does NOT override when message_end already recorded a speed", () => {
+  it("does NOT run when the primary path already recorded this turn (turn-scoped guard)", () => {
     const state = createRouterState();
-    recordSpeed(state.recentSpeeds, 250);
     const ok = recordTurnThroughputFallback(
       msgs([
         ["user", 1000, 0],
         ["assistant", 5000, 400],
       ]),
       state,
+      true,
     );
     expect(ok).toBe(false);
-    expect(state.recentSpeeds).toEqual([250]);
+    expect(state.recentSpeeds).toEqual([]);
+  });
+
+  it("REGRESSION (Bug A): runs even when EARLIER turns populated the window — the guard is turn-scoped, not session-scoped", () => {
+    // Pre-fix, the guard `recentSpeeds.length > 0` saw samples recorded by
+    // previous turns and permanently disabled the fallback — providers with
+    // broken message_start timing (e.g. MiniMax) lost their TPS indicator for
+    // the rest of the session after any working primary recording.
+    const state = createRouterState();
+    recordSpeed(state.recentSpeeds, 250); // stale sample from an earlier turn
+    const ok = recordTurnThroughputFallback(
+      msgs([
+        ["user", 1000, 0],
+        ["assistant", 5000, 400],
+      ]),
+      state,
+      false,
+    );
+    expect(ok).toBe(true);
+    expect(state.recentSpeeds).toEqual([250, 100]); // 400 tok / 4s = 100
   });
 
   it("skips messages without output tokens or timestamps", () => {
@@ -578,6 +600,7 @@ describe("recordTurnThroughputFallback", () => {
         { role: "assistant" }, // no timestamp at all
       ],
       state,
+      false,
     );
     expect(ok).toBe(false);
     expect(state.recentSpeeds).toEqual([]);
@@ -588,7 +611,54 @@ describe("recordTurnThroughputFallback", () => {
     const ok = recordTurnThroughputFallback(
       [{ role: "assistant", timestamp: 5000, usage: { output: 100 } }],
       state,
+      false,
     );
     expect(ok).toBe(false);
+  });
+});
+
+// ─── TPS smoothing (v1.4.2): median display + measurement-noise floor ──
+describe("medianSpeed", () => {
+  it("returns 0 for an empty window", () => {
+    expect(medianSpeed([])).toBe(0);
+  });
+
+  it("passes a single sample through", () => {
+    expect(medianSpeed([40])).toBe(40);
+  });
+
+  it("odd count takes the middle value", () => {
+    expect(medianSpeed([40, 41, 380, 42, 40])).toBe(41);
+  });
+
+  it("even count averages the two middle values", () => {
+    expect(medianSpeed([40, 400])).toBe(220);
+    expect(medianSpeed([38, 40, 42, 400])).toBe(41);
+  });
+
+  it("a single wild spike does not move the median (the reported symptom)", () => {
+    // Should read ~40 tok/s; one artifact sample at ~10x must not shift it.
+    expect(medianSpeed([40, 42, 380, 41, 40])).toBe(41);
+    expect(medianSpeed([380, 40, 41])).toBe(41);
+  });
+});
+
+describe("tokensPerSecond measurement-noise floor", () => {
+  it("exposes MIN_STREAM_ELAPSED_MS = 50", () => {
+    expect(MIN_STREAM_ELAPSED_MS).toBe(50);
+  });
+
+  it("returns 0 below the floor (start-time misalignment artifact, the TPS spike source)", () => {
+    // 2000 tokens "in" 49ms is not a 40k tok/s model — it is a message_start
+    // that arrived late or a clock artifact. Never record it.
+    expect(tokensPerSecond(2000, 49)).toBe(0);
+    expect(tokensPerSecond(50, 10)).toBe(0);
+  });
+
+  it("still measures normally at and above the floor", () => {
+    expect(tokensPerSecond(2000, 50)).toBe(40_000);
+    expect(tokensPerSecond(400, 10_000)).toBe(40);
+    expect(tokensPerSecond(0, 10_000)).toBe(0);
+    expect(tokensPerSecond(100, 0)).toBe(0);
   });
 });

@@ -102,6 +102,13 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
   // RouterState.
   const workerSpawnStarts = new Map<string, number>();
 
+  // Turn-scoped flag: did the PRIMARY throughput path (message_start →
+  // message_end wall-clock) record a reading during THIS turn? agent_end's
+  // fallback needs exactly this — the old guard sniffed the session-persistent
+  // recentSpeeds window and permanently disabled itself after the first
+  // successful recording anywhere in the session (Bug A, v1.4.2).
+  let primarySpeedRecorded = false;
+
   const getConfig = () => config;
   const getState = () => state;
 
@@ -161,6 +168,15 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     await init(ctx);
+    // Bug B (v1.4.2): sync the ACTUAL session model into display state. The
+    // router's state starts as a guess ("fast", null) and pi's session
+    // default never emits model_select, so the badge could show a model that
+    // was never running. Display-only: no setModel — session_start stays
+    // observe-only (SPEC contract).
+    const m: any = (ctx as any).model;
+    if (m?.provider && (m.id ?? m.modelId)) {
+      syncSessionModel(state, config, m.provider, m.id ?? m.modelId);
+    }
     // Defensive: a new session should never inherit orchestration state
     // from a previous one (e.g. after an abort that skipped agent_end).
     // Cheap no-op when inactive; refreshes the bar to a sane label.
@@ -194,6 +210,9 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       resetOrchestration(state);
       if (config.ux.statusBar) updateBar(ctx.ui, config, state);
     }
+
+    // New turn → the primary throughput path has recorded nothing yet.
+    primarySpeedRecorded = false;
 
     if (!config?.enabled || !event.prompt?.trim()) return;
 
@@ -528,7 +547,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     // REPAINT the bar: recording alone leaves the stale no-speed label up.
     let throughputRecorded = false;
     try {
-      throughputRecorded = recordTurnThroughputFallback((event as any).messages ?? [], state);
+      throughputRecorded = recordTurnThroughputFallback((event as any).messages ?? [], state, primarySpeedRecorded);
     } catch (fallbackErr) {
       console.warn(`[ShiftRouter] throughput fallback failed: ${fallbackErr}`);
     }
@@ -786,6 +805,18 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     const msg: any = (event as any).message;
     if (!msg || msg.role !== "assistant") return;
 
+    // Display-only model sync (Bug B, v1.4.2): keep the badge on the ACTUAL
+    // running model even when the divergence source is not a model_select
+    // event (session default, provider-level switch). Idempotent — the
+    // router's own applyModelSwitch already set these same values before the
+    // message streamed; routing decisions are untouched.
+    const msgModel: string | undefined = msg.model ?? msg.modelId;
+    if (msg.provider && msgModel &&
+        (msg.provider !== state.currentProvider || msgModel !== state.currentModelId)) {
+      syncSessionModel(state, config, msg.provider, msgModel);
+      if (config.ux.statusBar) updateBar(ctx.ui, config, state);
+    }
+
     const usage = msg.usage;
     const outputTokens: number = usage?.output ?? 0;
     state.totalOutputTokens += outputTokens;
@@ -804,6 +835,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       const tps = tokensPerSecond(outputTokens, elapsed);
       if (tps > 0) {
         recordSpeed(state.recentSpeeds, tps);
+        primarySpeedRecorded = true; // turn-scoped: gates the agent_end fallback
         if (config.ux.routerLogVerbose) {
           console.log(
             `[ShiftRouter] ${outputTokens} tokens in ${elapsed}ms = ${tps} tok/s (total ${state.totalOutputTokens.toLocaleString()})`,

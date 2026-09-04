@@ -450,3 +450,70 @@ describe("applyModelSwitch no-op on identical model", () => {
     expect(state.currentModelId).toBe("smart-model");
   });
 });
+
+// ─── Judge unavailability: fallback results are HOLDS, not fast verdicts ──
+//
+// AGENTS.md / SPEC §2.3: "When the Judge is unavailable, hold position on the
+// current tier — never guess." classify() returns { tier: "fast", source:
+// "fallback" } with NO confidence when every judge endpoint fails. Defaulting
+// that missing confidence to 1.0 fabricates a decisive fast verdict (pSmart =
+// 0), poisons the window with non-hold fast entries, and silently downgrades
+// a smart session during an outage.
+describe("Judge unavailability — fallback source holds (never downgrades)", () => {
+  // The exact shape judge.ts returns when every fast-chain endpoint fails.
+  const FALLBACK: JudgeResult = { tier: "fast", source: "fallback" };
+
+  function smartState() {
+    const state = createRouterState();
+    state.currentTier = "smart";
+    state.currentProvider = "p";
+    state.currentModelId = "smart-model";
+    return state;
+  }
+
+  it("a fallback result on smart stays smart and pushes a hold entry", () => {
+    const state = smartState();
+    const d = step(state, makeConfig(), FALLBACK);
+    expect(d.action).toBe("stay");
+    expect(state.window[0].hold).toBe(true);
+    // No fabricated signal: undefined confidence lands in stats' "none"
+    // bucket, not "low" (0 would misread as a real measured-low verdict).
+    expect(state.window[0].confidence).toBeUndefined();
+  });
+
+  it("two consecutive fallback results never downgrade smart (regression: fabricated decisive fast)", () => {
+    const state = smartState();
+    step(state, makeConfig(), FALLBACK);
+    const d = step(state, makeConfig(), FALLBACK);
+    expect(d.action).toBe("stay");
+  });
+
+  it("three consecutive fallback results never downgrade smart either", () => {
+    const state = smartState();
+    step(state, makeConfig(), FALLBACK);
+    step(state, makeConfig(), FALLBACK);
+    const d = step(state, makeConfig(), FALLBACK);
+    expect(d.action).toBe("stay");
+    expect(state.window.every((e) => e.hold)).toBe(true);
+  });
+
+  it("a fallback result on fast stays fast (no upgrade, no fabricated signal)", () => {
+    const state = createRouterState();
+    state.currentTier = "fast";
+    state.currentProvider = "p";
+    state.currentModelId = "fast-model";
+    const d = step(state, makeConfig(), FALLBACK);
+    expect(d.action).toBe("stay");
+    expect(state.window[0].hold).toBe(true);
+  });
+
+  it("a real LLM verdict after an outage still routes normally (outage ends)", () => {
+    const state = smartState();
+    step(state, makeConfig(), FALLBACK);
+    // A confident fast verdict on smart: two decisive fast entries are needed
+    // for a downgrade; this first one must NOT downgrade by itself.
+    const d = step(state, makeConfig(), judge("fast", 0.95));
+    expect(d.action).toBe("stay");
+    expect(state.window[state.window.length - 1].hold).toBe(false);
+  });
+});

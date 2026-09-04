@@ -9,6 +9,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.4.2] — Judge-outage hold, retry-aware audit, TPS smoothing
+
+### Fixed
+
+- **Judge unavailability is now a HOLD, not a fabricated fast verdict.** Previously,
+  when every judge endpoint failed, `classify()` returned `{tier:"fast", source:"fallback"}`
+  with no confidence; `processRoute` defaulted the missing confidence to 1.0
+  → `pSmart = 0` → a decisive fast verdict was written into the window, and
+  two consecutive judge outages silently downgraded a smart session to fast.
+  Now `source === "fallback"` forces a hold entry — "When the Judge is
+  unavailable, hold position — never guess." (AGENTS / SPEC §2.3).
+
+- **Orchestration exit + audit now defer on a retryable error tail** (B1). pi
+  emits `agent_end` before its auto-retry continuation when a turn fails with
+  a provider error, and the extension-facing event carries no `willRetry` flag
+  (the `willRetry` only goes to in-process listeners — verified in pi's
+  `agent-session.js`). The old code exited and audited the truncated transcript,
+  false-flagging "no CTO summary" on what was really a retry, and left the retry
+  continuation without worker accounting, caps, or a final audit. Now: failover-
+  signature error tail → label freezes to a static Done/Total, the failover
+  block cools the dead model so the retry lands on the fallback, and the real
+  end (healthy tail) runs the normal audit + exit. A leaked state on permanent
+  failure is cleaned by the `before_agent_start` sweep.
+
+- **Audit LLM pass is cooldown-aware** (B4). `callAuditLLM` pinned
+  `endpoints[0]` unconditionally — re-burning an endpoint the same turn had
+  just cooled (e.g. the fast primary 429'd), eating the full `timeoutMs` each
+  orchestrated turn before returning null. `auditOrchestration` now takes an
+  injected `isCool` predicate, filters cooled endpoints before invoking the
+  LLM pass, and skips the pass entirely when the whole chain is cooled
+  (deterministic checks already ran).
+
+### Changed
+
+- **TPS display is now the MEDIAN of the sliding window, not the last sample.**
+  A single artifact reading (late `message_start` / clock noise) used to spike
+  the indicator ~10× above the honest rate ("should be ~40 tok/s, sometimes
+  jumps to hundreds"). The median is spike-proof while still tracking genuine
+  rate changes within the 5-sample window. Applies to the plain tier badge
+  and to the orchestration label (worker median; the "avg" suffix is dropped
+  from the label since the median is no longer an average). `tokensPerSecond`
+  also discards `elapsed < 50ms` (`MIN_STREAM_ELAPSED_MS`) — "2000 tokens in
+  40ms" is start-time misalignment, not a real rate.
+- **agent_end throughput fallback guard is turn-scoped, not session-scoped**
+  (Bug A). The old guard `recentSpeeds.length > 0` read a window that persists
+  across turns, so after the first successful primary recording anywhere in the
+  session the fallback was permanently disabled — providers with broken
+  `message_start` timing (e.g. MiniMax) lost the TPS indicator for the rest
+  of the session. `recordTurnThroughputFallback` now takes an explicit
+  `primaryRecordedThisTurn` flag.
+
+- **Status bar syncs the ACTUAL session model** (Bug B). `RouterState` started
+  as a guess (tier `"fast"`, model null); pi's session default never emits
+  `model_select`, so the badge could show a model that was never running
+  (e.g. `[🦾 MiniMax-M3?]` while `glm-5.3-flash` actually ran). `session_start`
+  now syncs `ctx.model`, and `message_end` syncs the streaming message's
+  `provider` / `modelId` — both display-only, no `setModel` (session_start
+  stays observe-only per SPEC contract).
+
+### Contract changes
+
+- Status-bar orchestration label: dropped the "avg" suffix (median now).
+  Old-contract assertions moved in `tests/orchestrate.test.ts` and
+  `tests/status-bar.test.ts` (one each).
+
 ## [1.4.1] — Failover on 402 Insufficient Balance; hero refresh
 
 ### Fixed

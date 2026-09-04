@@ -886,6 +886,22 @@ flags via warn/toast and `/router status` → `Last audit`. Files:
 `src/audit.ts` (pure deterministics + `callAuditLLM`), `src/prompts/auditor.md`,
 wiring in `agent_end`; goal snapshot in `OrchestrationState.goal`.
 
+**Retry-aware audit deferral + cooldown-aware LLM pass (v1.4.2):** pi emits
+`agent_end` *before* its auto-retry continuation when a turn fails with a
+provider error, and the extension-facing event carries no `willRetry` flag.
+When an orchestration turn ends on a **failover-signature error tail**, the
+audit and orchestration exit are therefore **deferred**: auditing a truncated
+transcript would false-flag "no CTO summary" on what is really a retry, and
+the retry continuation must keep worker accounting, caps, and the wand. The
+failover block cools the dead model so the retry lands on the fallback; the
+real end (healthy tail) runs the normal audit + exit, and the
+`before_agent_start` sweep closes any leaked state after a permanent failure
+(the bar then shows a static Done/Total label until the next turn — bounded,
+cosmetic). Within the audit itself, the LLM pass is **cooldown-aware**: the
+caller injects the cooldown predicate, cooled endpoints are excluded, and an
+all-cooled chain skips the pass (deterministic checks still ran) — the audit
+must not re-burn an endpoint the same turn just cooled down.
+
 **Backward compatibility contract (must not break existing behavior):**
 
 1. **Default `auto`, one-command opt-out.** Orchestration ships on by default

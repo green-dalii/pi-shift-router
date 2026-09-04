@@ -208,3 +208,75 @@ describe("auditOrchestration", () => {
     expect(audit.violations.length).toBeGreaterThanOrEqual(0);
   });
 });
+
+// ─── Cooldown-aware audit LLM endpoint pick (v1.4.2, B4) ────────────
+//
+// The audit LLM used to pin endpoints[0] unconditionally — re-burning an
+// endpoint the SAME TURN had just cooled down (e.g. the fast primary 429'd
+// and markModelFailed recorded it), eating the full timeout each orchestrated
+// turn before returning null. The cooldown predicate is injected by the
+// caller; auditOrchestration filters before invoking llmCall.
+describe("auditOrchestration — cooldown-aware endpoint filtering", () => {
+  const ep = (provider: string, modelId: string) =>
+    ({ baseUrl: "http://x", apiType: "openai-completions", apiKey: "k", modelId, provider }) as never;
+  const base = {
+    spawned: 2,
+    done: 2,
+    rounds: 1,
+    escalations: 0,
+    maxRounds: 3,
+    escalationThreshold: 2,
+    messages: msgs("CTO summary: planned / delegated / reviewed+accepted / remains"),
+    enabled: true,
+    goal: "g",
+    ctoSummary: "CTO summary",
+    workerResults: "worker out",
+    timeoutMs: 100,
+  };
+
+  it("skips endpoints the caller marks as cooled", async () => {
+    const seen: Array<string> = [];
+    const stub = async (_g: unknown, _c: unknown, _w: unknown, endpoints: Array<{ provider: string; modelId: string }>) => {
+      seen.push(...endpoints.map((e) => e.modelId));
+      return { verdict: "pass" as const, issues: [] };
+    };
+    await auditOrchestration({
+      ...base,
+      endpoints: [ep("p", "cooled-a"), ep("p", "healthy-b")],
+      isCool: (provider: string, model: string) => model === "cooled-a",
+      llmCall: stub as never,
+    });
+    expect(seen).toEqual(["healthy-b"]);
+  });
+
+  it("skips the LLM pass entirely when every endpoint is cooled (deterministic audit still runs)", async () => {
+    let called = 0;
+    const stub = async () => {
+      called += 1;
+      return { verdict: "pass" as const, issues: [] };
+    };
+    const audit = await auditOrchestration({
+      ...base,
+      endpoints: [ep("p", "cooled-a"), ep("p", "cooled-b")],
+      isCool: () => true,
+      llmCall: stub as never,
+    });
+    expect(called).toBe(0);
+    expect(audit.selfExecuted).toBeFalsy();
+    expect(audit.auditedAt).toBeGreaterThan(0);
+  });
+
+  it("passes all endpoints through when no predicate is given (back-compat)", async () => {
+    const seen: Array<string> = [];
+    const stub = async (_g: unknown, _c: unknown, _w: unknown, endpoints: Array<{ provider: string; modelId: string }>) => {
+      seen.push(...endpoints.map((e) => e.modelId));
+      return { verdict: "pass" as const, issues: [] };
+    };
+    await auditOrchestration({
+      ...base,
+      endpoints: [ep("p", "a"), ep("p", "b")],
+      llmCall: stub as never,
+    });
+    expect(seen).toEqual(["a", "b"]);
+  });
+});

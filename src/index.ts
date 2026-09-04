@@ -33,6 +33,7 @@ import {
 import { auditOrchestration, callAuditLLM, extractFinalAssistantText, extractWorkerResults } from "./audit.js";
 import {
   planTurnFailover,
+  detectTurnFailure,
   markModelFailed,
   clearModelCooldown,
   isModelInCooldown,
@@ -475,7 +476,28 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     // orchestration turn still releases its state. Cross-turn lifecycle is
     // Phase 3.)
     if (state.orchestration.active) {
+      // Retry-aware deferral (v1.4.2, B1): pi emits agent_end BEFORE its
+      // auto-retry continuation when the turn failed with a provider error,
+      // and the extension-facing event carries no willRetry flag. A
+      // failover-signature error tail therefore means the turn may still be
+      // in flight: exiting now would (a) audit a truncated transcript and
+      // false-flag ⛔ "no CTO summary", and (b) leave the retry continuation
+      // without worker accounting or caps. Instead: freeze the label, stay
+      // active, and let the failover block below cool the dead model so the
+      // retry lands on the fallback. The real end (healthy tail, or the
+      // next turn's before_agent_start sweep on permanent failure) closes
+      // the orchestration normally.
+      const retryLikely = detectTurnFailure((event as any).messages ?? []) !== null;
       stopLoading();
+      if (retryLikely) {
+        if (config.ux.routerLogVerbose) {
+          console.log(
+            `[ShiftRouter] 🪄 orchestration turn failed with a retryable error — ` +
+            `exit deferred (accounting kept); audit skipped until the turn settles`,
+          );
+        }
+        if (config.ux.statusBar) updateBar(ctx.ui, config, state);
+      } else {
       const o = state.orchestration;
       if (config.ux.routerLogVerbose) {
         console.log(
@@ -506,6 +528,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
           ctoSummary: extractFinalAssistantText(messages),
           workerResults: extractWorkerResults(messages),
           endpoints: fastEndpoints,
+          isCool: cooldownPredicate(state.modelCooldowns, Date.now()),
           timeoutMs: auditTimeout,
           verbose: verboseAudit,
           llmCall: callAuditLLM,
@@ -533,6 +556,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       // is now inactive. Without this refresh the stale label persists
       // until the next event that calls updateBar (next turn, etc.).
       if (config.ux.statusBar) updateBar(ctx.ui, config, state);
+      }
     }
 
     if (!config?.enabled) return;

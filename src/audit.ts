@@ -309,6 +309,12 @@ export async function auditOrchestration(input: {
   timeoutMs?: number;
   verbose?: boolean;
   llmCall?: AuditLLMCall;
+  /**
+   * Cooldown predicate injected by the caller (v1.4.2, B4). Endpoints it
+   * marks cool are excluded from the LLM pass — the audit must not re-burn
+   * an endpoint the same turn just cooled down. Omit for back-compat.
+   */
+  isCool?: (provider: string, model: string) => boolean;
 }): Promise<OrchestrationAudit> {
   const base = deterministicAudit(input);
   const audit: OrchestrationAudit = {
@@ -325,7 +331,13 @@ export async function auditOrchestration(input: {
     audit.selfExecuted = true;
     return audit;
   }
-  const llmEnabled = input.enabled && !!input.llmCall && input.endpoints && input.endpoints.length > 0;
+  // Cooldown-aware endpoint filter (v1.4.2, B4): never re-burn an endpoint
+  // the same turn just cooled down; when every endpoint is cooled, skip the
+  // LLM pass — the deterministic checks above already ran.
+  const healthyEndpoints = input.isCool
+    ? (input.endpoints ?? []).filter((e) => !input.isCool!(e.provider, e.modelId))
+    : (input.endpoints ?? []);
+  const llmEnabled = input.enabled && !!input.llmCall && healthyEndpoints.length > 0;
   if (!llmEnabled) return audit;
 
   try {
@@ -333,7 +345,7 @@ export async function auditOrchestration(input: {
       input.goal,
       input.ctoSummary ?? "",
       input.workerResults ?? "",
-      input.endpoints!,
+      healthyEndpoints,
       input.timeoutMs ?? 5000,
       input.verbose ?? false,
     );

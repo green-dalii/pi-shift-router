@@ -130,7 +130,7 @@ Judge 与路由共用同一张冷却表（判定失败也会走完整条 fast �
 
 ### 一个编排轮次怎么跑
 
-1. **进入。** 判定说 `smart` → 路由器把主模型切到 Smart 档并注入一条编排指令（你的角色、派发规则、硬上限）。状态栏全程显示实时遥测：CTO 规划期为 `[🧠 deepseek] • 42 tok/s`（🪄 只在 worker 真正派发后才出现），Fast worker 跑起来后为 `🪄 Done(2)/Total(3) • ~30 tok/s avg`。
+1. **进入。** 判定说 `smart` → 路由器把主模型切到 Smart 档并注入一条编排指令（你的角色、派发规则、硬上限）。状态栏全程显示实时遥测：CTO 规划期为 `[🧠 deepseek] • 42 tok/s`（🪄 只在 worker 真正派发后才出现），Fast worker 跑起来后为 `🪄 Done(2)/Total(3) • ~30 tok/s`。
 2. **规划。** Smart 把任务拆成多个阶段，每个阶段带验收标准。
 3. **派发。** 每个阶段通过 `subagent` 工具拉起一个 Fast 子代理——`agent: "worker"`、`context: "fresh"`、模型钉在你** Fast 档**——配一份自包含的任务契约（目标、约束、验收标准、要动的文件）。
 4. **审核。** Smart 按验收标准读每个 worker 的结果。失败阶段带着具体反馈回到 worker——或连续失败 N 次后由 Smart 亲自接管。

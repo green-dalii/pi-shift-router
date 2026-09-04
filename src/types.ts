@@ -237,9 +237,10 @@ export interface OrchestrationState {
   done: number;
   /**
    * Per-worker throughput readings (tokens/sec), one per completed worker
-   * this task. Drives the "~N tok/s avg" segment of the workers status-bar
-   * label — average across completed workers, not a single worker, so
-   * concurrent completions don't make the display jumpy.
+   * this task. Drives the "~N tok/s" segment of the workers status-bar
+   * label — the MEDIAN across completed workers (spike-proof, v1.4.2), not
+   * a single worker, so concurrent completions don't make the display
+   * jumpy and one artifact reading can't dominate.
    */
   workerSpeeds: number[];
   /**

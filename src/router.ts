@@ -242,7 +242,14 @@ export function processRoute(
   }
 
   // 3. Push to window (hold entries marked; they break fast streaks).
-  state.window.push({ tier: decision, timestamp: now, confidence, hold });
+  //    Judge-outage entries carry NO confidence (undefined → stats' "none"
+  //    bucket): 0 would misread as a real measured-low verdict.
+  state.window.push({
+    tier: decision,
+    timestamp: now,
+    confidence: judgeUnavailable ? undefined : confidence,
+    hold,
+  });
   const maxSize = config.routing.window.size;
   if (state.window.length > maxSize) {
     state.window = state.window.slice(-maxSize);

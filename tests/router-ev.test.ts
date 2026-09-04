@@ -476,6 +476,9 @@ describe("Judge unavailability — fallback source holds (never downgrades)", ()
     const d = step(state, makeConfig(), FALLBACK);
     expect(d.action).toBe("stay");
     expect(state.window[0].hold).toBe(true);
+    // No fabricated signal: undefined confidence lands in stats' "none"
+    // bucket, not "low" (0 would misread as a real measured-low verdict).
+    expect(state.window[0].confidence).toBeUndefined();
   });
 
   it("two consecutive fallback results never downgrade smart (regression: fabricated decisive fast)", () => {

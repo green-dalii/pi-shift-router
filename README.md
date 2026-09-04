@@ -130,7 +130,7 @@ Turn-level routing picks *which model* runs a turn. Task-level orchestration pic
 
 ### How an orchestrated turn runs
 
-1. **Enter.** Judge says `smart` → the router switches the main agent to the Smart model and injects an orchestrator instruction (your role, delegation rules, hard caps). The status bar shows live telemetry throughout: `[🧠 deepseek] • 42 tok/s` while the CTO plans (the wand 🪄 appears only once workers are actually spawned), then `🪄 Done(2)/Total(3) • ~30 tok/s avg` while Fast workers run.
+1. **Enter.** Judge says `smart` → the router switches the main agent to the Smart model and injects an orchestrator instruction (your role, delegation rules, hard caps). The status bar shows live telemetry throughout: `[🧠 deepseek] • 42 tok/s` while the CTO plans (the wand 🪄 appears only once workers are actually spawned), then `🪄 Done(2)/Total(3) • ~30 tok/s` while Fast workers run.
 2. **Plan.** The Smart agent decomposes the task into phases, each with acceptance criteria.
 3. **Delegate.** For each phase it spawns a Fast subagent via the `subagent` tool — `agent: "worker"`, `context: "fresh"`, model pinned from your **Fast tier** — with a self-contained task contract (goal, constraints, acceptance criteria, files to touch).
 4. **Review.** It reads each worker's result against the phase's acceptance criteria. Failed phases go back to a worker with concrete feedback — or the Smart agent takes over the phase itself after N failures.

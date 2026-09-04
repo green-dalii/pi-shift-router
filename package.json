@@ -1,6 +1,6 @@
 {
   "name": "pi-shift-router",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "An LLM judge routes every Pi agent turn to the right model — fast execution for routine work, smart reasoning for hard problems — with multi-model failover and automatic orchestration.",
   "keywords": [
     "pi-package",

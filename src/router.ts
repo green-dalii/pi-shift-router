@@ -43,6 +43,7 @@ export function createRouterState(): RouterState {
       workerFailStreak: 0,
       goal: null,
     },
+    lastDecision: null,
     lastAudit: null,
   };
 }
@@ -129,7 +130,7 @@ export function effectiveTheta(
  * wizard snapshots of the v1.3 default must not silently turn the strong
  * conservatism on).
  */
-function sameFamilyThetaFactor(config: ShiftRouterConfig): number {
+export function sameFamilyThetaFactor(config: ShiftRouterConfig): number {
   const ca = config.routing.cacheAware;
   if (typeof ca?.sameFamilyPenalty === "number" && ca.sameFamilyPenalty > 1) return ca.sameFamilyPenalty;
   if (

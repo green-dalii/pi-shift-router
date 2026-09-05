@@ -336,6 +336,14 @@ export interface ModelsStore {
 }
 
 /** Window entry — one Judge result / routing decision */
+export interface LastDecision {
+  verdict: Tier;
+  confidence?: number;
+  action: "upgrade" | "downgrade" | "stay" | "manual" | "enforce";
+  reason?: string;
+  at: number;
+}
+
 export interface WindowEntry {
   tier: Tier;
   timestamp: number;
@@ -424,6 +432,7 @@ export interface RouterState {
    * after the turn that triggered it has ended. Null until the first
    * orchestrated turn completes.
    */
+  lastDecision: LastDecision | null;
   lastAudit: OrchestrationAudit | null;
 }
 

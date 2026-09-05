@@ -8,6 +8,7 @@
  * /route-force     — Manual override for current turn
  */
 
+import { readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ShiftRouterConfig, RouterState, Tier, TierEntry, ModelRef, EconomicMode } from "./types.js";
 import { TIERS, ECONOMIC_MODE_PRESETS, LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT } from "./types.js";
@@ -24,9 +25,11 @@ import {
   effectiveReworkPenalty,
   effectiveTheta,
   legacyThetaOverride,
+  sameFamilyThetaFactor,
 } from "./router.js";
 import { resetOrchestration } from "./orchestrate.js";
-import { formatStats } from "./stats.js";
+import { formatStats, computeStats, judgeModelDisplay } from "./stats.js";
+import { StatusPanel, assembleStatusData, type StatusPanelInput } from "./tui/status-panel.js";
 import { formatRemaining } from "./failover.js";
 import {
   getConfigPath,
@@ -559,77 +562,116 @@ export function registerCommands(
         return;
       }
       if (arg === "status") {
-        const counts: Record<string, number> = { fast: 0, smart: 0 };
-        for (const e of state.window) counts[e.tier]++;
-
-        // Cooldown summary (SPEC §8.5.4): models currently cooling down.
         const now = Date.now();
-        const cooldownLines: string[] = [];
+        const store = await loadModelsStore();
+
+        // Cost telemetry (money section) — a null baseline (no pricing) is fine.
+        const snapshot = computeStats(state, config, now, store);
+        const money = snapshot.cost.baselineModel
+          ? {
+              spentFast: snapshot.cost.byTier.fast.cost,
+              spentSmart: snapshot.cost.byTier.smart.cost,
+              callsFast: snapshot.cost.byTier.fast.calls,
+              callsSmart: snapshot.cost.byTier.smart.calls,
+              actualTotal: snapshot.cost.actualTotal,
+              baselineTotal: snapshot.cost.baselineTotal,
+              savings: snapshot.cost.savings,
+              baselineName: `${snapshot.cost.baselineModel.provider}/${snapshot.cost.baselineModel.modelId}`,
+            }
+          : null;
+
+        // Per-model gauges for the CURRENT model: context window (pi) and
+        // cache hit rate (this tier's session-cumulative prompt tokens).
+        const contextUsage = (ctx as any).getContextUsage?.() ?? null;
+        const cacheStats = state.currentTier
+          ? {
+              input: state.tierUsage[state.currentTier].tokens.input,
+              cacheRead: state.tierUsage[state.currentTier].tokens.cacheRead,
+            }
+          : null;
+
+        const chains = TIERS.map((tier) => ({
+          tier,
+          models: (config.tiers[tier]?.models ?? []).map((ref) => {
+            const entry = store[ref.provider]?.models.find((m) => m.id === ref.model);
+            return { provider: ref.provider, model: ref.model, costIn: entry?.cost?.input ?? null };
+          }),
+        }));
+
+        const cooldowns: Array<{ provider: string; model: string; remainingMs: number }> = [];
         for (const [key, entry] of state.modelCooldowns) {
           if (entry.until <= now) continue;
           const [provider, ...rest] = key.split("/");
-          const model = rest.join("/");
-          cooldownLines.push(
-            `  ⏳ ${provider}/${model} — retry in ${formatRemaining(entry.until - now)}`,
-          );
+          cooldowns.push({ provider, model: rest.join("/"), remainingMs: entry.until - now });
         }
 
-        // Load pricing for the smart-tier baseline; null is fine —
-        // computeStats() falls back to "baseline: unavailable".
-        const store = await loadModelsStore();
-        const stats = formatStats(state, config, Date.now(), store).split("\n");
+        const version = (() => {
+          try {
+            return JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8")).version ?? "?";
+          } catch {
+            return "?";
+          }
+        })();
 
-        const sHeader = config.enabled ? "✅" : "⛔";
-        const sManual = state.manualOverride.active
-          ? ` ✅ ${state.manualOverride.tier ?? state.manualOverride.modelId ?? "active"}`
-          : " ✗";
-        const sOrch = config.orchestration.mode === "auto"
-          ? (state.orchestration.active
-              ? ` 🪄 active (round ${state.orchestration.rounds}/${config.orchestration.maxRounds}, esc ${state.orchestration.escalations}/${config.orchestration.escalationThreshold}, workers ${state.orchestration.done}/${state.orchestration.spawned})`
-              : ` 🪄 auto (idle)`)
-          : " ✗ (off)";
-        // Last orchestration acceptance-audit result (托底 review, SPEC §9.3).
-        const sAudit = state.lastAudit
-          ? (state.lastAudit.violations.length > 0
-              ? ` ⛔ ${state.lastAudit.violations.length} issue(s)${state.lastAudit.llm ? ` (LLM: ${state.lastAudit.llm.verdict})` : ""}`
-              : ` ✓ clean${state.lastAudit.llm ? ` (LLM: ${state.lastAudit.llm.verdict})` : ""}`) +
-            (state.lastAudit.selfExecuted ? " (self-executed)" : "")
-          : " —";
-        const totalTurns = state.window.length + state.upgradeCount + state.downgradeCount;
+        const currentGear = config.routing.economics?.mode ?? "default";
+        const otherGears = (Object.keys(ECONOMIC_MODE_PRESETS) as EconomicMode[])
+          .filter((m) => m !== currentGear)
+          .map((m) => ({
+            cmd: `/router ${m}`,
+            label: m === "eco" ? "save more" : m === "sport" ? "smarter sooner" : "balanced",
+            theta: 1 / ECONOMIC_MODE_PRESETS[m],
+          }));
 
-        // Grouped, human-readable status. Raw Window/Counts stay at the
-        // bottom for power users — the top is for humans.
-        ctx.ui.notify(
-          [
-            `pi-shift-router — Mode: ${config.routing.mode.toUpperCase()} ${sHeader}`,
-            `Current: ${formatTierDisplay(state.currentTier, state.currentModelId)}${state.manualOverride.active ? " (manual)" : ""}`,
-            ``,
-            `Tiers:`,
-            formatTierList(config),
-            ``,
-            `Session:`,
-            `  Turns: ${totalTurns}   Upgrades: ↑${state.upgradeCount}   Downgrades: ↓${state.downgradeCount}`,
-            `  Manual override:${sManual}`,
-            `  Orchestration:${sOrch}`,
-            `  Last audit:${sAudit}`,
-            `  Cache-aware: ${shareProviderFamily(config) ? "🎯 same-family (θ ÷ " + (config.routing.cacheAware?.enabled ? sameFamilyFactorDisplay(config) : "1 — disabled") + ", " + (config.routing.cacheAware?.enabled ? "warm-cache guarded" : "inactive — enable in /router config") + ")" : "— (cross-family)"}`,
-            `  Economics: 🚗 mode ${economicModeLabel(config)}  R=${effectiveReworkPenalty(config)} (θ=${effectiveThetaDisplay(config)}${effectiveThetaEffNote(config)})  downgrade streak ≥ ${config.routing.economics?.downgradeMemory ?? 2} fast${legacyThetaOverride(config) !== undefined ? `  ⚠ legacy window.threshold=${legacyThetaOverride(config)} (non-default value) overrides θ` : ""}`,
-            `  Gears:    /router eco (R=2, θ=0.50) · /router default (R=3, θ≈0.33) · /router sport (R=5, θ=0.20)`,
-            ...(cooldownLines.length > 0
-              ? [`  Cooldowns (${cooldownLines.length}):`, ...cooldownLines]
-              : [`  Cooldowns: none`]),
-            ``,
-            `Stats:`,
-            ...stats.map((line) => `  ${line}`),
-            ``,
-            `Detail:`,
-            `  Window: ${formatWindow(state.window)}  (${state.window.length} entries)`,
-            `  Counts: S=${counts.smart} F=${counts.fast}`,
-            ``,
-            formatConfigSource(),
-          ].join("\n"),
-          "info",
-        );
+        const input: StatusPanelInput = {
+          version,
+          enabled: config.enabled,
+          routingMode: config.routing.mode,
+          currentTier: state.currentTier,
+          currentProvider: state.currentProvider,
+          currentModelId: state.currentModelId,
+          manualActive: state.manualOverride.active,
+          lastDecision: state.lastDecision,
+          contextUsage,
+          cacheStats,
+          money,
+          speed: {
+            current: snapshot.currentTokensPerSec,
+            avg: snapshot.avgTokensPerSec,
+            totalTokens: snapshot.totalOutputTokens,
+          },
+          gear: {
+            label: economicModeLabel(config),
+            thetaEff: effectiveTheta(config),
+            downgradeMemory: config.routing.economics?.downgradeMemory ?? 2,
+            cacheAware: config.routing.cacheAware?.enabled === true,
+            sameFamily: shareProviderFamily(config),
+            sameFamilyFactor: sameFamilyThetaFactor(config),
+          },
+          otherGears,
+          chains,
+          cooldowns,
+          judgeModel: judgeModelDisplay(config),
+          windowGlyphs: state.window.slice(-10).map((e) => e.tier),
+          orchestration: {
+            mode: config.orchestration.mode,
+            active: state.orchestration.active,
+            detail: state.orchestration.active
+              ? `round ${state.orchestration.rounds}/${config.orchestration.maxRounds}, workers ${state.orchestration.done}/${state.orchestration.spawned}`
+              : undefined,
+            audit: state.lastAudit
+              ? state.lastAudit.violations.length > 0
+                ? `⛔ ${state.lastAudit.violations.length} issue(s)${state.lastAudit.llm ? ` (LLM: ${state.lastAudit.llm.verdict})` : ""}`
+                : `✓ clean${state.lastAudit.llm ? ` (LLM: ${state.lastAudit.llm.verdict})` : ""}${state.lastAudit.selfExecuted ? " (self-executed)" : ""}`
+              : null,
+          },
+          configSource: getConfigSource(),
+          now,
+        };
+
+        await ctx.ui.custom<null>((_tui, theme, _keybindings, done) => {
+          return new StatusPanel(theme, assembleStatusData(input), () => done(null)) as any;
+        });
+        updateStatus(ctx.ui);
         return;
       }
 

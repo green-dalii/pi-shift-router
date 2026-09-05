@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import {
   expandEnv,
   validateConfig,
@@ -19,6 +20,7 @@ import {
   loadModelsStore,
   loadConfig,
   saveConfig,
+  getConfigSource,
   invalidateModelsStoreCache,
   invalidateConfigCache,
 } from "../src/config.js";
@@ -549,5 +551,75 @@ describe("saveConfig → reload roundtrip", () => {
     await saveConfig(c, DIR, "project");
     const reloaded = await loadConfig(DIR);
     expect(reloaded.routing.economics.mode).toBe("sport");
+  });
+});
+
+
+// ─── Config source tracking (user ↔ project precedence visibility) ──
+//
+// Layering itself was already correct (defaults ← user ← project deep-merge,
+// project wins on conflict); what was missing is VISIBILITY — _configPath
+// even pointed at the project path when NEITHER file exists (it is the
+// default write target), which misleads users reading /router status.
+describe("config source tracking", () => {
+  const USER_CFG = "/tmp/pi-shift-router-test-home/.pi/agent/pi-shift-router.json";
+  let projectDir = "";
+
+  beforeEach(() => {
+    rmSync("/tmp/pi-shift-router-test-home", { recursive: true, force: true });
+    projectDir = "/tmp/pi-shift-router-src-test-" + Math.random().toString(36).slice(2, 8);
+    invalidateConfigCache();
+  });
+
+  afterEach(() => {
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync("/tmp/pi-shift-router-test-home", { recursive: true, force: true });
+  });
+
+  it("reports \"default\" when neither config file exists", async () => {
+    const cfg = await loadConfig(projectDir);
+    const src = getConfigSource();
+    expect(src.source).toBe("default");
+    expect(cfg).toBeDefined();
+  });
+
+  it("reports \"user\" when only the user-layer config exists", async () => {
+    mkdirSync("/tmp/pi-shift-router-test-home/.pi/agent", { recursive: true });
+    writeFileSync(USER_CFG, JSON.stringify({ ux: { quietMode: true } }));
+    await loadConfig(projectDir);
+    const src = getConfigSource();
+    expect(src.source).toBe("user");
+    expect(src.userLayerExists).toBe(true);
+    expect(src.projectExists).toBe(false);
+  });
+
+  it("reports \"project\" when the project-layer config exists", async () => {
+    mkdirSync(join(projectDir, ".pi"), { recursive: true });
+    writeFileSync(join(projectDir, ".pi", "pi-shift-router.json"), JSON.stringify({ ux: { quietMode: true } }));
+    await loadConfig(projectDir);
+    const src = getConfigSource();
+    expect(src.source).toBe("project");
+    expect(src.projectExists).toBe(true);
+  });
+
+  it("project wins on conflict; user-only fields survive the merge", async () => {
+    mkdirSync("/tmp/pi-shift-router-test-home/.pi/agent", { recursive: true });
+    writeFileSync(USER_CFG, JSON.stringify({
+      ux: { quietMode: false, routerLogVerbose: true },
+      tiers: { fast: { models: [{ provider: "user-p", model: "user-m", priority: 1 }] } },
+    }));
+    mkdirSync(join(projectDir, ".pi"), { recursive: true });
+    writeFileSync(join(projectDir, ".pi", "pi-shift-router.json"), JSON.stringify({
+      ux: { quietMode: true },
+      tiers: { fast: { models: [{ provider: "proj-p", model: "proj-m", priority: 1 }] } },
+    }));
+    const cfg = await loadConfig(projectDir);
+    const src = getConfigSource();
+    expect(src.source).toBe("project");
+    // Project wins the conflicted key AND the tier model array (arrays replace).
+    expect(cfg.ux.quietMode).toBe(true);
+    expect(cfg.tiers.fast.models[0].provider).toBe("proj-p");
+    // User-only key survives underneath (deep-merge layering).
+    expect(cfg.ux.routerLogVerbose).toBe(true);
   });
 });

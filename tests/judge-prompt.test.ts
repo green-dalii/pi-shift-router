@@ -123,6 +123,26 @@ describe("Judge prompt structure", () => {
 
   // ─── Static structural guards ───────────────────────────────────
 
+  it("requires HIGH confidence (>= 0.9) when the user explicitly requests a tier", () => {
+    // v1.4.2: "使用Smart档" with conf 0.4x hit the hold window (conf <
+    // minConfidence) and the explicit request was silently vetoed. The
+    // prompt must tell the judge that following an explicit instruction is
+    // a certainty, not a hedge.
+    expect(prompt).toMatch(/explicitly requests a tier or gear/i);
+    expect(prompt).toMatch(/confidence ≥ 0\.9/);
+    expect(prompt).toMatch(/certainty, not a hedge/i);
+  });
+
+  it("includes a tier-request few-shot (explicit gear switch)", () => {
+    expect(prompt).toMatch(/使用Smart档|使用 Smart 档|use the smart (?:tier|gear)/i);
+  });
+
+  it("explicit ORCHESTRATION intent also forces smart + orchestrate:true with >= 0.9 (replaces the removed EXPLICIT_ORCH_RE regex)", () => {
+    // v1.4.2 removed the keyword hard-gate in index.ts — the Judge is the
+    // sole classifier, including for explicit orchestration requests.
+    expect(prompt).toMatch(/explicitly asks for orchestration\/delegation\/parallel work[^\n]{0,120}0\.9/s);
+  });
+
   it("does not exceed reasonable length", () => {
     // Prompt is sent on every Judge call; keep it bounded
     // (token-cost matters). 4000 chars is the upper limit.

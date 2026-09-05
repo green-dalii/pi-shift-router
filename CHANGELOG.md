@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.2] — Judge-outage hold, retry-aware audit, TPS smoothing
 
+### Added
+
+- **`/router status` and `/router config` now show WHICH config layer is
+  authoritative** — `project (<path>)` when a project-side
+  `.pi/pi-shift-router.json` exists (with a note when the user layer is
+  merged underneath), `user (<path>)` otherwise, or `defaults` when no
+  config file exists (previously the status line showed the project path
+  even when no file existed — it is merely the default write target).
+  Layering semantics unchanged: defaults ← user ← project deep-merge,
+  project wins on conflict.
+
 ### Fixed
 
 - **Judge unavailability is now a HOLD, not a fabricated fast verdict.** Previously,
@@ -40,6 +51,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   injected `isCool` predicate, filters cooled endpoints before invoking the
   LLM pass, and skips the pass entirely when the whole chain is cooled
   (deterministic checks already ran).
+
+### Fixed (continued)
+
+- **Explicit tier requests are now honored** ("使用Smart档" / "use the smart
+  tier"). Root cause of the reported "explicit Smart request stayed on M3":
+  the judge's torn verdict (conf < minConfidence) hit the hold window, strict
+  takeover pinned the fast model, and the orchestration gate — reading the RAW
+  verdict instead of the decision — injected the CTO prompt anyway ("CTO loop
+  on the fast model"). Three changes: `RouteDecision` now carries
+  `decisionTier` (post-EV, post-hold) and `shouldOrchestrate` gates on it —
+  one signal for both the model switch and the CTO prompt; the judge prompt
+  requires confidence ≥ 0.9 on explicit tier/gear/orchestration requests
+  (obeying an explicit instruction is a certainty, not a hedge) and escalates
+  them before torn-task signals; and the `EXPLICIT_ORCH_RE` keyword hard-gate
+  is **removed entirely** (it was a keyword classifier — SPEC violation — and
+  its confidence-less tier mutation was the decoupling's origin). Explicit
+  intent is now judged, never regex-matched.
 
 ### Changed
 

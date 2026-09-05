@@ -30,6 +30,7 @@ import { formatStats } from "./stats.js";
 import { formatRemaining } from "./failover.js";
 import {
   getConfigPath,
+  getConfigSource,
   userConfigPath,
   loadModelsStore,
   loadAuthStore,
@@ -118,6 +119,24 @@ async function persistConfig(config: ShiftRouterConfig, cwd: string): Promise<bo
   const path = getConfigPath();
   const scope = path !== null && path === userConfigPath() ? "user" : "project";
   return saveConfig(config, cwd, scope);
+}
+
+/**
+ * One-line description of WHICH config layer is authoritative for the
+ * loaded config (v1.4.2): project file wins when present, else user file,
+ * else compiled defaults. The user layer is merged underneath a project
+ * file (project wins on conflict) — noted so users don't assume wholesale
+ * replacement.
+ */
+function formatConfigSource(): string {
+  const src = getConfigSource();
+  if (src.source === "project") {
+    return `Config: project (${src.path})${src.userLayerExists ? " — user layer merged underneath" : ""}`;
+  }
+  if (src.source === "user") {
+    return `Config: user (${src.path})`;
+  }
+  return "Config: defaults (no config file yet — saving creates one)";
 }
 
 /**
@@ -485,6 +504,9 @@ export function registerCommands(
         await routeConfigWizard(getConfig(), ctx.cwd, ctx);
         onConfigChanged();
         updateStatus(ctx.ui);
+        // Show which layer is now authoritative — a wizard save may have
+        // created the project file (default write target) just now.
+        ctx.ui.notify(`pi-shift-router: ${formatConfigSource()}`, "info");
         return;
       }
       if (arg === "quiet") {
@@ -604,7 +626,7 @@ export function registerCommands(
             `  Window: ${formatWindow(state.window)}  (${state.window.length} entries)`,
             `  Counts: S=${counts.smart} F=${counts.fast}`,
             ``,
-            `Config: ${getConfigPath() ?? "N/A"}`,
+            formatConfigSource(),
           ].join("\n"),
           "info",
         );

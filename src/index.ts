@@ -286,6 +286,14 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     // signal for both the model switch and the CTO prompt.
 
     const result = processRoute(judgeResult, state, config, ctx.modelRegistry as any);
+    // /router status "Last:" line — the most recent decision, one place.
+    state.lastDecision = {
+      verdict: judgeResult.tier,
+      confidence: judgeResult.confidence,
+      action: result.action,
+      reason: judgeResult.reason,
+      at: Date.now(),
+    };
 
     if (verbose) {
       console.log(`[ShiftRouter][diag] before_agent_start classify done in ${Date.now() - tDiag}ms`);

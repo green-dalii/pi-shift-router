@@ -216,11 +216,12 @@ export function processRoute(
           tier: state.manualOverride.tier ?? targetTier,
         },
         action: "manual",
+        decisionTier: state.manualOverride.tier ?? targetTier,
       };
     }
     if (state.manualOverride.tier) {
       const m = findBestModelForTier(state.manualOverride.tier, config, modelRegistry);
-      if (m) return { switchTo: m, action: "manual" };
+      if (m) return { switchTo: m, action: "manual", decisionTier: m.tier };
     }
   }
 
@@ -261,7 +262,7 @@ export function processRoute(
     if (m) {
       state.window = []; // fresh start for the new tier
       state.upgradeCount += 1;
-      return { switchTo: m, action: "upgrade" };
+      return { switchTo: m, action: "upgrade", decisionTier: "smart" };
     }
   }
 
@@ -273,7 +274,7 @@ export function processRoute(
       const m = findBestModelForTier("fast", config, modelRegistry, cooldownPredicate(state.modelCooldowns, now));
       if (m) {
         state.downgradeCount += 1;
-        return { switchTo: m, action: "downgrade" };
+        return { switchTo: m, action: "downgrade", decisionTier: "fast" };
       }
     }
   }
@@ -284,15 +285,22 @@ export function processRoute(
   const runningTier = state.currentTier;
   const m = findBestModelForTier(runningTier, config, modelRegistry, cooldownPredicate(state.modelCooldowns, now));
   if (m && (m.provider !== state.currentProvider || m.modelId !== state.currentModelId)) {
-    return { switchTo: m, action: "enforce" };
+    return { switchTo: m, action: "enforce", decisionTier: runningTier };
   }
 
-  return { switchTo: null, action: "stay" };
+  return { switchTo: null, action: "stay", decisionTier: runningTier };
 }
 
 export interface RouteDecision {
   switchTo: ResolvedModel | null;
   action: "upgrade" | "downgrade" | "stay" | "manual" | "enforce";
+  /**
+   * The tier the router actually DECIDED on (post-EV, post-hold, post-override).
+   * v1.4.2: orchestration must gate on THIS, not the raw judge verdict — the
+   * two diverge on holds and manual overrides, which produced "CTO loop on
+   * the fast model" when a torn smart verdict held on fast.
+   */
+  decisionTier: Tier;
 }
 
 /**

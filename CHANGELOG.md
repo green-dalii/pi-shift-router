@@ -41,6 +41,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LLM pass, and skips the pass entirely when the whole chain is cooled
   (deterministic checks already ran).
 
+### Fixed (continued)
+
+- **Explicit tier requests are now honored** ("使用Smart档" / "use the smart
+  tier"). Root cause of the reported "explicit Smart request stayed on M3":
+  the judge's torn verdict (conf < minConfidence) hit the hold window, strict
+  takeover pinned the fast model, and the orchestration gate — reading the RAW
+  verdict instead of the decision — injected the CTO prompt anyway ("CTO loop
+  on the fast model"). Three changes: `RouteDecision` now carries
+  `decisionTier` (post-EV, post-hold) and `shouldOrchestrate` gates on it —
+  one signal for both the model switch and the CTO prompt; the judge prompt
+  requires confidence ≥ 0.9 on explicit tier/gear/orchestration requests
+  (obeying an explicit instruction is a certainty, not a hedge) and escalates
+  them before torn-task signals; and the `EXPLICIT_ORCH_RE` keyword hard-gate
+  is **removed entirely** (it was a keyword classifier — SPEC violation — and
+  its confidence-less tier mutation was the decoupling's origin). Explicit
+  intent is now judged, never regex-matched.
+
 ### Changed
 
 - **TPS display is now the MEDIAN of the sliding window, not the last sample.**

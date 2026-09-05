@@ -517,3 +517,73 @@ describe("Judge unavailability — fallback source holds (never downgrades)", ()
     expect(state.window[state.window.length - 1].hold).toBe(false);
   });
 });
+
+// ─── RouteDecision.decisionTier — orchestration/model-switch consistency ──
+//
+// v1.4.2 real-world bug: shouldOrchestrate gated on the RAW judge verdict
+// while the model switch followed the post-EV decision. A smart verdict with
+// conf < minConfidence held on fast, strict takeover pinned the fast model,
+// and the CTO prompt was injected anyway — "CTO loop on the fast model".
+// The decision must carry its own tier so both consumers read ONE signal.
+describe("RouteDecision.decisionTier", () => {
+  it("upgrade carries the smart tier", () => {
+    const state = createRouterState();
+    state.currentTier = "fast";
+    const d = step(state, makeConfig(), judge("smart", 0.9));
+    expect(d.action).toBe("upgrade");
+    expect(d.decisionTier).toBe("smart");
+  });
+
+  it("decisive fast on fast carries the fast tier", () => {
+    const state = createRouterState();
+    state.currentTier = "fast";
+    state.currentProvider = "p";
+    state.currentModelId = "fast-model";
+    const d = step(state, makeConfig(), judge("fast", 0.95));
+    expect(d.action).toBe("stay");
+    expect(d.decisionTier).toBe("fast");
+  });
+
+  it("REGRESSION: hold on a torn smart verdict over fast carries FAST (not the verdict tier)", () => {
+    // The user's exact case: "使用Smart档" → judge smart conf 0.4x < 0.5 →
+    // hold. Decision stays fast; orchestration must NOT inject the CTO loop.
+    const state = createRouterState();
+    state.currentTier = "fast";
+    state.currentProvider = "p";
+    state.currentModelId = "fast-model";
+    const d = step(state, makeConfig(), judge("smart", 0.4));
+    expect(d.action).toBe("stay");
+    expect(d.decisionTier).toBe("fast");
+  });
+
+  it("hold on a torn smart verdict while ALREADY smart carries smart (CTO on smart is correct)", () => {
+    const state = createRouterState();
+    state.currentTier = "smart";
+    state.currentProvider = "p";
+    state.currentModelId = "smart-model";
+    const d = step(state, makeConfig(), judge("smart", 0.4));
+    expect(d.action).toBe("stay");
+    expect(d.decisionTier).toBe("smart");
+  });
+
+  it("downgrade carries the fast tier", () => {
+    const state = createRouterState();
+    state.currentTier = "smart";
+    state.currentProvider = "p";
+    state.currentModelId = "smart-model";
+    // Two decisive fast entries → downgrade.
+    step(state, makeConfig(), judge("fast", 0.95));
+    const d = step(state, makeConfig(), judge("fast", 0.95));
+    expect(d.action).toBe("downgrade");
+    expect(d.decisionTier).toBe("fast");
+  });
+
+  it("manual tier override carries the overridden tier", () => {
+    const state = createRouterState();
+    state.currentTier = "fast";
+    state.manualOverride = { active: true, tier: "smart" };
+    const d = step(state, makeConfig(), judge("fast", 0.95));
+    expect(d.action).toBe("manual");
+    expect(d.decisionTier).toBe("smart");
+  });
+});

@@ -34,8 +34,8 @@ The tier you pick **does the whole turn** (thinking, tooling, writing). You don'
 
 Weigh these signals, in priority order:
 
-1. **Explicit intent wins.** If the user says how they want it done, follow that — cases like *"think carefully / 仔细想想 / 最强大模型"* → smart; *"quick answer / 别想太多 / just code it"* → fast.
-2. **Explicit orchestration intent also wins** (see §2). If the user explicitly asks for orchestration/delegation/parallel work, that forces `smart` with `orchestrate:true`.
+1. **Explicit intent wins.** If the user says how they want it done, follow that — cases like *"think carefully / 仔细想想 / 最强大模型"* → smart; *"quick answer / 别想太多 / just code it"* → fast. **When the user explicitly requests a tier or gear** (e.g. *"使用Smart档"*, *"用 smart"*, *"use the smart tier"*, *"fast 档处理"*), you MUST return that tier with **confidence ≥ 0.9** — obeying an explicit instruction is a certainty, not a hedge. Do NOT dilute it because the rest of the task looks routine or torn: the user overrode the classification, and a mid-range confidence would push the decision into the hold window and silently veto their request.
+2. **Explicit orchestration intent also wins** (see §2). If the user explicitly asks for orchestration/delegation/parallel work, that forces `smart` with `orchestrate:true` and the same ≥ 0.9 confidence.
 3. **Stakes / reversibility.** Production, security, money, data, public API, irreversible deploy/delete → smart. Throwaway script, prototype → fast.
 4. **Task content.** Use the table above.
 5. **Ambiguity.** Many valid approaches / hidden constraints → smart. Single clear path → fast.
@@ -91,6 +91,12 @@ Example for an important one-pass decision:
 
 ```json
 {"tier":"smart","confidence":0.88,"reason":"explicit depth","orchestrate":false}
+```
+
+Example for an explicit tier/gear request (never hedge these):
+
+```json
+{"tier":"smart","confidence":0.95,"reason":"explicit smart request","orchestrate":false}
 ```
 
 Example for routine work:

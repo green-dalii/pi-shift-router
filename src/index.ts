@@ -276,19 +276,14 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       );
     }
 
-    // Explicit orchestration intent override (no new command): if the user
-    // explicitly asks for orchestration (e.g. "编排" / "orchestrat*" /
-    // "delegate"), force smart + orchestrate:true regardless of what the
-    // Judge said. Judge's `orchestrate` rule is soft (prompt-only); this is
-    // the hard gate so explicit intent never gets blocked by a `fast` verdict.
-    const EXPLICIT_ORCH_RE = /(编排|并行调研|并行对比|拆成.*子任务|派发|子代理|orchestrat|delegate\s+to\s+subagents?|fan[ -]?out|spawn\s+workers?)/i;
-    const wantsExplicitOrch = EXPLICIT_ORCH_RE.test(event.prompt ?? "");
-    if (wantsExplicitOrch && config.orchestration.mode === "auto" && config.enabled) {
-      if (judgeResult.tier !== "smart" || judgeResult.orchestrate !== true) {
-        if (verbose) console.log(`[ShiftRouter] explicit orchestration intent detected → forcing smart + orchestrate:true (was ${judgeResult.tier}/${String(judgeResult.orchestrate)})`);
-        judgeResult = { ...judgeResult, tier: "smart" as const, orchestrate: true };
-      }
-    }
+    // Explicit intent (tier OR orchestration) is honored by the Judge itself
+    // (prompts/judge.md §1–2: explicit request → forced tier + confidence
+    // ≥ 0.9). v1.4.2 removed the old EXPLICIT_ORCH_RE keyword hard-gate that
+    // used to force smart+orchestrate here — it was a keyword classifier
+    // (SPEC violation) and, by mutating the tier without a confidence, it
+    // decoupled orchestration from the model switch (CTO loop on the fast
+    // model). Orchestration now gates on result.decisionTier below — one
+    // signal for both the model switch and the CTO prompt.
 
     const result = processRoute(judgeResult, state, config, ctx.modelRegistry as any);
 
@@ -347,7 +342,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     try {
       if (
         orchestrationAllowed &&
-        shouldOrchestrate(config, judgeResult.tier, judgeResult.orchestrate, smartResolvable, subagentAvailable)
+        shouldOrchestrate(config, result.decisionTier, judgeResult.orchestrate, smartResolvable, subagentAvailable)
       ) {
         enterOrchestration(state);
         // Snapshot the user's original goal for the post-turn acceptance

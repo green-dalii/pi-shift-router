@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.2] — Judge-outage hold, retry-aware audit, TPS smoothing
 
+### Added
+
+- **`/router status` and `/router config` now show WHICH config layer is
+  authoritative** — `project (<path>)` when a project-side
+  `.pi/pi-shift-router.json` exists (with a note when the user layer is
+  merged underneath), `user (<path>)` otherwise, or `defaults` when no
+  config file exists (previously the status line showed the project path
+  even when no file existed — it is merely the default write target).
+  Layering semantics unchanged: defaults ← user ← project deep-merge,
+  project wins on conflict.
+
 ### Fixed
 
 - **Judge unavailability is now a HOLD, not a fabricated fast verdict.** Previously,

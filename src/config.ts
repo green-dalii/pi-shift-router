@@ -51,6 +51,34 @@ export function getConfigPath(): string | null {
   return _configPath;
 }
 
+/** Which config layer is authoritative for the loaded config. */
+export type ConfigSource = "project" | "user" | "default";
+
+let _configSource: ConfigSource = "default";
+let _userLayerExists = false;
+let _projectLayerExists = false;
+
+/**
+ * Source of the LAST LOADED config (set by loadConfig, reset by
+ * invalidateConfigCache). "project" = project file exists and wins;
+ * "user" = only the user layer exists; "default" = neither file exists.
+ * The user layer is always merged underneath when present — project wins
+ * on CONFLICT, it does not replace the user file wholesale.
+ */
+export function getConfigSource(): {
+  source: ConfigSource;
+  path: string | null;
+  userLayerExists: boolean;
+  projectExists: boolean;
+} {
+  return {
+    source: _configSource,
+    path: _configPath,
+    userLayerExists: _userLayerExists,
+    projectExists: _projectLayerExists,
+  };
+}
+
 /** Check if a file exists */
 async function fileExists(path: string): Promise<boolean> {
   try {
@@ -188,6 +216,9 @@ export function getModelPricing(
 export function invalidateConfigCache(): void {
   _config = null;
   _configPath = null;
+  _configSource = "default";
+  _userLayerExists = false;
+  _projectLayerExists = false;
   // Also clear the models-store cache: a config save is a "something changed"
   // signal — the user may also have edited models.json, and the next read should
   // reflect current disk state. _authStore is intentionally NOT cleared (owned by pi-agent).
@@ -414,9 +445,13 @@ export async function loadConfig(cwd: string): Promise<ShiftRouterConfig> {
   deepMerge(merged as unknown as Record<string, unknown>, projectCfg);
   _config = merged;
 
-  // Track which path is authoritative (project if exists, else user if exists)
-  _configPath = (await fileExists(projectPath)) ? projectPath
-              : (await fileExists(userPath))   ? userPath
+  // Track which layer is authoritative (project if it exists, else user;
+  // when neither exists the project path is the default WRITE target).
+  _projectLayerExists = await fileExists(projectPath);
+  _userLayerExists = await fileExists(userPath);
+  _configSource = _projectLayerExists ? "project" : _userLayerExists ? "user" : "default";
+  _configPath = _projectLayerExists ? projectPath
+              : _userLayerExists ? userPath
               : projectPath; // default write target
 
   return merged;

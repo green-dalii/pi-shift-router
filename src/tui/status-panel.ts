@@ -11,7 +11,7 @@
  * factory; no runtime import of pi-coding-agent (type-only imports are OK).
  */
 
-import { Box, Container, Text, getKeybindings } from "@earendil-works/pi-tui";
+import { Box, Container, Spacer, Text, getKeybindings } from "@earendil-works/pi-tui";
 import { formatRemaining } from "../failover.js";
 import type { Tier } from "../types.js";
 
@@ -276,8 +276,9 @@ const BAR_WIDTH = 10;
  */
 export class StatusPanel {
   private box = new Box(1, 0);
+  private container = new Container();
 
-  constructor(theme: ThemeLike, data: StatusPanelData, private onDone: () => void) {
+  constructor(private theme: ThemeLike, data: StatusPanelData, private onDone: () => void) {
     const accent = (t: string) => theme.fg("accent", t);
     const success = (t: string) => theme.fg("success", t);
     const warning = (t: string) => theme.fg("warning", t);
@@ -285,7 +286,9 @@ export class StatusPanel {
     const muted = (t: string) => theme.fg("muted", t);
     const dim = (t: string) => theme.fg("dim", t);
     const add = (text: string) => this.box.addChild(new Text(text, 0, 0));
-    const blank = () => add("");
+    // NOTE: Text("") renders ZERO lines (pi-tui skips whitespace-only text)
+    // — vertical gaps must use Spacer, not empty Text.
+    const blank = () => this.box.addChild(new Spacer(1));
     const section = (title: string) => add(accent(title));
 
     // Header
@@ -389,15 +392,16 @@ export class StatusPanel {
 
     // Reference
     add(muted(data.configLine));
-    add(dim("                                                   q / Esc close"));
-
+    blank();
     this.container.addChild(this.box);
   }
 
-  private container = new Container();
-
   render(width: number): string[] {
-    return this.container.render(width);
+    const lines = this.container.render(width);
+    // Close hint right-aligned at render time (the only place the real
+    // terminal width is known) and visually separated by a blank line.
+    lines.push(this.theme.fg("dim", "q / Esc — close".padStart(Math.max(0, width - 2))));
+    return lines;
   }
 
   handleInput(data: string): void {

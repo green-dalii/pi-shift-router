@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`/router status` is now a themed TUI dashboard** (q / Esc closes) with
+  per-model gauges — context-window usage and cache hit rate — inline
+  cooldowns on the chains, a live-entry marker, per-model pricing, a
+  dual-color spend bar, and a plain-language "how routing decides" section
+  (theta is expressed as a Smart-confidence bar, not math).
 - **`/router status` and `/router config` now show WHICH config layer is
   authoritative** — `project (<path>)` when a project-side
   `.pi/pi-shift-router.json` exists (with a note when the user layer is

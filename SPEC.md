@@ -365,7 +365,7 @@ The cheapest-fallback pool includes **all providers** that have a valid API key 
 
 | Command | Function |
 |---------|----------|
-| `/router status` | Show current tier, model, window state, and config summary |
+| `/router status` | Open the status dashboard (TUI panel): live model, last decision, money, chains with cooldowns, health, config layer |
 | `/router on` | Enable routing |
 | `/router off` | Disable routing — pi falls back to its default model |
 | `/router config` | Open the interactive configuration wizard (TUI) |
@@ -373,20 +373,47 @@ The cheapest-fallback pool includes **all providers** that have a valid API key 
 | `/router verbose` | Toggle verbose logging to console (for advanced debugging) |
 | `/route-force <tier\|model>` | Manually override the next turn's model |
 
-### 6.2 `/router status` Output
+### 6.2 `/router status` Output (TUI dashboard)
+
+`/router status` opens a blocking, theme-colored TUI panel (q / Esc closes).
+Sections, top-down by question: live state → last decision → money → chains
+→ health → how routing decides (plain language) → config layer. Per-model
+gauges: context-window usage (bar turns warning >80%) and cache hit rate
+(`cacheRead / (input + cacheRead)`, session-cumulative for the live tier;
+`n/a` when the provider reports nothing). Cooldowns render inline on the
+matching chain entry (⏳ + countdown); the running entry is marked `← live`;
+tier badges sit on their own line above each chain.
 
 ```
-Mode: AUTO  Enabled: ✅  Quiet: 🔇
+pi-shift-router v1.4.2 — routing ON (auto)
+Now: 🧠 commandcode/deepseek/deepseek-v4-flash
+  Context  ▓▓▓░░░░░░░  19% · 38.2k / 200.0k
+  Cache hit 84%  (12.4k of 14.8k prompt tokens from cache)
+Last: judge smart (conf 0.95) → ↑ upgrade to Smart — "explicit smart request"
 
-Current: [🧠 kimi-k3]
-Window: [s, f, f, f]  (4 entries)
-Counts: S=1 F=3
-Manual: ✗ None
+Money · this session
+  saved   $0.155 of $0.210  (74%)  vs all-smart: …
+  spent   $0.055  fast ▓░░░░░░░░░ 6% · smart ▓▓▓▓▓▓▓▓▓▓ 94%
+  speed   125 tok/s (avg 98) · 45.2k tokens
 
-Config: /project/.pi/pi-shift-router.json
+Chains (priority ↓ · price per Mtok in)
+  🦾 Fast
+     1  minimax-cn/MiniMax-M3  $0.28/M
+     2  commandcode/deepseek/deepseek-v4-flash  $0.11/M ⏳3m12s
+  🧠 Smart
+     1  commandcode/deepseek/deepseek-v4-flash  $0.11/M ← live
 
-  🦾 Fast         deepseek/deepseek-v4-flash
-  🧠 Smart        kimi/kimi-k3
+Health
+  judge 🧭 minimax-cn/MiniMax-M3 · cooldowns: 1
+  recent turns  ●●●●●   ● smart · ● fast
+  orchestration: 🪄 auto, idle · audit: ✓ clean (LLM pass)
+
+How routing decides
+  Gear: default — a turn goes to Smart when the judge is at least 22%
+  confident; back to Fast after 2 straight fast turns. Cache-aware is on:
+  switching within the same model family keeps your prompt cache warm.
+
+Config: project (/proj/.pi/pi-shift-router.json) — user layer merged underneath
 ```
 
 ### 6.3 Manual Override
@@ -559,8 +586,9 @@ retries are exhausted.
 
 On failover, show a toast notification (unless `quietMode`):
 `⚠️ <model> unavailable (429), switching to <fallback> — retry in Ns`.
-`/router status` lists each tier's active model and any cooldowns:
-`fast: deepseek-v4-flash (primary M3 in cooldown 3m12s)`.
+`/router status` inlines cooldowns onto the matching chain entry
+(warning-colored, with the countdown):
+`2 commandcode/deepseek/deepseek-v4-flash $0.11/M ⏳3m12s`.
 
 ### 8.5.5 Edge cases
 
@@ -587,13 +615,12 @@ On failover, show a toast notification (unless `quietMode`):
 
 **Fallback**: when pricing is missing for every model used (e.g. fully-local session with no `models-store.json` pricing), the baseline shows `unavailable` instead of a misleading savings number.
 
-**Display** (excerpt from `/router status`):
+**Display** (Money section of the `/router status` dashboard):
 
 ```
-Spend: fast $0.045 (12 calls) · smart $0.42 (3 calls) · total $0.465
-  baseline: anthropic/claude-opus-5 → $3.21 (saved $2.74 by routing)
-  fast tokens: 12,400 in / 8,200 out
-  smart tokens: 4,800 in / 1,100 out
+Money · this session
+  saved   $2.742 of $3.210  (85%)  vs all-smart: anthropic/claude-opus-5
+  spent   $0.465  fast ▓▓░░░░░░░░ 10% · smart ▓▓▓▓▓▓▓▓░░ 90%
 ```
 
 ### 9.2 Cache-aware routing (planned v1.0.0)

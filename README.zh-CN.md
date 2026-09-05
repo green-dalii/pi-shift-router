@@ -220,7 +220,7 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 /router status
 ```
 
-能看到当前档位、作用域、经济参数（R / θ）、降级连击要求和吞吐数据就对了。下一轮发消息触发首次判定。
+会打开一个主题化仪表盘（q / Esc 关闭）：当前档位与模型、上下文窗口与缓存命中率仪表、最近一次路由决策、会话省钱金额、两条链与内联冷却，以及一段白话的"路由如何决策"。下一轮发消息触发首次判定。
 
 ---
 
@@ -228,7 +228,7 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 
 | 命令 | 作用 |
 |------|------|
-| `/router status` | 查看当前档位、模型、窗口、配置摘要 |
+| `/router status` | 打开状态仪表盘（TUI）：当前模型、最近决策、花费、链路、健康度、配置层 |
 | `/router on` / `/router off` | 启用 / 停用路由 |
 | `/router config` | 打开 TUI 配置向导 |
 | `/router quiet` | 关闭内联 toast 提示 |

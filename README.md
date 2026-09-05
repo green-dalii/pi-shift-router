@@ -237,7 +237,7 @@ The wizard also exposes **🛡️ Cache-aware routing** — on by default when y
 /router status
 ```
 
-You should see your current tier, scope, economics (R / θ), downgrade-streak requirement, and throughput. Your next message triggers the first classification.
+A themed dashboard opens (q / Esc closes): your live tier and model, context-window and cache-hit gauges, last routing decision, session savings, both chains with cooldowns inlined, and a plain-language "how routing decides" section. Your next message triggers the first classification.
 
 ---
 
@@ -245,12 +245,12 @@ You should see your current tier, scope, economics (R / θ), downgrade-streak re
 
 | Command | What it does |
 |---|---|
-| `/router status` | Show current tier, model, window, config summary |
+| `/router status` | Open the status dashboard (TUI): live model, last decision, money, chains, health, config layer |
 | `/router on` / `/router off` | Enable / disable routing |
 | `/router config` | Launch the TUI configuration wizard |
 | `/router quiet` | Toggle inline toast notifications |
 | `/router verbose` | Toggle verbose logging |
-| `/router eco\|default\|sport` | Gear-shift economics presets (persisted): **eco** → R=2 (θ=0.5, cheaper — only clearly-needed turns run smart), **default** → R=3 (θ≈0.33), **sport** → R=5 (θ=0.2, eager — any real chance of needing Smart escalates). Top-level words so pi tab-completes them; `/router status` shows the current mode + the preset table |
+| `/router eco\|default\|sport` | Gear-shift economics presets (persisted): **eco** → R=2 (θ=0.5, cheaper — only clearly-needed turns run smart), **default** → R=3 (θ≈0.33), **sport** → R=5 (θ=0.2, eager — any real chance of needing Smart escalates). Top-level words so pi tab-completes them; `/router status` shows the current gear in plain language |
 | `/router orchestrate auto` | Task-level orchestration (default): complex tasks → Smart CTO delegates to Fast subagents; simple tasks stay on the plain router |
 | `/router orchestrate off` | Disable orchestration — plain two-tier routing only |
 | `/route-force <tier>` | Pin a tier for the next turn |

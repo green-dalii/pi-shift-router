@@ -37,6 +37,7 @@ export function createRouterState(): RouterState {
       escalations: 0,
       startedAt: null,
       spend: 0,
+      workerSpends: [],
       spawned: 0,
       done: 0,
       workerSpeeds: [],

@@ -26,6 +26,7 @@ import {
   resetOrchestration,
   capHit,
   recordWorkerOutcome,
+  recordWorkerSpend,
 } from "../src/orchestrate.js";
 
 function makeConfig(partial?: Partial<ShiftRouterConfig>): ShiftRouterConfig {
@@ -51,6 +52,35 @@ function makeConfig(partial?: Partial<ShiftRouterConfig>): ShiftRouterConfig {
 function noCooldown(_provider: string, _model: string): boolean {
   return false;
 }
+
+describe("recordWorkerSpend — per-worker cost attribution", () => {
+  it("accumulates cost and appends a per-worker record", () => {
+    const state = createRouterState();
+    recordWorkerSpend(state.orchestration, 0.05, 1200, 8000, 1000);
+    recordWorkerSpend(state.orchestration, 0.02, 300, 2000, 2000);
+    expect(state.orchestration.spend).toBeCloseTo(0.07);
+    expect(state.orchestration.workerSpends).toEqual([
+      { cost: 0.05, outputTokens: 1200, elapsedMs: 8000, at: 1000 },
+      { cost: 0.02, outputTokens: 300, elapsedMs: 2000, at: 2000 },
+    ]);
+  });
+
+  it("caps the per-worker ledger at 20 (oldest dropped, spend keeps accumulating)", () => {
+    const state = createRouterState();
+    for (let i = 0; i < 25; i++) recordWorkerSpend(state.orchestration, 0.01, 100, 100, i);
+    expect(state.orchestration.workerSpends).toHaveLength(20);
+    expect(state.orchestration.workerSpends[0].at).toBe(5);
+    expect(state.orchestration.spend).toBeCloseTo(0.25);
+  });
+
+  it("ledger resets on enterOrchestration (per-task attribution)", () => {
+    const state = createRouterState();
+    recordWorkerSpend(state.orchestration, 0.05, 100, 100, 1);
+    enterOrchestration(state);
+    expect(state.orchestration.workerSpends).toEqual([]);
+    expect(state.orchestration.spend).toBe(0);
+  });
+});
 
 describe("orchestration: default config", () => {
   it("is auto by default (v1.0.0 feature on by default)", () => {

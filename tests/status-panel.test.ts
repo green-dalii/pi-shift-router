@@ -156,6 +156,18 @@ describe("assembleStatusData", () => {
     expect(d.otherGears.map((g) => g.barPct)).toEqual([33, 13]); // 0.5/1.5→33, 0.2/1.5→13
   });
 
+  it("orchestration spend surfaces as a Money line when present", () => {
+    const d = assembleStatusData(
+      baseInput({ orchestration: { mode: "auto", active: false, audit: null, spend: 0.0689, workers: 5 } }),
+    );
+    expect(d.orchestrationSpendLine).toEqual({ cost: 0.0689, workers: 5 });
+  });
+
+  it("no orchestration Money line when spend is zero/absent", () => {
+    const d = assembleStatusData(baseInput());
+    expect(d.orchestrationSpendLine).toBeNull();
+  });
+
   it("money savings percentage is derived, not stored", () => {
     const d = assembleStatusData(baseInput());
     expect(d.money!.savingsPct).toBe(74); // 0.1552 / 0.2103 = 73.8

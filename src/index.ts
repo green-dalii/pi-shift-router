@@ -28,6 +28,7 @@ import {
   exitOrchestration,
   resetOrchestration,
   recordWorkerOutcome,
+  recordWorkerSpend,
   capHit,
 } from "./orchestrate.js";
 import { auditOrchestration, callAuditLLM, extractFinalAssistantText, extractWorkerResults } from "./audit.js";
@@ -773,17 +774,20 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     const spawnStart = typeof e?.toolCallId === "string" ? workerSpawnStarts.get(e.toolCallId) : undefined;
     if (spawnStart !== undefined) workerSpawnStarts.delete(e.toolCallId);
     const outputTokens: number = e?.usage?.output ?? 0;
+    const elapsedMs = spawnStart !== undefined ? Date.now() - spawnStart : null;
     if (spawnStart !== undefined && outputTokens > 0) {
-      const elapsed = Date.now() - spawnStart;
-      const tps = tokensPerSecond(outputTokens, elapsed);
+      const tps = tokensPerSecond(outputTokens, elapsedMs!);
       if (tps > 0) state.orchestration.workerSpeeds.push(tps);
     }
-    // Cost attribution (Phase 2): pi-subagents reports the subagent's usage
-    // on the tool result. Fold it into the orchestration spend so agent_end
-    // and (later) /router stats can show what delegation cost.
+    // Cost attribution (Phase 2 / v1.5.0): pi-subagents reports the subagent's
+    // usage on the tool result. Ledger the worker (bounded) and accumulate the
+    // task spend so the /router status Money section can show what
+    // delegation cost.
     const usage = e?.usage;
     const cost = usage?.cost?.total ?? 0;
-    if (cost > 0) state.orchestration.spend += cost;
+    if (cost > 0 || outputTokens > 0) {
+      recordWorkerSpend(state.orchestration, cost, outputTokens, elapsedMs);
+    }
     if (config.ux.statusBar) updateBar(ctx.ui, config, state);
     if (config.ux.routerLogVerbose) {
       console.log(

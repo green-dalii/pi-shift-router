@@ -615,6 +615,8 @@ export function registerCommands(
           orchestration: {
             mode: config.orchestration.mode,
             active: state.orchestration.active,
+            spend: state.orchestration.spend,
+            workers: state.orchestration.done,
             detail: state.orchestration.active
               ? `round ${state.orchestration.rounds}/${config.orchestration.maxRounds}, workers ${state.orchestration.done}/${state.orchestration.spawned}`
               : undefined,

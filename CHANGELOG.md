@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.5.0] — Per-worker cost attribution
+
+### Added
+
+- **Per-worker cost attribution**: orchestrated workers now get a bounded
+  spend ledger (cap 20, oldest dropped) fed by `usage.cost.total`,
+  output tokens, and wall time from the tool result; the `/router status`
+  dashboard Money section shows `orchestration $X (N workers)` when workers
+  have spent anything this task. Ledger resets per orchestration task.
+
+### Changed
+
+- ROADMAP catch-up: Released table now lists v1.0.0–v1.4.3; wizard menus
+  match by position/exact label instead of substring (`includes(key)`
+  mis-hit when one model id prefixes another, e.g. kimi/k2 vs kimi/k2-turbo).
+
 ## [1.4.3] — Codex usage-limit failover + housekeeping
 
 ### Fixed

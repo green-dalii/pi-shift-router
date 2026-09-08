@@ -39,7 +39,7 @@ Release history and planned work for **pi-shift-router**.
 | Feature | Version | Notes |
 |---------|---------|-------|
 | Examples directory | ongoing | Sample configs (frontend / ML / cross-provider cost-saving) for documentation. |
-| Cost attribution (per-worker) | v1.5.0 target | Subagent `usage.cost` from run results → §9.1 telemetry → per-worker spend in the `/router status` Money section. (`recordWorkerOutcome` carries usage; Phase 0 spike verified the data path.) |
+| Cost attribution (per-worker) | v1.5.0 ✅ done | Bounded per-worker ledger (`recordWorkerSpend`, cap 20) + task-spend accumulation; `/router status` Money section shows `orchestration $X (N workers)`. Aggregate spend was already in the status bar since v1.1. |
 | Context discipline | TBD | Orchestrator digests between phases (reuse compaction ideas); worker tasks self-contained. Gather real-usage data first. |
 | §9.2 warm-cache interplay | TBD | Main agent stays Smart across orchestration turns → cache invalidation; decide whether cacheAware should be orchestration-aware. Gather usage data first. |
 | Parallel worker fanout | Phase 3 | Specialized workers (frontend / backend / tests) from the Fast chain; independent phases fan out via `runs.all` with `worktree: true` isolation. |

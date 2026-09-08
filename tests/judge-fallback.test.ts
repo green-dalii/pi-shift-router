@@ -170,10 +170,13 @@ describe("classify falls back across fast-tier models", () => {
       return okResponse("model-b", "fast");
     });
 
+    // 2s abort window: generous headroom under vitest's 5s per-test timeout —
+    // this is the only test relying on a real millisecond timer, and a cold
+    // CI/worktree start once starved the 100ms variant (flake, 2026-09-07).
     const r = await classify("quick task", [
       endpoint("model-a"),
       endpoint("model-b"),
-    ], 100);
+    ], 2000);
 
     expect(r).toEqual({ tier: "fast", source: "llm" });
     expect(fetchMock).toHaveBeenCalledTimes(2);

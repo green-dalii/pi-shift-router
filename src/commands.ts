@@ -10,7 +10,7 @@
 
 import { readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { ShiftRouterConfig, RouterState, Tier, TierEntry, ModelRef, EconomicMode } from "./types.js";
+import type { ShiftRouterConfig, RouterState, Tier, ModelRef, EconomicMode } from "./types.js";
 import { TIERS, ECONOMIC_MODE_PRESETS, LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT } from "./types.js";
 import {
   isValidTier,
@@ -22,7 +22,6 @@ import {
   clearManualOverride,
   setManualOverrideModel,
   shareProviderFamily,
-  effectiveReworkPenalty,
   effectiveTheta,
   legacyThetaOverride,
   sameFamilyThetaFactor,
@@ -47,30 +46,6 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
-function formatWindow(window: RouterState["window"]): string {
-  if (window.length === 0) return "(empty)";
-  const badge: Record<string, string> = { fast: "f", smart: "s", hold: "·" };
-  return "[" + window.map((e) => (e.hold ? badge.hold : badge[e.tier] ?? "?")).join(", ") + "]";
-}
-
-function tierEntries(config: ShiftRouterConfig): TierEntry[] {
-  return TIERS.map((t) => ({
-    tier: t,
-    label: config.tiers[t].label,
-    description: config.tiers[t].description,
-    models: config.tiers[t].models.map((m) => ({ provider: m.provider, model: m.model })),
-  }));
-}
-
-function formatTierList(config: ShiftRouterConfig): string {
-  return tierEntries(config)
-    .map(
-      (e) =>
-        `  ${tierEmoji(e.tier)} ${e.label.padEnd(14)} ${e.models.map((m: { provider: string; model: string }) => `${m.provider}/${m.model}`).join(", ") || "(none)"}`,
-    )
-    .join("\n");
-}
-
 // ─── `/route-config` wizard ──────────────────────────────────────
 
 type MenuChoice = "fast" | "smart" | "ux" | "cache" | "done" | "cancel";
@@ -87,14 +62,6 @@ function economicModeLabel(config: ShiftRouterConfig): string {
   return R === undefined || R === 3 ? "default" : "custom";
 }
 
-/** " → 0.22 eff (same-family ÷1.5)" suffix when cache-aware division applies. */
-function effectiveThetaEffNote(config: ShiftRouterConfig): string {
-  const effective = effectiveTheta(config);
-  const base = 1 / Math.max(effectiveReworkPenalty(config), 1);
-  if (Math.abs(effective - base) <= 1e-9 || !shareProviderFamily(config)) return "";
-  return ` → ${effective.toFixed(2)} eff (same-family ÷${sameFamilyFactorDisplay(config)})`;
-}
-
 /** Same-family θ divisor for status display (mirrors router.sameFamilyThetaFactor). */
 function sameFamilyFactorDisplay(config: ShiftRouterConfig): string {
   const ca = config.routing.cacheAware;
@@ -103,13 +70,6 @@ function sameFamilyFactorDisplay(config: ShiftRouterConfig): string {
   // dead (migrates to 1.5); only a differing value implies the strong 3.0.
   if (typeof ca?.sameFamilyThreshold === "number" && ca.sameFamilyThreshold !== LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT) return "3";
   return "1.5";
-}
-
-/** Effective θ for status display (legacy non-default threshold overrides economics). */
-function effectiveThetaDisplay(config: ShiftRouterConfig): string {
-  const legacy = legacyThetaOverride(config);
-  if (legacy !== undefined) return String(legacy);
-  return (1 / Math.max(effectiveReworkPenalty(config), 1)).toFixed(2);
 }
 
 /**

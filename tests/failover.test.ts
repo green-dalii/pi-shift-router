@@ -243,6 +243,12 @@ describe("detectFailoverError", () => {
     expect(detectFailoverError("Too Many Requests")).not.toBeNull();
   });
 
+  it("detects Codex usage-limit exhaustion", () => {
+    expect(detectFailoverError("Codex error: The usage limit has been reached")).toEqual({ code: "429" });
+    expect(detectFailoverError("Codex error event: The usage limit has been reached (code=usage_limit_reached)")).toEqual({ code: "429" });
+    expect(detectFailoverError('{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}')).toEqual({ code: "429" });
+  });
+
   it("does NOT detect 400/401/404 (config/auth errors) — except unsupported_model", () => {
     expect(detectFailoverError("400 Bad Request: invalid_prompt")).toBeNull();
     expect(detectFailoverError("401 Unauthorized: invalid api key")).toBeNull();

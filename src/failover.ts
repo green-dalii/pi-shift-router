@@ -119,9 +119,10 @@ export function detectFailoverError(message: string | undefined | null): { code:
   const text = message.trim();
   if (!text) return null;
 
-  // Keyword signatures (rate limit / quota / token plan).
+  // Keyword signatures (rate limit / usage limit / quota / token plan).
   if (
     /rate[_ -]?limit/i.test(text) ||
+    /usage[_ -]?limit/i.test(text) ||
     /too many requests/i.test(text) ||
     /quota/i.test(text) ||
     /insufficient[_ -]?quota/i.test(text) ||

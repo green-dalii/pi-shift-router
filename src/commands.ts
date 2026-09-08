@@ -27,9 +27,8 @@ import {
   sameFamilyThetaFactor,
 } from "./router.js";
 import { resetOrchestration } from "./orchestrate.js";
-import { formatStats, computeStats, judgeModelDisplay } from "./stats.js";
+import { computeStats, judgeModelDisplay } from "./stats.js";
 import { StatusPanel, assembleStatusData, type StatusPanelInput } from "./tui/status-panel.js";
-import { formatRemaining } from "./failover.js";
 import {
   getConfigPath,
   getConfigSource,
@@ -318,12 +317,11 @@ async function routeConfigWizard(
 
       labels.push("✅ Back");
       const pick = await ctx.ui.select(header, labels);
-      if (!pick || pick.includes("Back")) return null;
-      for (const m of models) {
-        if (pick.includes(`${m.provider}/${m.id}`)) {
-          return { provider: m.provider, model: m.id, priority: 1 };
-        }
-      }
+      // Positional match — `includes(key)` would mis-hit when one model id is
+      // a prefix of another (kimi/k2 vs kimi/k2-turbo).
+      const idx = pick ? labels.indexOf(pick) : -1;
+      if (idx < 0 || idx >= models.length) return null;
+      return { provider: models[idx].provider, model: models[idx].id, priority: 1 };
     }
   }
 
@@ -338,11 +336,13 @@ async function routeConfigWizard(
     ];
 
     const pick = await ctx.ui.select("🎨 UX Settings", lines);
-    if (!pick || pick.includes("Done")) return;
-    if (pick.includes("Quiet")) ux.quietMode = !ux.quietMode;
-    if (pick.includes("Status bar")) ux.statusBar = !ux.statusBar;
-    if (pick.includes("Inline toast")) ux.inlineToast = !ux.inlineToast;
-    if (pick.includes("Verbose log")) ux.routerLogVerbose = !ux.routerLogVerbose;
+    if (!pick) return;
+    // Positional match — labels are display text, not identifiers.
+    const idx = lines.indexOf(pick);
+    if (idx === 0) ux.quietMode = !ux.quietMode;
+    else if (idx === 1) ux.statusBar = !ux.statusBar;
+    else if (idx === 2) ux.inlineToast = !ux.inlineToast;
+    else if (idx === 3) ux.routerLogVerbose = !ux.routerLogVerbose;
   }
 
   async function editCacheAware(): Promise<void> {
@@ -357,8 +357,8 @@ async function routeConfigWizard(
     ];
 
     const pick = await ctx.ui.select("🛡️ Cache-aware Routing", lines);
-    if (!pick || pick.includes("Done")) return;
-    if (pick.includes("Cache-aware routing")) {
+    if (!pick) return;
+    if (lines.indexOf(pick) === 0) {
       config.routing.cacheAware = { ...cache, enabled: !cache.enabled };
     }
   }

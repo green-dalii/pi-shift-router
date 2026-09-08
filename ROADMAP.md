@@ -22,18 +22,30 @@ Release history and planned work for **pi-shift-router**.
 | v0.9.0 | Cost telemetry + `/router status` restructure + cooldown rescale (4xx/5xx split) | ✅ |
 | v0.9.1 | Slogan philosophy + CTO/Engineer terminology unification | ✅ |
 | v0.10.0 | Cache-aware routing (same-family threshold + warm-cache guard) + coverage reporting | ✅ |
+| v1.0.0 | Task-level orchestration: Smart CTO delegates to Fast subagents | ✅ |
+| v1.0.1 | Custom-provider support, expandEnv fix | ✅ |
+| v1.1.0 | Orchestration works end-to-end; full status-bar telemetry | ✅ |
+| v1.1.1 | Logging & status-bar display fixes | ✅ |
+| v1.2.0 | Orchestration hardening: hard caps, convergence protocol, stale-model cleanup | ✅ |
+| v1.3.0 | Orchestration acceptance audit + prompt overhaul | ✅ |
+| v1.3.1 | pi-tui runtime dependency + release gates | ✅ |
+| v1.4.0 | EV economics routing, gear presets, doc-aware judge | ✅ |
+| v1.4.1 | Failover on 402 Insufficient Balance / 余额不足 | ✅ |
+| v1.4.2 | Judge-outage hold, retry-aware audit, TPS smoothing, status dashboard | ✅ |
+| v1.4.3 | Codex usage-limit failover + housekeeping | ✅ |
 
 ## Planned
 
 | Feature | Version | Notes |
 |---------|---------|-------|
-| Cost telemetry — deep view | v0.9.0 ✅ done | Smart vs Fast spend breakdown + savings vs **all-turns-on-smart** baseline (`config.tiers.smart.models[0]` pricing × session tokens). Data: pi-agent `message_end.usage.cost.total` + `models-store.json`. |
-| Cooldown backoff rescale | v0.9.0 ✅ done | 4× multiplier, 6h cap, **4xx starts at 16m** (client-side rate limits outlive 5xx blips), 5xx keeps 1m. |
-| Orchestration hardening (Phase 2) | v1.2.0 ✅ done | Review-loop convergence protocol + plugin-enforced escalation/max-rounds caps (`recordWorkerOutcome` + `tool_call` block + `⛔cap` status). Native /model contract documented (Scheme A). |
 | Examples directory | ongoing | Sample configs (frontend / ML / cross-provider cost-saving) for documentation. |
+| Cost attribution (per-worker) | v1.5.0 target | Subagent `usage.cost` from run results → §9.1 telemetry → per-worker spend in the `/router status` Money section. (`recordWorkerOutcome` carries usage; Phase 0 spike verified the data path.) |
+| Context discipline | TBD | Orchestrator digests between phases (reuse compaction ideas); worker tasks self-contained. Gather real-usage data first. |
+| §9.2 warm-cache interplay | TBD | Main agent stays Smart across orchestration turns → cache invalidation; decide whether cacheAware should be orchestration-aware. Gather usage data first. |
+| Parallel worker fanout | Phase 3 | Specialized workers (frontend / backend / tests) from the Fast chain; independent phases fan out via `runs.all` with `worktree: true` isolation. |
+| Cross-turn orchestration lifecycle | Phase 3 | `orchestration.active` session state; main model stays Smart across turns while active. MVP is single-turn. |
 | Tool-result classification | TBD | SPEC §9: classify tool calls (long shell output may indicate debugging, not a question). |
 | Verbose logs to file | TBD | `routerLogVerbose` currently writes straight to stdout, which interleaves with pi's TUI frame render and can leave the working spinner on screen after a turn (reported + root-caused in v0.10.0). Plan: route verbose diagnostics to a log file (e.g. `~/.pi/logs/shift-router.log`) instead of stdout, or expose a pi logging channel if one ships. |
-| **Task-level orchestration** | v1.0.0 | SPEC §9.3. Complex tasks escalate to a **Smart main agent that orchestrates Fast subagents** (Teams/Orchestra pattern) using pi-subagents. See sub-plan below. |
 | Coverage reporting | ✅ done | `vitest --coverage` in CI (v8 provider, thresholds ≥90% lines/functions/statements, ≥85% branches on `src/router.ts` + `src/failover.ts`). Current: router 100% / failover 95.5%. |
 
 ### Task-level orchestration — implementation sub-plan (SPEC §9.3)

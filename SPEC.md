@@ -264,7 +264,7 @@ For CoT models (e.g., DeepSeek Reasoner) that emit a separate `reasoning_content
 
 There is **no heuristic rule** as a fallback. When the LLM Judge is unavailable (network error, auth error, malformed response), the Judge returns `{ tier: "fast", source: "fallback" }`. The router treats this as `stay` (no model switch) and only logs a warning. The user is not interrupted.
 
-Additionally, when a Judge call fails with a **failover signature** (HTTP 429/5xx, or a body containing rate-limit / quota / `rate_limit_error`), the failed model is written into the shared `modelCooldowns` map via the `onFailure` callback. This means a rate-limited fast model is **not retried on subsequent Judge calls** — the next Judge invocation skips it via `isCooldown` and moves straight to the next fast-tier model. See §8.5.5 for the shared-map mechanism.
+Additionally, when a Judge call fails with a **failover signature** (HTTP 429/5xx, or a body containing rate-limit / usage-limit / quota / `rate_limit_error`), the failed model is written into the shared `modelCooldowns` map via the `onFailure` callback. This means a rate-limited fast model is **not retried on subsequent Judge calls** — the next Judge invocation skips it via `isCooldown` and moves straight to the next fast-tier model. See §8.5.5 for the shared-map mechanism.
 
 ---
 
@@ -572,7 +572,8 @@ retries are exhausted.
 ### 8.5.3 Failover signatures
 
 - **Trigger cooldown**: HTTP 429, 402, 5xx (500/502/503/504); body containing
-  `rate limit`, `quota`, `rate_limit_error`, `insufficient_quota`,
+  `rate limit`, `usage limit` / `usage_limit_reached` (Codex
+  subscription-exhaustion wording), `quota`, `rate_limit_error`, `insufficient_quota`,
   `insufficient balance` / `余额不足` (402 billing-exhausted — e.g.
   OpenRouter-style "Insufficient Balance" wrapped in `Error: 402: {…}`).
   The 4xx bucket (429 + 402) inherits the longer 16m backoff start because

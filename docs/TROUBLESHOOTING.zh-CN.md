@@ -38,6 +38,14 @@ v0.8.0 修复（commit `de6073a`+）。根因：`JSON.stringify(undefined)` 返�
 失败模型会进入 16m 冷却（同 4xx 桶，与 429 相同处理），路由器自动选
 同一档的下一个健康模型。
 
+### Codex 每轮都报 `The usage limit has been reached`
+
+Codex 把订阅额度耗尽报成
+`The usage limit has been reached` / `usage_limit_reached` —— 纯文字措辞，
+没有 HTTP 429 状态码。**v1.4.3 已修复**：检测层现在把
+`usage limit` 视为 429 类 failover 签名，耗尽的 Codex 模型进入 16m 冷却，
+同档下一个模型自动接管。旧版本请升级到 **pi-shift-router ≥ 1.4.3**。
+
 ## 总是被降级到 Fast
 
 Judge 误分类（`/router verbose` 查看）或阈值太激进。调高：

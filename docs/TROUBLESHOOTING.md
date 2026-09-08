@@ -39,6 +39,15 @@ If you see this on an older install, upgrade to **pi-shift-router ≥ 1.4.1**
 The failing model enters a 16m cooldown (same 4xx bucket as 429) and the
 router picks the next healthy same-tier model.
 
+### Every turn dies on Codex with `The usage limit has been reached`
+
+Codex reports exhausted subscription capacity as
+`The usage limit has been reached` / `usage_limit_reached` — plain wording,
+no HTTP 429 status. **Fixed in v1.4.3**: the detection layer now treats
+`usage limit` as a 429-class failover signature, so the exhausted Codex
+model enters a 16m cooldown and the next same-tier model takes over.
+On older installs, upgrade to **pi-shift-router ≥ 1.4.3**.
+
 ## Router keeps downgrading to Fast
 
 Either the Judge is misclassifying (inspect with `/router verbose`) or the threshold is too aggressive. Raise it:

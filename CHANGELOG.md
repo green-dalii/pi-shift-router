@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.4.3] — Codex usage-limit failover + housekeeping
+
+### Fixed
+
+- **Failover now triggers on Codex usage-limit exhaustion**: `The usage limit
+  has been reached` / `usage_limit_reached` (plain wording, no HTTP status)
+  is recognized as a 429-class signature — the exhausted Codex model gets a
+  16m cooldown and the next same-tier model takes over (+3 test assertions).
+
+### Changed
+
+- Dead-code cleanup: 5 status formatters orphaned by the v1.4.2 dashboard
+  rewrite removed (`formatWindow`, `tierEntries`, `formatTierList`,
+  `effectiveThetaEffNote`, `effectiveThetaDisplay`) + 2 dead imports.
+- Flake hardening: the judge abort test's real-timer window widened
+  100ms → 2000ms (cold-start headroom; no semantic change).
+
 ## [1.4.2] — Judge-outage hold, retry-aware audit, TPS smoothing
 
 ### Added

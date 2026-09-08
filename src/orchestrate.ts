@@ -140,6 +140,7 @@ export function createOrchestrationState(): OrchestrationState {
     escalations: 0,
     startedAt: null,
     spend: 0,
+    workerSpends: [],
     spawned: 0,
     done: 0,
     workerSpeeds: [],
@@ -165,6 +166,7 @@ export function enterOrchestration(state: RouterState): void {
     orch.rounds = 0;
     orch.escalations = 0;
     orch.spend = 0;
+    orch.workerSpends = [];
     orch.spawned = 0;
     orch.done = 0;
     orch.workerSpeeds = [];
@@ -227,6 +229,26 @@ export function shouldOrchestrate(
  * Pure state update — no side effects. Call from the `tool_result` handler for
  * subagent tools only, and only while orchestration is active.
  */
+/** Per-worker ledger cap — the status panel needs recency, not history. */
+export const WORKER_SPEND_CAP = 20;
+
+/**
+ * Attribute one completed worker's cost (Phase 2 / v1.5.0). Appends to the
+ * bounded per-worker ledger and accumulates the task spend. Pure state
+ * mutation — the tool_result handler in index.ts owns event extraction.
+ */
+export function recordWorkerSpend(
+  orch: OrchestrationState,
+  cost: number,
+  outputTokens: number,
+  elapsedMs: number | null,
+  at = Date.now(),
+): void {
+  orch.spend += cost;
+  orch.workerSpends.push({ cost, outputTokens, elapsedMs, at });
+  if (orch.workerSpends.length > WORKER_SPEND_CAP) orch.workerSpends.shift();
+}
+
 export function recordWorkerOutcome(state: RouterState, config: ShiftRouterConfig, ok: boolean): void {
   const orch = state.orchestration;
   if (!orch.active) return;

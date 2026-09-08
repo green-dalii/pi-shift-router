@@ -220,6 +220,18 @@ export interface OrchestrationAudit {
 }
 
 /** Orchestration lifecycle state (session-scoped, not persisted). */
+/** Per-worker cost attribution record (v1.5.0). */
+export interface WorkerSpendRecord {
+  /** USD attributed to this worker (usage.cost.total from the tool result). */
+  cost: number;
+  /** Output tokens the worker produced. */
+  outputTokens: number;
+  /** Spawn→result wall time, or null when the spawn start was lost. */
+  elapsedMs: number | null;
+  /** Epoch ms of the tool_result. */
+  at: number;
+}
+
 export interface OrchestrationState {
   /** Is the main agent currently running as an orchestrator? */
   active: boolean;
@@ -231,6 +243,8 @@ export interface OrchestrationState {
   startedAt: number | null;
   /** Estimated spend so far (USD) — hard budget guard. */
   spend: number;
+  /** Per-worker spend ledger (bounded, oldest dropped) for /router status. */
+  workerSpends: WorkerSpendRecord[];
   /** Subagent workers spawned during this orchestration task. */
   spawned: number;
   /** Subagent workers completed (tool_result received) this task. */

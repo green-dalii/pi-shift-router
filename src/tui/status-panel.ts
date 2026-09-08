@@ -95,7 +95,15 @@ export interface StatusPanelInput {
   cooldowns: Array<{ provider: string; model: string; remainingMs: number }>;
   judgeModel: string;
   windowGlyphs: Tier[];
-  orchestration: { mode: string; active: boolean; detail?: string; audit: string | null };
+  orchestration: {
+    mode: string;
+    active: boolean;
+    detail?: string;
+    audit: string | null;
+    /** Cumulative worker spend this task (Money section row; omitted when 0). */
+    spend?: number;
+    workers?: number;
+  };
   configSource: { source: "project" | "user" | "default"; path: string | null; userLayerExists: boolean };
   now: number;
 }
@@ -135,6 +143,8 @@ export interface StatusPanelData {
     models: ChainModelRow[];
   }>;
   health: { judgeModel: string; cooldownCount: number; windowGlyphs: Tier[]; orchLine: string; auditLine: string };
+  /** Money-section row for orchestrated worker spend; null when nothing recorded. */
+  orchestrationSpendLine: { cost: number; workers: number } | null;
   gearLine: { label: string; barPct: number; downgradeMemory: number; cacheAware: boolean };
   otherGears: Array<{ cmd: string; label: string; barPct: number }>;
   configLine: string;
@@ -256,6 +266,10 @@ export function assembleStatusData(input: StatusPanelInput): StatusPanelData {
       orchLine: `orchestration: 🪄 ${input.orchestration.mode}${input.orchestration.active ? `, ACTIVE${input.orchestration.detail ? ` (${input.orchestration.detail})` : ""}` : ", idle"}`,
       auditLine: `audit: ${input.orchestration.audit ?? "—"}`,
     },
+    orchestrationSpendLine:
+      input.orchestration.spend && input.orchestration.spend > 0
+        ? { cost: input.orchestration.spend, workers: input.orchestration.workers ?? 0 }
+        : null,
     gearLine,
     otherGears,
     configLine,
@@ -337,6 +351,12 @@ export class StatusPanel {
         `  spent   ${formatUsd(data.money.actualTotal)}  ` +
           `fast ${dim(fastBlocks)} ${data.money.pctFast}% · smart ${accent(smartBlocks)} ${data.money.pctSmart}%`,
       );
+      if (data.orchestrationSpendLine) {
+        add(
+          `  orchestration  ${formatUsd(data.orchestrationSpendLine.cost)}  ` +
+            dim(`(${data.orchestrationSpendLine.workers} workers)`),
+        );
+      }
     }
     if (data.speedLine) {
       add(

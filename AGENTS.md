@@ -100,7 +100,7 @@ Every public release (`npm publish`) goes through a fixed 8-step sequence. The a
    - `major` (X.0.0) — breaking config changes, breaking API changes, removal of a feature.
    - The repo `package.json` version must always be the **next** version higher than the latest published npm version (`npm view pi-shift-router version`). A stale `package.json` is a release bug.
 3. **Update `CHANGELOG.md`.** New top entry `## [X.Y.Z] — <one-line summary>` with sub-sections `### Added` / `### Changed` / `### Fixed` / `### Removed` (Keep a Changelog format). The summary line must be ≤ 10 words. Each user-facing change gets one bullet.
-4. **Update the version mention in `README.md` / `README.zh-CN.md`** if the README has a "version" callout (it does not currently, but if added later it must stay in sync).
+4. **Update the README head metadata** in `README.md` / `README.zh-CN.md`. Both have a non-visible SEO block at the top of the file and it IS a version callout: `latest: vX.Y.Z`, `last-updated: YYYY-MM`, plus `features:` / `search-intents:` for anything user-visible the release added. **This drifted silently from v1.4.0 to v1.5.0** (both READMEs still said `latest: v1.4.0` / `last-updated: 2026-08` while npm was on 1.5.0) — treat these two lines as mandatory release fields, not optional prose.
 5. **Commit the release locally.** One commit,
    - `chore: release vX.Y.Z` (or `feat: ...` / `fix: ...` if the release is a single-purpose change).
    - The commit message body recaps the changelog bullets.

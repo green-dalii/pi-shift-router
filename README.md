@@ -10,11 +10,11 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 - repo: https://github.com/green-dalii/pi-shift-router
 - docs: README.md / README.zh-CN.md / docs/CONFIG.md / docs/MODELS.md / docs/TROUBLESHOOTING.md
 - first-published: v0.4.0
-- latest: v1.4.0
-- last-updated: 2026-08
+- latest: v1.5.0
+- last-updated: 2026-09
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
-- search-intents: "auto-route pi agent turns", "LLM as classifier", "two-tier model routing", "model failover on 429", "cost vs quality model selection", "pi-coding-agent extension", "model cooldown exponential backoff", "JSON-mode classifier", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "auto switch models in pi agent", "task-level orchestration pi", "Smart CTO delegates to Fast subagents", "pi agent subagent orchestration"
-- features: two-tier routing, LLM judge, JSON-mode classifier, sliding-window downgrade gate, multi-model fallback chains, TUI config wizard, exponential-backoff runtime failover (429/5xx), shared cooldown map between routing and Judge, cache-aware routing (same-provider cache protection), cross-provider native, zero-config defaults, token throughput telemetry, task-level orchestration (on by default: Smart CTO delegates to Fast subagents; requires pi-subagents)
+- search-intents: "auto-route pi agent turns", "LLM as classifier", "two-tier model routing", "model failover on 429", "model failover on 402 insufficient balance", "codex usage limit failover", "cost vs quality model selection", "pi-coding-agent extension", "model cooldown exponential backoff", "JSON-mode classifier", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "auto switch models in pi agent", "task-level orchestration pi", "Smart CTO delegates to Fast subagents", "pi agent subagent orchestration", "per-worker cost attribution", "orchestration cost tracking pi", "TUI status dashboard pi"
+- features: two-tier routing, LLM judge, JSON-mode classifier, sliding-window downgrade gate, multi-model fallback chains, TUI config wizard, exponential-backoff runtime failover (429/402/5xx + Codex usage-limit exhaustion), shared cooldown map between routing and Judge, cache-aware routing (same-provider cache protection), cross-provider native, zero-config defaults, token throughput telemetry, TUI status dashboard (context-window + cache-hit gauges, chains with inline cooldowns, last decision, money), per-worker cost attribution (bounded orchestration ledger, `orchestration $X (N workers)`), EV economics routing with gear presets (eco/default/sport), task-level orchestration (on by default: Smart CTO delegates to Fast subagents; requires pi-subagents)
 - direct-competitor: "@tenchi4u/pi-bifrost (7-stage heuristic + subscription quota) · pi-smart-router (12-stage local pipeline + HyDRA + Virtual Cost v2)"
 - author: green-dalii (https://github.com/green-dalii)
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.md
@@ -237,7 +237,7 @@ The wizard also exposes **🛡️ Cache-aware routing** — on by default when y
 /router status
 ```
 
-A themed dashboard opens (q / Esc closes): your live tier and model, context-window and cache-hit gauges, last routing decision, session savings, both chains with cooldowns inlined, and a plain-language "how routing decides" section. Your next message triggers the first classification.
+A themed dashboard opens (q / Esc closes): your live tier and model, context-window and cache-hit gauges, last routing decision, session savings (plus worker spend when orchestrating), both chains with cooldowns inlined, and a plain-language "how routing decides" section. Your next message triggers the first classification.
 
 ---
 
@@ -268,9 +268,16 @@ A themed dashboard opens (q / Esc closes): your live tier and model, context-win
 `/router status` also reports **cost telemetry** — per-tier spend and how much routing saves you:
 
 ```
-Spend: fast $0.045 (9 calls) · smart $0.42 (3 calls) · total $0.465
-  baseline: all-turns-on-smart (opencode-go/deepseek-v4-flash) → $3.21 · saved $2.74
+Money · this session
+  saved   $2.742 of $3.210  (85%)  vs all-smart: opencode-go/deepseek-v4-flash
+  spent   $0.465  fast ▓░░░░░░░░░ 10% · smart ▓▓▓▓▓▓▓▓░░ 90%
+  orchestration  $0.0689  (5 workers)
 ```
+
+The **orchestration** row appears only when delegated workers actually spent
+something this task — each worker's `usage.cost.total` lands in a bounded
+per-worker ledger (last 20) and accumulates into the task total, so
+delegation cost is never hidden inside the main-agent figures.
 
 The baseline asks: *what would this session have cost if every turn ran on your configured Smart-tier model (priority 1) — i.e. no router?* The difference is your savings. If pricing is missing (fully-local session with no `models-store.json` pricing), it shows `baseline: unavailable` instead of a made-up number.
 

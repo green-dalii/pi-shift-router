@@ -610,6 +610,15 @@ On failover, show a toast notification (unless `quietMode`):
 
 `/router status` exposes per-tier spend (USD + token counts) plus a hypothetical baseline.
 
+**Orchestration worker spend (v1.5.0)**: delegated workers are attributed
+separately from the main agent. Each completed `subagent` tool result folds
+its `usage.cost.total` into `orchestration.spend` **and** appends a bounded
+per-worker record (`recordWorkerSpend`: cost, output tokens, spawn→result
+wall time; ledger cap 20, oldest dropped; reset per orchestration task).
+The dashboard Money section renders `orchestration $X (N workers)` whenever
+the task spent anything, so delegation cost is never buried in the
+main-agent totals.
+
 **Data source**: pi-agent's `message_end.usage` carries `input`, `output`, `cacheRead`, `cacheWrite`, and `cost.total` (USD) for every assistant message. The router attributes each message to whichever tier was active when it ran (`state.currentTier` at message_start).
 
 **Baseline definition**: "what would this session have cost on the most expensive model you actually used?" — across `state.callLog`, the max input / output / cacheRead / cacheWrite prices set the per-token rates; every message's tokens are priced at those rates and summed. When the most-expensive-model lookup succeeds, the difference `hypothetical - actual` is the **savings** figure.
@@ -880,7 +889,7 @@ judgment, code does boundary control):
 
 | Control layer | Owns | Responsibilities |
 |---|---|---|
-| **Hard (plugin code)** | pi-shift-router state machine | entry gate (Judge complex), main-model switch to Smart, **max rounds cap**, **escalation threshold N** (v1.2.0: plugin-enforced via `recordWorkerOutcome` + `tool_call` block), **elapsed/cost budget**, abort/reset semantics, per-phase state (`currentPhase`, `attempts`, `spend`) |
+| **Hard (plugin code)** | pi-shift-router state machine | entry gate (Judge complex), main-model switch to Smart, **max rounds cap**, **escalation threshold N** (v1.2.0: plugin-enforced via `recordWorkerOutcome` + `tool_call` block), **elapsed/cost budget**, abort/reset semantics, per-phase state (`currentPhase`, `attempts`, `spend`, `workerSpends`) |
 | **Soft (Smart main agent)** | CTO judgment | plan (phase list + per-phase acceptance criteria), delegation (which worker, what task), review pass/fail, final acceptance |
 
 **"Should the loop continue?" is a double judgment**: the *content* answer
@@ -995,7 +1004,9 @@ must not re-burn an endpoint the same turn just cooled down.
    wall-clock per `toolCallId`; `tool_result` pairs it back, computes
    tokens/sec from `usage.output`, and pushes into
    `orchestration.workerSpeeds` while folding `usage.cost.total` into
-   `orchestration.spend`. Router-off turns keep telemetry too:
+   `orchestration.spend` and appending a bounded per-worker ledger entry
+   (`recordWorkerSpend`, cap 20) that the `/router status` Money section
+   renders as `orchestration $X (N workers)`. Router-off turns keep telemetry too:
    `⛔ • 55 tok/s`. `/router status` shows workers `done/spawned` while
    active. A leaked orchestration state (interrupted turn that skipped
    agent_end) is swept at the start of the next turn, so a stale planning

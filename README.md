@@ -237,7 +237,7 @@ The wizard also exposes **🛡️ Cache-aware routing** — on by default when y
 /router status
 ```
 
-A themed dashboard opens (q / Esc closes): your live tier and model, context-window and cache-hit gauges, last routing decision, session savings, both chains with cooldowns inlined, and a plain-language "how routing decides" section. Your next message triggers the first classification.
+A themed dashboard opens (q / Esc closes): your live tier and model, context-window and cache-hit gauges, last routing decision, session savings (plus worker spend when orchestrating), both chains with cooldowns inlined, and a plain-language "how routing decides" section. Your next message triggers the first classification.
 
 ---
 
@@ -268,9 +268,16 @@ A themed dashboard opens (q / Esc closes): your live tier and model, context-win
 `/router status` also reports **cost telemetry** — per-tier spend and how much routing saves you:
 
 ```
-Spend: fast $0.045 (9 calls) · smart $0.42 (3 calls) · total $0.465
-  baseline: all-turns-on-smart (opencode-go/deepseek-v4-flash) → $3.21 · saved $2.74
+Money · this session
+  saved   $2.742 of $3.210  (85%)  vs all-smart: opencode-go/deepseek-v4-flash
+  spent   $0.465  fast ▓░░░░░░░░░ 10% · smart ▓▓▓▓▓▓▓▓░░ 90%
+  orchestration  $0.0689  (5 workers)
 ```
+
+The **orchestration** row appears only when delegated workers actually spent
+something this task — each worker's `usage.cost.total` lands in a bounded
+per-worker ledger (last 20) and accumulates into the task total, so
+delegation cost is never hidden inside the main-agent figures.
 
 The baseline asks: *what would this session have cost if every turn ran on your configured Smart-tier model (priority 1) — i.e. no router?* The difference is your savings. If pricing is missing (fully-local session with no `models-store.json` pricing), it shows `baseline: unavailable` instead of a made-up number.
 

@@ -220,7 +220,7 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 /router status
 ```
 
-会打开一个主题化仪表盘（q / Esc 关闭）：当前档位与模型、上下文窗口与缓存命中率仪表、最近一次路由决策、会话省钱金额、两条链与内联冷却，以及一段白话的"路由如何决策"。下一轮发消息触发首次判定。
+会打开一个主题化仪表盘（q / Esc 关闭）：当前档位与模型、上下文窗口与缓存命中率仪表、最近一次路由决策、会话省钱金额（编排时另有 worker 花费）、两条链与内联冷却，以及一段白话的"路由如何决策"。下一轮发消息触发首次判定。
 
 ---
 
@@ -249,9 +249,15 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 `/router status` 还会展示**花费统计**——各档位花费与路由替你省了多少钱：
 
 ```
-Spend: fast $0.045 (9 calls) · smart $0.42 (3 calls) · total $0.465
-  baseline: all-turns-on-smart (opencode-go/deepseek-v4-flash) → $3.21 · saved $2.74
+Money · this session
+  saved   $2.742 of $3.210  (85%)  vs all-smart: opencode-go/deepseek-v4-flash
+  spent   $0.465  fast ▓░░░░░░░░░ 10% · smart ▓▓▓▓▓▓▓▓░░ 90%
+  orchestration  $0.0689  (5 workers)
 ```
+
+**orchestration 行**只在本次任务真的有 worker 花钱时出现——每个 worker 的
+`usage.cost.total` 记入一个有界账本（最近 20 条）并累加到任务总额，委派成本
+不会被埋在主 agent 的数字里。
 
 基线问的是：*如果每一轮都跑在你配置的 Smart 档模型（priority 1）上——也就是没装路由器——这个会话要花多少？* 差值就是你的节省。若定价缺失（纯本地会话，`models-store.json` 没有定价），显示 `baseline: unavailable`，不编数字。
 

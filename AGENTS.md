@@ -60,7 +60,7 @@ GitHub branch protection is enabled on `main` with at least one required review 
 **Standard flow for any change (including release bumps and hotfixes):**
 
 1. **Branch off `main`.** Create a descriptive branch (e.g., `fix/orchestrate-trigger`, `docs/pr-1-followup`, `chore/release-v1.1.0`, `hotfix/v1.0.1-cache-leak`).
-2. **Commit locally on the branch.** Multiple commits are fine; the agent squashes on merge via `gh pr merge --squash`.
+2. **Commit locally on the branch — one logical commit, amended.** Follow-up fixes on the same branch (docs gaps, review nits, SEO metadata, review feedback) are **amended into that commit** (`git commit --amend`, then `git push --force-with-lease` if the branch is already pushed) — never stacked as separate `fix:`/`docs:` commits on top. A branch that needs a second commit is usually two PRs, not one. The squash on merge (`gh pr merge --squash`) is a safety net for review-time fixups, **not** a licence to push fragmented history: reviewer-visible branches should read as a single coherent change.
 3. **Push the branch** — requires explicit user approval per the Hard Stop rule above (`push` / `发布` / `go` / `ship it`).
 4. **Open a PR** with `gh pr create` against `main`. The PR body must summarize the change, link any related issues (`Closes #N` / `Refs #N`), and note any breaking changes or follow-up work. Requires explicit user approval.
 5. **Wait for review.** The agent must NOT self-approve or auto-merge. Wait for the user (or another reviewer) to leave a review. The agent may post a review comment summarizing its own audit findings (e.g., via `gh pr comment`) so the human reviewer has full context.

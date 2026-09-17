@@ -14,8 +14,8 @@ import { matchMenuChoice, matchSaveScope } from "../src/commands.js";
 
 describe("matchMenuChoice", () => {
   it("routes Cache-aware before Smart (emoji collision regression)", () => {
-    // "🛡️ Cache-aware routing" must NOT be captured by the Smart branch.
-    expect(matchMenuChoice("🛡️ Cache-aware routing")).toBe("cache");
+    // "🛡 Cache-aware routing" must NOT be captured by the Smart branch.
+    expect(matchMenuChoice("🛡 Cache-aware routing")).toBe("cache");
     // "🧠 Smart — 2 model(s) (CTO: direction, review, hard problems)"
     expect(matchMenuChoice("🧠 Smart — 2 model(s)  (CTO: direction, review, hard problems)")).toBe("smart");
   });
@@ -30,7 +30,7 @@ describe("matchMenuChoice", () => {
 
   it("does not confuse Smart with Cache-aware regardless of order", () => {
     expect(matchMenuChoice("🧠 Smart — 0 model(s)")).toBe("smart");
-    expect(matchMenuChoice("🛡️ Cache-aware routing")).toBe("cache");
+    expect(matchMenuChoice("🛡 Cache-aware routing")).toBe("cache");
   });
 });
 

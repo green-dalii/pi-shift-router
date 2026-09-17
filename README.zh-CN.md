@@ -11,11 +11,11 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.zh-CN.md
 - docs: README.md / README.zh-CN.md / docs/CONFIG.zh-CN.md / docs/MODELS.zh-CN.md / docs/TROUBLESHOOTING.zh-CN.md
 - first-published: v0.4.0
-- latest: v1.4.0
-- last-updated: 2026-08
+- latest: v1.5.0
+- last-updated: 2026-09
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
-- search-intents: "自动路由 pi agent 每轮", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排"
-- features: 两层路由、LLM Judge、JSON-mode 分类器、滑动窗口降级门、多模型 fallback 链、TUI 配置向导、指数退避运行时 failover（429/5xx）、路由与 Judge 共享冷却、cache-aware 路由（同 Provider 缓存保护）、跨 Provider、零配置起步、token 吞吐遥测、任务级编排（默认开启：Smart 档作为 CTO 派发给 Fast 子代理；需安装 pi-subagents）
+- search-intents: "自动路由 pi agent 每轮", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "402 余额不足自动切换模型", "Codex usage limit 自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排", "worker 花费归因", "编排成本统计", "TUI 状态仪表盘"
+- features: 两层路由、LLM Judge、JSON-mode 分类器、滑动窗口降级门、多模型 fallback 链、TUI 配置向导、指数退避运行时 failover（429/402/5xx + Codex usage limit 耗尽）、路由与 Judge 共享冷却、cache-aware 路由（同 Provider 缓存保护）、跨 Provider、零配置起步、token 吞吐遥测、TUI 状态仪表盘（上下文窗口与缓存命中率仪表、链内联冷却、最近决策、花费）、per-worker 花费归因（有界编排账本，`orchestration $X (N workers)`）、EV 经济学路由与齿轮预设（eco/default/sport）、任务级编排（默认开启：Smart 档作为 CTO 派发给 Fast 子代理；需安装 pi-subagents）
 - direct-competitor: "@tenchi4u/pi-bifrost（7 阶段启发式 + 订阅配额）· pi-smart-router（12 阶段本地管线 + HyDRA + Virtual Cost v2）"
 - author: green-dalii（https://github.com/green-dalii）
 -->

@@ -10,11 +10,11 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 - repo: https://github.com/green-dalii/pi-shift-router
 - docs: README.md / README.zh-CN.md / docs/CONFIG.md / docs/MODELS.md / docs/TROUBLESHOOTING.md
 - first-published: v0.4.0
-- latest: v1.4.0
-- last-updated: 2026-08
+- latest: v1.5.0
+- last-updated: 2026-09
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
-- search-intents: "auto-route pi agent turns", "LLM as classifier", "two-tier model routing", "model failover on 429", "cost vs quality model selection", "pi-coding-agent extension", "model cooldown exponential backoff", "JSON-mode classifier", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "auto switch models in pi agent", "task-level orchestration pi", "Smart CTO delegates to Fast subagents", "pi agent subagent orchestration"
-- features: two-tier routing, LLM judge, JSON-mode classifier, sliding-window downgrade gate, multi-model fallback chains, TUI config wizard, exponential-backoff runtime failover (429/5xx), shared cooldown map between routing and Judge, cache-aware routing (same-provider cache protection), cross-provider native, zero-config defaults, token throughput telemetry, task-level orchestration (on by default: Smart CTO delegates to Fast subagents; requires pi-subagents)
+- search-intents: "auto-route pi agent turns", "LLM as classifier", "two-tier model routing", "model failover on 429", "model failover on 402 insufficient balance", "codex usage limit failover", "cost vs quality model selection", "pi-coding-agent extension", "model cooldown exponential backoff", "JSON-mode classifier", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "auto switch models in pi agent", "task-level orchestration pi", "Smart CTO delegates to Fast subagents", "pi agent subagent orchestration", "per-worker cost attribution", "orchestration cost tracking pi", "TUI status dashboard pi"
+- features: two-tier routing, LLM judge, JSON-mode classifier, sliding-window downgrade gate, multi-model fallback chains, TUI config wizard, exponential-backoff runtime failover (429/402/5xx + Codex usage-limit exhaustion), shared cooldown map between routing and Judge, cache-aware routing (same-provider cache protection), cross-provider native, zero-config defaults, token throughput telemetry, TUI status dashboard (context-window + cache-hit gauges, chains with inline cooldowns, last decision, money), per-worker cost attribution (bounded orchestration ledger, `orchestration $X (N workers)`), EV economics routing with gear presets (eco/default/sport), task-level orchestration (on by default: Smart CTO delegates to Fast subagents; requires pi-subagents)
 - direct-competitor: "@tenchi4u/pi-bifrost (7-stage heuristic + subscription quota) · pi-smart-router (12-stage local pipeline + HyDRA + Virtual Cost v2)"
 - author: green-dalii (https://github.com/green-dalii)
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.md

@@ -59,7 +59,7 @@ GitHub branch protection is enabled on `main` with at least one required review 
 
 **Standard flow for any change (including release bumps and hotfixes):**
 
-1. **Branch off `main`.** Create a descriptive branch (e.g., `fix/orchestrate-trigger`, `docs/pr-1-followup`, `chore/release-v1.1.0`, `hotfix/v1.0.1-cache-leak`).
+1. **Branch off `main` — and prove the baseline first.** Run `git branch --show-current && git status -sb` and confirm you are ON `main` before `git checkout -b <branch>`. A feature branch left checked out is the documented cause of a **release PR silently carrying feature commits**: 2026-09-18, `chore/release-v1.6.0` was cut from `feat/pi-model-registry-alignment` instead of `main`, so PR #38 shipped the feature *and* the bump while the feature PR #37 stayed open and had to be closed as superseded (an empty squash once its diff was already on `main`). Create a descriptive branch (e.g., `fix/orchestrate-trigger`, `docs/pr-1-followup`, `chore/release-v1.1.0`, `hotfix/v1.0.1-cache-leak`).
 2. **Commit locally on the branch — one logical commit, amended.** Follow-up fixes on the same branch (docs gaps, review nits, SEO metadata, review feedback) are **amended into that commit** (`git commit --amend`, then `git push --force-with-lease` if the branch is already pushed) — never stacked as separate `fix:`/`docs:` commits on top. A branch that needs a second commit is usually two PRs, not one. The squash on merge (`gh pr merge --squash`) is a safety net for review-time fixups, **not** a licence to push fragmented history: reviewer-visible branches should read as a single coherent change.
 3. **Push the branch** — requires explicit user approval per the Hard Stop rule above (`push` / `发布` / `go` / `ship it`).
 4. **Open a PR** with `gh pr create` against `main`. The PR body must summarize the change, link any related issues (`Closes #N` / `Refs #N`), and note any breaking changes or follow-up work. Requires explicit user approval.
@@ -85,7 +85,14 @@ GitHub branch protection is enabled on `main` with at least one required review 
 
 ### Release Workflow
 
-Every public release (`npm publish`) goes through a fixed 8-step sequence. The agent must follow the order; skipping a step is a release-process bug.
+Every public release (`npm publish`) goes through a fixed 9-step sequence. The agent must follow the order; skipping a step is a release-process bug.
+
+0. **Branch from up-to-date `main`, with the feature PR already merged.** In order:
+   - `git checkout main && git pull origin main` — the release branch **must** start from `main`; never from a feature branch. `git log --oneline -1` must show the last merged PR, not an unmerged feature commit.
+   - `gh pr view <feature-PR> --json state` must return `MERGED`. A feature whose PR is still open is not released yet.
+   - `git checkout -b chore/release-vX.Y.Z`.
+   - **Self-check before opening the release PR:** `gh pr diff <release-PR> --name-only` must list **only** version/doc files (`package.json`, `CHANGELOG.md`, `README*.md`, `ROADMAP.md`, `docs/*`, `AGENTS.md`). Any source file (`src/**`, `tests/**`, `scripts/**`, `SPEC.md`) in a release diff is a **red flag** — the release branch was cut from the wrong base; abandon it, merge the feature PR, and redo.
+   - After merge, verify no orphan PRs remain: `gh pr list --state open` should show nothing that is already contained in `main` (`git diff main origin/<head-branch>` empty ⇒ close it as superseded rather than merging an empty squash).
 
 1. **Verify locally.** Run, in order:
    - `node --experimental-vm-modules node_modules/vitest/vitest.mjs run` — all tests pass (currently 373 tests across 17 files).

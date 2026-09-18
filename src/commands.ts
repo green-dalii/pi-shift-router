@@ -30,17 +30,20 @@ import { resetOrchestration } from "./orchestrate.js";
 import { computeStats, judgeModelDisplay } from "./stats.js";
 import { StatusPanel, assembleStatusData, type StatusPanelInput } from "./tui/status-panel.js";
 import {
+  listAvailableModels,
+  isModelAvailable,
+  refreshRegistry,
+  type ModelRegistryLike,
+} from "./model-source.js";
+import {
   getConfigPath,
   getConfigSource,
   userConfigPath,
   loadModelsStore,
   loadAuthStore,
-  flattenModels,
   saveConfig,
   invalidateModelsStoreCache,
   invalidateAuthStoreCache,
-  isProviderAuthenticated,
-  isModelUnavailable,
 } from "./config.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -147,7 +150,13 @@ async function routeConfigWizard(
   invalidateAuthStoreCache();
   const store = await loadModelsStore();
   const auth = await loadAuthStore();
-  const allModels = flattenModels(store).filter((m) => isProviderAuthenticated(m.provider, auth, store));
+  // Same catalog pi's `/model` shows: ask pi's registry first (it knows about
+  // env-var / models.json-command / runtime credentials and pi's full bundled
+  // catalog), and refresh so a just-edited models.json is reflected.
+  const registry = (ctx as any).modelRegistry as ModelRegistryLike | undefined;
+  await refreshRegistry(registry);
+  const modelSource = { registry, store, auth };
+  const allModels = listAvailableModels(modelSource);
   if (allModels.length === 0 && Object.keys(store).length > 0) {
     ctx.ui.notify("No authenticated providers — run /login for a provider before configuring tiers", "warning");
   }
@@ -189,7 +198,7 @@ async function routeConfigWizard(
     if (ctx.mode === "tui") {
       const unavailableKeys = new Set(
         cfg.models
-          .filter((m) => isModelUnavailable(m.provider, m.model, store, auth))
+          .filter((m) => !isModelAvailable(modelSource, m.provider, m.model))
           .map((m) => `${m.provider}/${m.model}`),
       );
       const { createChainEditor } = await import("./tui/fallback-chain-editor.js");
@@ -526,7 +535,13 @@ export function registerCommands(
         const store = await loadModelsStore();
 
         // Cost telemetry (money section) — a null baseline (no pricing) is fine.
-        const snapshot = computeStats(state, config, now, store);
+        const snapshot = computeStats(
+          state,
+          config,
+          now,
+          store,
+          (ctx as any).modelRegistry as ModelRegistryLike | undefined,
+        );
         const money = snapshot.cost.baselineModel
           ? {
               spentFast: snapshot.cost.byTier.fast.cost,

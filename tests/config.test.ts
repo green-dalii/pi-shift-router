@@ -127,6 +127,73 @@ describe("mergeCustomProviders", () => {
 });
 
 // ─── resolveFastEndpoints (custom provider auth) ────────────────────
+describe("resolveFastEndpoints — pi registry priority", () => {
+  const cfg: any = {
+    tiers: { fast: { models: [{ provider: "openrouter", model: "reg-only", priority: 1 }] }, smart: { models: [] } },
+    routing: {},
+    ux: {},
+  };
+
+  it("resolves a registry-only model (absent from models-store.json)", async () => {
+    const registry = {
+      find: (provider: string, id: string) =>
+        provider === "openrouter" && id === "reg-only"
+          ? { id, provider, baseUrl: "https://openrouter.ai/api/v1/", api: "openai-completions" }
+          : undefined,
+      getApiKeyForProvider: async () => "sk-from-pi",
+      getAvailable: () => [{ id: "reg-only", provider: "openrouter", cost: { input: 1 } }],
+    };
+
+    const eps = await resolveFastEndpoints(cfg, {} as any, {} as any, {}, registry as any);
+
+    expect(eps).toHaveLength(1);
+    expect(eps[0]).toMatchObject({
+      provider: "openrouter",
+      modelId: "reg-only",
+      baseUrl: "https://openrouter.ai/api/v1", // trailing slash trimmed
+      apiType: "openai-completions",
+      apiKey: "sk-from-pi",
+    });
+  });
+
+  it("cheapest-fallback pool comes from the registry when present", async () => {
+    const emptyFast: any = { tiers: { fast: { models: [] }, smart: { models: [] } }, routing: {}, ux: {} };
+    const registry = {
+      find: (provider: string, id: string) => ({ id, provider, baseUrl: "https://x/v1", api: "openai-completions" }),
+      getApiKeyForProvider: async () => "sk",
+      getAvailable: () => [
+        { id: "pricey", provider: "p", cost: { input: 5 } },
+        { id: "cheap", provider: "p", cost: { input: 0.5 } },
+      ],
+    };
+
+    const eps = await resolveFastEndpoints(emptyFast, {} as any, {} as any, {}, registry as any);
+    expect(eps.map((e) => e.modelId)).toEqual(["cheap"]);
+  });
+
+  it("falls back to store + auth.json when no registry is supplied", async () => {
+    const store: any = {
+      p: { models: [{ id: "m", baseUrl: "https://s/v1", api: "anthropic-messages", cost: { input: 1 } }] },
+    };
+    const auth: any = { p: { type: "api_key", key: "sk-store" } };
+
+    // cfg's fast tier references openrouter/reg-only, absent from this store →
+    // the designed cheapest-authenticated fallback resolves p/m instead.
+    const viaFallback = await resolveFastEndpoints(cfg, store, auth, {});
+    expect(viaFallback.map((e) => e.modelId)).toEqual(["m"]);
+    expect(viaFallback[0]).toMatchObject({ apiType: "anthropic-messages", apiKey: "sk-store" });
+
+    // Explicit fast-tier entry that IS in the store → resolved directly.
+    const direct = await resolveFastEndpoints(
+      { ...cfg, tiers: { fast: { models: [{ provider: "p", model: "m", priority: 1 }] }, smart: { models: [] } } },
+      store,
+      auth,
+      {},
+    );
+    expect(direct[0]).toMatchObject({ provider: "p", modelId: "m", apiType: "anthropic-messages", apiKey: "sk-store" });
+  });
+});
+
 describe("resolveFastEndpoints", () => {
   it("resolves a custom provider via inline apiKey with env expansion", async () => {
     const store: ModelsStore = {

@@ -335,6 +335,43 @@ export interface StoredModel {
   maxTokens?: number;
 }
 
+/**
+ * Structural subset of pi's public `ModelRegistry` extension API (SPEC §5.4).
+ * Declared here (not imported from pi-ai, which is a transitive host
+ * dependency) so every module can share one shape without a cycle.
+ */
+export interface RegistryModelLike {
+  id: string;
+  provider: string;
+  name?: string;
+  api?: string;
+  baseUrl?: string;
+  contextWindow?: number;
+  cost?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+  };
+}
+
+export interface RegistryAuthStatusLike {
+  configured: boolean;
+  source?: string;
+  label?: string;
+}
+
+export interface ModelRegistryLike {
+  getAvailable?: () => RegistryModelLike[];
+  getAll?: () => RegistryModelLike[];
+  find?: (provider: string, modelId: string) => RegistryModelLike | undefined;
+  hasConfiguredAuth?: (model: RegistryModelLike) => boolean;
+  getProviderAuthStatus?: (provider: string) => RegistryAuthStatusLike | undefined;
+  getProviderDisplayName?: (provider: string) => string;
+  getApiKeyForProvider?: (provider: string) => Promise<string | undefined>;
+  refresh?: () => Promise<unknown>;
+}
+
 /** One provider's entry in the merged model store. */
 export interface ProviderEntry {
   models: StoredModel[];

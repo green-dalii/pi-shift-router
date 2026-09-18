@@ -104,7 +104,7 @@ function formatConfigSource(): string {
 /**
  * Map a wizard option label to its menu action.
  *
- * Labels carry decorative emoji prefixes (🦾 🧠 🛡 …); matching on those is
+ * Labels carry decorative emoji prefixes (🦾 🧠 🔒 …); matching on those is
  * collision-prone — both "🧠 Smart" and "🧠 Cache-aware" start with 🧠, so a
  * `startsWith` on the emoji silently routes Cache-aware into Smart. Instead we
  * match on stable English keywords that are unique across the fixed option
@@ -173,7 +173,7 @@ async function routeConfigWizard(
       `🦾 Fast — ${config.tiers.fast.models.length} model(s)  (engineer: execution, daily coding)`,
       `🧠 Smart — ${config.tiers.smart.models.length} model(s)  (CTO: direction, review, hard problems)`,
       "🎨 UX settings",
-      "🛡 Cache-aware routing",
+      "🔒 Cache-aware routing",
       "💾 Save & exit",
       "🚫 Discard & exit",
     ]);
@@ -356,7 +356,7 @@ async function routeConfigWizard(
       "✅ Done",
     ];
 
-    const pick = await ctx.ui.select("🛡 Cache-aware Routing", lines);
+    const pick = await ctx.ui.select("🔒 Cache-aware Routing", lines);
     if (!pick) return;
     if (lines.indexOf(pick) === 0) {
       config.routing.cacheAware = { ...cache, enabled: !cache.enabled };

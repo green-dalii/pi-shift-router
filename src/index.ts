@@ -9,6 +9,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
 import type { Tier, ShiftRouterConfig, RouterState, ProviderEndpoint } from "./types.js";
+import { appendRouterLog } from "./log.js";
 import { loadConfig, resolveFastEndpoints } from "./config.js";
 import { findBestModelForTier, formatTierDisplay } from "./tier.js";
 import { formatStatusBarLabel } from "./status-bar.js";
@@ -81,7 +82,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     if (!provider || !modelId) return;
     const tierChanged = syncSessionModel(state, config, provider, modelId);
     if (config.ux.routerLogVerbose) {
-      console.log(
+      appendRouterLog(
         `[ShiftRouter][diag] model_select (${e?.source}): ${provider}/${modelId}` +
           (tierChanged ? ` (tier -> ${state.currentTier})` : ""),
       );
@@ -222,11 +223,11 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     const verbose = config.ux.routerLogVerbose;
     const promptPreview = event.prompt.slice(0, 80).replace(/\n/g, " ");
     if (verbose) {
-      console.log(`\n[ShiftRouter] ─── Turn start ───`);
-      console.log(`[ShiftRouter] prompt: "${promptPreview}${event.prompt.length > 80 ? "…" : ""}"`);
-      console.log(`[ShiftRouter] current: ${formatTierDisplay(state.currentTier, state.currentModelId)}`);
-      console.log(`[ShiftRouter][diag] before_agent_start entered @${tDiag}`);
-      console.log(`[ShiftRouter][diag] systemPrompt base: ${(event as any).systemPrompt?.length ?? "?"} chars`);
+      appendRouterLog(`\n[ShiftRouter] ─── Turn start ───`);
+      appendRouterLog(`[ShiftRouter] prompt: "${promptPreview}${event.prompt.length > 80 ? "…" : ""}"`);
+      appendRouterLog(`[ShiftRouter] current: ${formatTierDisplay(state.currentTier, state.currentModelId)}`);
+      appendRouterLog(`[ShiftRouter][diag] before_agent_start entered @${tDiag}`);
+      appendRouterLog(`[ShiftRouter][diag] systemPrompt base: ${(event as any).systemPrompt?.length ?? "?"} chars`);
     }
 
     // Restore the working indicator flag. pi's `agent_start` only shows the
@@ -269,7 +270,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       const ratio = state.window.length === 0
         ? "0/0"
         : `${state.window.filter((e) => e.tier === "fast").length}/${state.window.length}`;
-      console.log(
+      appendRouterLog(
         `[ShiftRouter] judge: ${judgeResult.tier} (${judgeResult.source})` +
           (judgeResult.confidence !== undefined ? ` conf=${judgeResult.confidence.toFixed(2)}` : "") +
           (judgeResult.reason !== undefined ? ` reason=${judgeResult.reason}` : "") +
@@ -297,8 +298,8 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     };
 
     if (verbose) {
-      console.log(`[ShiftRouter][diag] before_agent_start classify done in ${Date.now() - tDiag}ms`);
-      console.log(`[ShiftRouter] decision: ${result.action}${result.switchTo ? ` → ${result.switchTo.provider}/${result.switchTo.modelId}` : ""}`);
+      appendRouterLog(`[ShiftRouter][diag] before_agent_start classify done in ${Date.now() - tDiag}ms`);
+      appendRouterLog(`[ShiftRouter] decision: ${result.action}${result.switchTo ? ` → ${result.switchTo.provider}/${result.switchTo.modelId}` : ""}`);
     }
 
     // ── Task-level orchestration (SPEC §9.3) ──────────────────────
@@ -359,7 +360,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         state.orchestration.goal = event.prompt ?? null;
         const orchPrompt = buildOrchestratorPrompt(config, cooldownPredicate(state.modelCooldowns, Date.now()));
         if (config.ux.routerLogVerbose) {
-          console.log(
+          appendRouterLog(
             `[ShiftRouter] 🪄 orchestrating: judge=${judgeResult.tier}` +
               (judgeResult.orchestrate !== undefined ? ` orchestrate=${judgeResult.orchestrate}` : "") +
               `, injecting orchestrator prompt (${orchPrompt.length} chars)`,
@@ -395,7 +396,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         }
         const chainedSystemPrompt = baseSystemPrompt + "\n\n" + orchPrompt;
         if (config.ux.routerLogVerbose) {
-          console.log(
+          appendRouterLog(
             `[ShiftRouter] 🪄 system prompt chained: ${baseSystemPrompt.length} → ${chainedSystemPrompt.length} chars (+${orchPrompt.length} orchestrator)`,
           );
         }
@@ -413,7 +414,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
           ctx.modelRegistry as any,
           (m) => pi.setModel(m as any),
         );
-        if (verbose) console.log(`[ShiftRouter] model switch ${ok ? "ok" : "FAILED"}`);
+        if (verbose) appendRouterLog(`[ShiftRouter] model switch ${ok ? "ok" : "FAILED"}`);
         if (ok && !config.ux.quietMode && config.ux.inlineToast) {
           ctx.ui.notify(`${formatTierDisplay(state.currentTier, state.currentModelId)}`, "info");
         }
@@ -425,14 +426,14 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       // and state.orchestration.active stuck true (status bar frozen on
       // "🪄 orchestrating…"). Clean up here and let the turn proceed on the
       // current model; per AGENTS.md errors are logged, never crash host.
-      console.error("[ShiftRouter] before_agent_start error — recovering:", err);
+      appendRouterLog(`[ShiftRouter] before_agent_start error — recovering: ${err}`);
       stopLoading();
       if (state.orchestration.active) exitOrchestration(state);
       if (config.ux.statusBar) updateBar(ctx.ui, config, state);
     }
 
     if (config.ux.routerLogVerbose) {
-      console.log(
+      appendRouterLog(
         `[ShiftRouter][diag] before_agent_start end: systemPrompt=${(event as any).systemPrompt?.length ?? "?"} chars, current=${formatTierDisplay(state.currentTier, state.currentModelId)}`,
       );
     }
@@ -458,7 +459,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
   pi.on("agent_end", async (event, ctx) => {
     const tEnd0 = Date.now();
     if (config.ux.routerLogVerbose) {
-      console.log(`[ShiftRouter][diag] agent_end handler ENTER @${tEnd0}`);
+      appendRouterLog(`[ShiftRouter][diag] agent_end handler ENTER @${tEnd0}`);
     }
     // Defensive: explicitly clear the working spinner. If anything in this
     // handler (or pi's own agent_end → UI emit chain) hangs and prevents
@@ -495,7 +496,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       stopLoading();
       if (retryLikely) {
         if (config.ux.routerLogVerbose) {
-          console.log(
+          appendRouterLog(
             `[ShiftRouter] 🪄 orchestration turn failed with a retryable error — ` +
             `exit deferred (accounting kept); audit skipped until the turn settles`,
           );
@@ -504,7 +505,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       } else {
       const o = state.orchestration;
       if (config.ux.routerLogVerbose) {
-        console.log(
+        appendRouterLog(
           `[ShiftRouter] 🪄 orchestration turn ended — exited orchestrator state ` +
             `(workers ${o.done}/${o.spawned}, spend $${o.spend.toFixed(4)})`,
         );
@@ -540,19 +541,21 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         state.lastAudit = audit;
         if (audit.violations.length > 0) {
           // Diagnosability over silence: ungrounded acceptance is exactly the
-          // case the user must see. console.warn is not gated by verbose.
-          console.warn(
+          // case the user must see — via the toast below and `/router status`
+          // → Last audit. Logged to the router file, not the console: a stray
+          // write between TUI frames corrupts the frame layout.
+          appendRouterLog(
             `[ShiftRouter] ⛔ orchestration audit flagged ${audit.violations.length} issue(s): ${audit.violations.join(" | ")}`,
           );
           if (!config.ux.quietMode && config.ux.inlineToast) {
             ctx.ui.notify(`pi-shift-router: ⛔ audit: ${audit.violations[0]}`, "warning");
           }
         } else if (verboseAudit) {
-          console.log(`[ShiftRouter] ✓ orchestration audit passed (workers ${o.done}/${o.spawned})`);
+          appendRouterLog(`[ShiftRouter] ✓ orchestration audit passed (workers ${o.done}/${o.spawned})`);
         }
       } catch (auditErr) {
         // Errors are values: a broken audit must never crash agent_end.
-        console.warn(`[ShiftRouter] orchestration audit failed: ${auditErr}`);
+        appendRouterLog(`[ShiftRouter] orchestration audit failed: ${auditErr}`);
       }
       exitOrchestration(state);
       // Refresh the status bar: the previous frame may have shown
@@ -577,7 +580,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     try {
       throughputRecorded = recordTurnThroughputFallback((event as any).messages ?? [], state, primarySpeedRecorded);
     } catch (fallbackErr) {
-      console.warn(`[ShiftRouter] throughput fallback failed: ${fallbackErr}`);
+      appendRouterLog(`[ShiftRouter] throughput fallback failed: ${fallbackErr}`);
     }
     const msgCount = (event as any).messages?.length ?? 0;
     const plan = planTurnFailover(
@@ -588,7 +591,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       t0,
     );
     if (config.ux.routerLogVerbose) {
-      console.log(`[ShiftRouter][diag] agent_end entered: messages=${msgCount} plan=${plan ? "failover" : "none"} elapsed=${Date.now() - t0}ms`);
+      appendRouterLog(`[ShiftRouter][diag] agent_end entered: messages=${msgCount} plan=${plan ? "failover" : "none"} elapsed=${Date.now() - t0}ms`);
       // Dump a compact shape of every message so the next-turn API 400
       // ("role 'tool' without preceding tool_calls") can be traced to a
       // specific message in agent.state.messages. Each message is wrapped in
@@ -636,11 +639,11 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
           // anthropic-messages for the failure case).
           const provider = m.provider ? ` provider=${m.provider}` : "";
           const api = m.api ? ` api=${m.api}` : "";
-          console.log(
+          appendRouterLog(
             `[ShiftRouter][diag]   msg[${i}] role=${role}${stop}${tcid}${provider}${api}${kind}${toolUseIds}${preview}`,
           );
         } catch (dumpErr) {
-          console.log(
+          appendRouterLog(
             `[ShiftRouter][diag]   msg[${i}] <dump failed: ${dumpErr instanceof Error ? dumpErr.message : String(dumpErr)}> keys=${m && typeof m === "object" ? Object.keys(m).join(",") : "?"}`,
           );
         }
@@ -657,13 +660,13 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       // have painted without one (empty recentSpeeds / no wall-clock timing).
       if (throughputRecorded && config.ux.statusBar) updateBar(ctx.ui, config, state);
       if (config.ux.routerLogVerbose) {
-        console.log(`[ShiftRouter][diag] agent_end exiting (no failover) @${Date.now()} total=${Date.now() - tEnd0}ms`);
+        appendRouterLog(`[ShiftRouter][diag] agent_end exiting (no failover) @${Date.now()} total=${Date.now() - tEnd0}ms`);
       }
       return; // healthy turn or non-failover error
     }
 
     if (config.ux.routerLogVerbose) {
-      console.log(
+      appendRouterLog(
         `[ShiftRouter] ⚠ ${plan.failed.provider}/${plan.failed.model} failed (${plan.failed.code}) → cooldown ${formatRemaining(remainingFor(state, plan.failed.provider, plan.failed.model))}`,
       );
     }
@@ -703,7 +706,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
 
   pi.on("agent_settled", async () => {
     if (config.ux.routerLogVerbose) {
-      console.log(`[ShiftRouter][diag] agent_settled handler @${Date.now()}`);
+      appendRouterLog(`[ShiftRouter][diag] agent_settled handler @${Date.now()}`);
     }
   });
 
@@ -720,7 +723,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     if (e?.toolName !== "subagent") return;
     if (!state.orchestration.active) {
       if (config.ux.routerLogVerbose) {
-        console.log(
+        appendRouterLog(
           `[ShiftRouter][diag] subagent tool_call but orchestration INACTIVE (active=false, spawned=${state.orchestration.spawned}) — skipping count; ui stays on tier badge`,
         );
       }
@@ -732,7 +735,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     // must take over the phase / wrap up.
     if (capHit(state, config)) {
       if (config.ux.routerLogVerbose) {
-        console.log(
+        appendRouterLog(
           `[ShiftRouter] ⛔ cap hit (rounds=${state.orchestration.rounds}/${config.orchestration.maxRounds}, escalations=${state.orchestration.escalations}/${config.orchestration.escalationThreshold}) — blocking new subagent spawn`,
         );
       }
@@ -751,7 +754,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     stopLoading();
     if (config.ux.statusBar) updateBar(ctx.ui, config, state);
     if (config.ux.routerLogVerbose) {
-      console.log(
+      appendRouterLog(
         `[ShiftRouter][diag] subagent tool_call #${state.orchestration.spawned}: spawned=${state.orchestration.spawned}, active=${state.orchestration.active} → updateBar`,
       );
     }
@@ -790,7 +793,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     }
     if (config.ux.statusBar) updateBar(ctx.ui, config, state);
     if (config.ux.routerLogVerbose) {
-      console.log(
+      appendRouterLog(
         `[ShiftRouter][diag] subagent tool_result: done=${state.orchestration.done}/${state.orchestration.spawned}, active=${state.orchestration.active}, cost=$${cost.toFixed(4)} → updateBar`,
       );
     }
@@ -799,7 +802,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
   pi.on("turn_end", async (event) => {
     if (config.ux.routerLogVerbose) {
       const msg: any = (event as any).message;
-      console.log(`[ShiftRouter][diag] turn_end handler @${Date.now()} role=${msg?.role} stop=${msg?.stopReason ?? ""} err=${msg?.errorMessage ?? ""}`);
+      appendRouterLog(`[ShiftRouter][diag] turn_end handler @${Date.now()} role=${msg?.role} stop=${msg?.stopReason ?? ""} err=${msg?.errorMessage ?? ""}`);
     }
   });
 
@@ -810,7 +813,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       if (isModelInCooldown(state.modelCooldowns, state.currentProvider, state.currentModelId, Date.now())) {
         clearModelCooldown(state.modelCooldowns, state.currentProvider, state.currentModelId);
         if (config.ux.routerLogVerbose) {
-          console.log(
+          appendRouterLog(
             `[ShiftRouter] ✓ ${state.currentProvider}/${state.currentModelId} recovered (HTTP ${event.status}) — cooldown cleared`,
           );
         }
@@ -868,12 +871,12 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         recordSpeed(state.recentSpeeds, tps);
         primarySpeedRecorded = true; // turn-scoped: gates the agent_end fallback
         if (config.ux.routerLogVerbose) {
-          console.log(
+          appendRouterLog(
             `[ShiftRouter] ${outputTokens} tokens in ${elapsed}ms = ${tps} tok/s (total ${state.totalOutputTokens.toLocaleString()})`,
           );
         }
       } else if (config.ux.routerLogVerbose) {
-        console.log(
+        appendRouterLog(
           `[ShiftRouter] message_end: tokens=${outputTokens} elapsed=${elapsed}ms startTime=${startTime} msgTs=${msg.timestamp}`,
         );
       }
@@ -886,7 +889,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         `[ShiftRouter] throughput: message_end without message_start timing (output=${outputTokens}) — status bar relies on the agent_end timestamp fallback`,
       );
     } else if (config.ux.routerLogVerbose) {
-      console.log(
+      appendRouterLog(
         `[ShiftRouter] message_end: tokens=${outputTokens} startTime=${startTime} usage=${usage ? JSON.stringify(usage) : "undefined"}`,
       );
     }
@@ -923,7 +926,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     state.streamingStartTime = null;
     updateBar(ctx.ui, config, state);
     if (config.ux.routerLogVerbose) {
-      console.log(`[ShiftRouter][diag] message_end handler done (role=assistant)`);
+      appendRouterLog(`[ShiftRouter][diag] message_end handler done (role=assistant)`);
     }
   });
 

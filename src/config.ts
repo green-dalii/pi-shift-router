@@ -7,6 +7,7 @@
  */
 
 import { readFile, writeFile, access, mkdir } from "node:fs/promises";
+import { appendRouterLog } from "./log.js";
 import { homedir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import {
@@ -21,6 +22,11 @@ import {
 } from "./types.js";
 
 const PI_AGENT_DIR = join(homedir(), ".pi", "agent");
+
+/** pi's per-agent state dir (`~/.pi/agent`) — single source for path rules. */
+export function piAgentDir(): string {
+  return PI_AGENT_DIR;
+}
 const CONFIG_FILENAME = "pi-shift-router.json";
 
 let _config: ShiftRouterConfig | null = null;
@@ -325,7 +331,7 @@ export async function resolveFastEndpoints(
     // Verbose-gated: this fires on every /router config save / on-off toggle
     // via onConfigChanged — unconditional logging was user-visible noise.
     if (config?.ux?.routerLogVerbose) {
-      console.log(`[ShiftRouter] Judge endpoints: ${endpoints.map((e) => `${e.provider}/${e.modelId}`).join(", ")}`);
+      appendRouterLog(`[ShiftRouter] Judge endpoints: ${endpoints.map((e) => `${e.provider}/${e.modelId}`).join(", ")}`);
     }
     return endpoints;
   }

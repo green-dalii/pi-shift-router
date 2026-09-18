@@ -48,6 +48,22 @@ no HTTP 429 status. **Fixed in v1.4.3**: the detection layer now treats
 model enters a 16m cooldown and the next same-tier model takes over.
 On older installs, upgrade to **pi-shift-router ≥ 1.4.3**.
 
+### Where do the verbose logs go? (and why they don't print to the console)
+
+Turn verbose mode on (`/router verbose` or `ux.routerLogVerbose`) and the
+router appends every decision, Judge call, and turn diagnostic to
+**`~/.pi/agent/logs/shift-router.log`** — tail it in another terminal:
+
+```bash
+tail -f ~/.pi/agent/logs/shift-router.log
+```
+
+Diagnostics never go to the console because pi owns the terminal: a stray
+write lands between TUI frames and the renderer loses line accounting, so the
+assistant's own message (e.g. the CTO summary) gets split mid-sentence with
+log lines spliced in and wrapped lines overlap. If you saw that before, this
+is the fix. Override the path with `PI_SHIFT_ROUTER_LOG`.
+
 ## Router keeps downgrading to Fast
 
 Either the Judge is misclassifying (inspect with `/router verbose`) or the threshold is too aggressive. Raise it:

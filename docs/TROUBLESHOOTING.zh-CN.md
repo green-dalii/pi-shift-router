@@ -46,6 +46,19 @@ Codex 把订阅额度耗尽报成
 `usage limit` 视为 429 类 failover 签名，耗尽的 Codex 模型进入 16m 冷却，
 同档下一个模型自动接管。旧版本请升级到 **pi-shift-router ≥ 1.4.3**。
 
+### verbose 日志写到哪了？（以及为什么不打印到控制台）
+
+打开 verbose（`/router verbose` 或 `ux.routerLogVerbose`）后，路由器把每次决策、
+Judge 调用与每轮诊断追加写入 **`~/.pi/agent/logs/shift-router.log`**，另开终端 tail 即可：
+
+```bash
+tail -f ~/.pi/agent/logs/shift-router.log
+```
+
+诊断刻意不写控制台：终端由 pi 独占，杂散写入落在 TUI 帧之间会让渲染器丢失
+行号记账——助手自己的消息（例如 CTO 总结）会被日志行从句子中间截断、折行重叠。
+你之前看到的正是这个现象。路径可用 `PI_SHIFT_ROUTER_LOG` 覆盖。
+
 ## 总是被降级到 Fast
 
 Judge 误分类（`/router verbose` 查看）或阈值太激进。调高：

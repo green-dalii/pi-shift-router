@@ -45,7 +45,7 @@ Release history and planned work for **pi-shift-router**.
 | Parallel worker fanout | Phase 3 | Specialized workers (frontend / backend / tests) from the Fast chain; independent phases fan out via `runs.all` with `worktree: true` isolation. |
 | Cross-turn orchestration lifecycle | Phase 3 | `orchestration.active` session state; main model stays Smart across turns while active. MVP is single-turn. |
 | Tool-result classification | TBD | SPEC §9: classify tool calls (long shell output may indicate debugging, not a question). |
-| Verbose logs to file | TBD | `routerLogVerbose` currently writes straight to stdout, which interleaves with pi's TUI frame render and can leave the working spinner on screen after a turn (reported + root-caused in v0.10.0). Plan: route verbose diagnostics to a log file (e.g. `~/.pi/logs/shift-router.log`) instead of stdout, or expose a pi logging channel if one ships. |
+| ~~Verbose logs to file~~ | ✅ done | `routerLogVerbose` now appends to `~/.pi/agent/logs/shift-router.log` via `src/log.ts` instead of stdout. stdout writes interleaved with pi's TUI frames and split assistant text mid-sentence (reported 2026-09-17 with a CTO summary). pi ships no logging channel, so a file is the sink; `PI_SHIFT_ROUTER_LOG` overrides the path. |
 | Coverage reporting | ✅ done | `vitest --coverage` in CI (v8 provider, thresholds ≥90% lines/functions/statements, ≥85% branches on `src/router.ts` + `src/failover.ts`). Current: router 100% / failover 95.5%. |
 
 ### Task-level orchestration — implementation sub-plan (SPEC §9.3)

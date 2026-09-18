@@ -23,6 +23,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { appendRouterLog } from "./log.js";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import type { OrchestrationAudit, ProviderEndpoint } from "./types.js";
@@ -275,13 +276,13 @@ export const callAuditLLM: AuditLLMCall = async (
     }
     const parsed = parseAuditorVerdict(text);
     if (verbose) {
-      console.log(
+      appendRouterLog(
         `[ShiftRouter] 🧾 audit LLM ${parsed ? `verdict=${parsed.verdict} issues=${parsed.issues.length}` : "unparseable"}`,
       );
     }
     return parsed;
   } catch (err) {
-    if (verbose) console.warn(`[ShiftRouter] 🧾 audit LLM call failed: ${err}`);
+    if (verbose) appendRouterLog(`[ShiftRouter] 🧾 audit LLM call failed: ${err}`);
     return null;
   }
 };

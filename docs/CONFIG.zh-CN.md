@@ -18,7 +18,7 @@
 ## 只能手改 JSON 的项（高级，不在 TUI 里）
 
 - `routing.judgeTimeout`、`routing.window.minConfidence`、`routing.economics.reworkPenalty`
-- `ux.quietMode`、`ux.routerLogVerbose`
+- `ux.quietMode`、`ux.routerLogVerbose`（verbose 日志写入 `~/.pi/agent/logs/shift-router.log`）
 
 手改后重跑一次 `/router config` 重新加载，或重启 pi。
 
@@ -51,7 +51,7 @@ pi-shift-router.json
     ├── quietMode              关闭 inline toast；默认 false
     ├── statusBar              显示 🦾 / 🧠 徽章；默认 true
     ├── inlineToast            模型切换提示；默认 true
-    └── routerLogVerbose       调试日志；默认 false
+    └── routerLogVerbose       调试日志写入 ~/.pi/agent/logs/shift-router.log；默认 false
 ├── orchestration            （SPEC §9.3，v1.0.0；全部可选）
     ├── mode                   "auto" | "off"；默认 auto（/router orchestrate off 关闭）
     ├── maxRounds              每任务 delegate→review 轮数上限；默认 3
@@ -100,7 +100,7 @@ tiers:
 | `routing.cacheAware.sameFamilyPenalty` | `1.5` | 启用 cache-aware 且同家族时的 θ 除数（更少降级 → 缓存存活）。 |
 | `routing.cacheAware.sameFamilyThreshold` | 旧版 | v1.4.0 之前的旋钮。**平滑迁移：旧默认值 `0.9` 已死**（向导快照回落到 `sameFamilyPenalty` 1.5）；只有**不等于** `0.9` 的值才蕴含强默认惩罚 3.0，保留显式调过它的旧配置的保守意图。 |
 | `routing.cacheAware.idleBoundaryMs` | `300000` | 空闲超过该时长视为 prompt 缓存已过期，恢复允许降级。 |
-| `ux.quietMode` / `statusBar` / `inlineToast` / `routerLogVerbose` | 各自 | 界面 / 日志开关。 |
+| `ux.quietMode` / `statusBar` / `inlineToast` / `routerLogVerbose` | 各自 | 界面开关；`routerLogVerbose` 把诊断追加到 `~/.pi/agent/logs/shift-router.log`。 |
 | `orchestration.mode` | `"auto"` | 任务级编排模式。`"auto"`（默认）：由 Judge 驱动——简单任务（fast 判定）走普通路由；复杂任务（smart 判定）升级为 Smart 编排执行（需安装 `pi-subagents` 扩展；未安装时退化为普通 smart 档运行）。`"off"`（`/router orchestrate off`）：永不编排——行为与现有路由完全一致。没有“总是”模式。 |
 | `orchestration.maxRounds` | `3` | 每任务 delegate→review 轮数硬上限；达到即停，无论 Smart 想继续多少轮。 |
 | `orchestration.escalationThreshold` | `2` | 某阶段 worker 失败 ≥N 次 → Smart 亲自接管该阶段。 |
@@ -142,7 +142,7 @@ tiers:
 
 **`tiers.<tier>.models[]`** — 按优先级排序。第一项是 primary，后续项是运行时 fallback（v0.6.0）。最便宜的健康模型放第一。
 
-**`ux.routerLogVerbose`** — 设为 `true`（或 `/router verbose`）在控制台看决策日志。校准 threshold 时很有用。
+**`ux.routerLogVerbose`** — 设为 `true`（或 `/router verbose`），把每次决策、Judge 调用与每轮诊断追加写入 **`~/.pi/agent/logs/shift-router.log`**（目录不存在时自动创建）。这些诊断**刻意不写控制台**：终端由 pi 独占，任何杂散写入都会打乱 TUI 帧——助手消息会被日志行截断、折行重叠——把诊断写进文件正是为了避免这一点。可用 `PI_SHIFT_ROUTER_LOG` 环境变量改路径。校准 `reworkPenalty` / 齿轮时很有用。
 
 ## 读 /router status
 

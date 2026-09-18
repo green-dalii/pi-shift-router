@@ -12,6 +12,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { appendRouterLog } from "./log.js";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import type { JudgeResult, Tier, ProviderEndpoint } from "./types.js";
@@ -115,8 +116,8 @@ async function classifyLLM(
     const url = judgeApiUrl(endpoint.baseUrl, endpoint.apiType);
 
     if (verbose) {
-      console.log(`[ShiftRouter] Judge → ${endpoint.modelId} (${endpoint.apiType})`);
-      console.log(`[ShiftRouter] Judge URL: ${url}`);
+      appendRouterLog(`[ShiftRouter] Judge → ${endpoint.modelId} (${endpoint.apiType})`);
+      appendRouterLog(`[ShiftRouter] Judge URL: ${url}`);
     }
 
     const res = await fetch(url, {
@@ -134,7 +135,7 @@ async function classifyLLM(
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       if (verbose) {
-        console.warn(`[ShiftRouter] Judge API error ${res.status} from ${url}: ${text.slice(0, 200)}`);
+        appendRouterLog(`[ShiftRouter] Judge API error ${res.status} from ${url}: ${text.slice(0, 200)}`);
       }
       return { ok: false, code: judgeFailureCode(res.status, text) };
     }
@@ -148,7 +149,7 @@ async function classifyLLM(
       const reasoning = jsonStr(choice?.message?.reasoning_content);
       const finish = choice?.finish_reason ?? "?";
       if (verbose) {
-        console.warn(
+        appendRouterLog(
           `[ShiftRouter] Judge unparseable from ${url}: ` +
           `content=${content.slice(0, 100)}, reasoning=${reasoning.slice(0, 100)}, finish=${finish}`,
         );
@@ -167,7 +168,7 @@ async function classifyLLM(
   } catch (err) {
     // Network / abort / DNS failure — not a failover signature, do not cool down.
     if (verbose) {
-      console.warn(`[ShiftRouter] Judge fetch failed for ${endpoint.baseUrl}: ${err}`);
+      appendRouterLog(`[ShiftRouter] Judge fetch failed for ${endpoint.baseUrl}: ${err}`);
     }
     return { ok: false, code: null };
   }

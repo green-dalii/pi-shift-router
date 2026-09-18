@@ -331,7 +331,7 @@ async function routeConfigWizard(
       `${ux.quietMode ? "☑" : "☐"} Quiet mode — no inline toast notifications`,
       `${ux.statusBar ? "☑" : "☐"} Status bar — show current tier/model in footer`,
       `${ux.inlineToast ? "☑" : "☐"} Inline toast — notify on tier change`,
-      `${ux.routerLogVerbose ? "☑" : "☐"} Verbose log — print router decisions to console (debug)`,
+      `${ux.routerLogVerbose ? "☑" : "☐"} Verbose log — write decisions to ~/.pi/agent/logs/shift-router.log (debug)`,
       "✅ Done",
     ];
 
@@ -484,7 +484,7 @@ export function registerCommands(
         await persistConfig(config, ctx.cwd);
         onConfigChanged();
         ctx.ui.notify(
-          `pi-shift-router: ${config.ux.routerLogVerbose ? "📝 Verbose logging ON" : "📝 Verbose logging OFF"}`,
+          `pi-shift-router: ${config.ux.routerLogVerbose ? "📝 Verbose logging ON → ~/.pi/agent/logs/shift-router.log" : "📝 Verbose logging OFF"}`,
           "info",
         );
         return;

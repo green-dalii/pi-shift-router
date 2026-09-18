@@ -18,7 +18,7 @@
 ## JSON-only settings (advanced, not in the TUI)
 
 - `routing.judgeTimeout`, `routing.window.minConfidence`, `routing.economics.reworkPenalty`
-- `ux.quietMode`, `ux.routerLogVerbose`
+- `ux.quietMode`, `ux.routerLogVerbose` (verbose writes to `~/.pi/agent/logs/shift-router.log`)
 
 After hand-editing, re-run `/router config` once to reload, or restart pi.
 
@@ -56,7 +56,7 @@ pi-shift-router.json
     ├── quietMode              suppress inline toasts; default false
     ├── statusBar              show 🦾 / 🧠 badge; default true
     ├── inlineToast            model-switch toasts; default true
-    └── routerLogVerbose       debug logging; default false
+    └── routerLogVerbose       debug logging to ~/.pi/agent/logs/shift-router.log; default false
 ├── orchestration             (SPEC §9.3, v1.0.0; all optional)
     ├── mode                   "auto" | "off"; default auto (opt-out via /router orchestrate off)
     ├── maxRounds              delegate→review rounds cap; default 3
@@ -104,7 +104,7 @@ tiers:
 | `routing.cacheAware.sameFamilyPenalty` | `1.5` | θ divisor when cache-aware is on for a same-family setup (fewer downgrades → cache survives). |
 | `routing.cacheAware.sameFamilyThreshold` | legacy | Pre-v1.4.0 knob. **Smooth migration:** the old default `0.9` is dead (wizard snapshots fall back to `sameFamilyPenalty` 1.5); only a value that *differs* from `0.9` implies the strong penalty `3.0` — old configs that explicitly tuned it keep their conservative intent. |
 | `routing.cacheAware.idleBoundaryMs` | `300000` | Idle gap after which the prompt cache is considered expired; downgrades are allowed again. |
-| `ux.quietMode` / `statusBar` / `inlineToast` / `routerLogVerbose` | various | Display / logging controls. |
+| `ux.quietMode` / `statusBar` / `inlineToast` / `routerLogVerbose` | various | Display controls; `routerLogVerbose` appends diagnostics to `~/.pi/agent/logs/shift-router.log`. |
 | `orchestration.mode` | `"auto"` | Task-level orchestration mode. `"auto"` (default): Judge-driven — simple tasks (fast verdict) keep the plain router; complex tasks (smart verdict) escalate to Smart-orchestrated execution (requires the `pi-subagents` extension; without it, behavior degrades to the plain smart-tier run). `"off"` (via `/router orchestrate off`): never orchestrate — byte-for-byte today's router. There is no "always" mode. |
 | `orchestration.maxRounds` | `3` | Hard cap on delegate→review rounds per task; the loop stops when this is hit regardless of what the Smart agent wants. |
 | `orchestration.escalationThreshold` | `2` | A worker failing ≥N times on a phase → Smart takes over that phase itself. |
@@ -150,7 +150,7 @@ Upgrades (fast → smart) are never affected. Cross-family setups are untouched.
 
 **`tiers.<tier>.models[]`** — ordered by priority. First is primary; rest are runtime fallbacks (v0.6.0). Put the cheapest healthy model first.
 
-**`ux.routerLogVerbose`** — set `true` (or `/router verbose`) to log every decision to the console. Useful while calibrating `reworkPenalty` / mode.
+**`ux.routerLogVerbose`** — set `true` (or `/router verbose`) to log every decision, judge call, and turn diagnostic to **`~/.pi/agent/logs/shift-router.log`** (append-only; the directory is created on demand). Diagnostics deliberately do **not** go to the console: pi owns the terminal, and stray writes corrupt the TUI frame — the assistant's own message text gets split and wrapped lines overlap. Keeping diagnostics in a file is what prevents that. Override the path with the `PI_SHIFT_ROUTER_LOG` env var. Useful while calibrating `reworkPenalty` / mode.
 
 ## Reading `/router status`
 

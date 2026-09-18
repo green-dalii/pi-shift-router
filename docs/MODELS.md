@@ -88,3 +88,5 @@ When you want the strongest model in each tier, regardless of who sells it. The 
 ---
 
 For live pricing and the full catalog per provider, see [models.dev](https://models.dev/). Model IDs above are real as of the snapshot date; if a provider returns `model_not_found`, run `curl -s https://models.dev/api.json | jq '.<provider>.models | keys'` and update.
+
+**Since v1.6.0 the picker reads pi's own model registry (`ctx.modelRegistry.getAvailable()`)**, so the list shown by `/router config` is the same set `/model` offers — only providers pi has configured auth for (auth.json, env vars, `models.json` commands, runtime login). The local `models-store.json` path is a fallback for headless/test contexts only.

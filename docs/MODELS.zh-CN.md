@@ -87,4 +87,6 @@
 
 ---
 
+**自 v1.6.0 起，向导读取 pi 自身的模型目录（`ctx.modelRegistry.getAvailable()`）**——所以 `/router config` 显示的列表与 `/model` 一致（只含 pi 已配置鉴权的 provider：auth.json / 环境变量 / `models.json` 命令 / runtime 登录）。本地 `models-store.json` 路径仅作为 headless/测试场景的兜底。
+
 实时定价与每个 Provider 完整模型列表见 [models.dev](https://models.dev/)。表中模型 ID 截至快照日均验证存在；若 Provider 返回 `model_not_found`，运行 `curl -s https://models.dev/api.json | jq '.<provider>.models | keys'` 查最新。

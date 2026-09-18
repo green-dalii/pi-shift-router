@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.6.0] — Pi model-registry alignment
+
+### Changed
+
+- **The wizard, Judge resolution and cost telemetry now use pi's own model
+  registry as the catalog source.** `/router config` opens with the same
+  set of models `/model` shows — configured/auth'd providers only — instead
+  of re-deriving from `~/.pi/agent/models-store.json` with a local auth
+  heuristic. Credentials resolved by pi (env vars, `models.json` commands,
+  runtime login, OAuth) are now visible to the wizard; a model that pi
+  knows about but the store never contained can finally be selected.
+  Measured drift before this change: store 5 providers / 413 models vs
+  pi's catalog 39 / 1354, with 13 openrouter + 2 deepseek models existing
+  only in pi's copy and `opencode-go` (23 models) wrongly dropped by the
+  local auth check. The store path remains as a fallback for headless
+  contexts. New `src/model-source.ts`; SPEC §5.4 rewritten, §7.6 / §8.5 /
+  §9.1 updated.
+
+### Internal
+
+- The two remaining verbose `console.warn` calls in `config.ts` (Judge
+  endpoint fallbacks) now go to the router log file — same TUI-frame
+  class as v1.5.1.
+
 ## [1.5.1] — Verbose logs to a file; wizard emoji fix
 
 ### Fixed

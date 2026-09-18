@@ -11,11 +11,11 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.zh-CN.md
 - docs: README.md / README.zh-CN.md / docs/CONFIG.zh-CN.md / docs/MODELS.zh-CN.md / docs/TROUBLESHOOTING.zh-CN.md
 - first-published: v0.4.0
-- latest: v1.5.1
+- latest: v1.6.0
 - last-updated: 2026-09
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
-- search-intents: "自动路由 pi agent 每轮", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "402 余额不足自动切换模型", "Codex usage limit 自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排", "worker 花费归因", "编排成本统计", "TUI 状态仪表盘"
-- features: 两层路由、LLM Judge、JSON-mode 分类器、滑动窗口降级门、多模型 fallback 链、TUI 配置向导、指数退避运行时 failover（429/402/5xx + Codex usage limit 耗尽）、路由与 Judge 共享冷却、cache-aware 路由（同 Provider 缓存保护）、跨 Provider、零配置起步、token 吞吐遥测、TUI 状态仪表盘（上下文窗口与缓存命中率仪表、链内联冷却、最近决策、花费）、per-worker 花费归因（有界编排账本，`orchestration $X (N workers)`）、EV 经济学路由与齿轮预设（eco/default/sport）、任务级编排（默认开启：Smart 档作为 CTO 派发给 Fast 子代理；需安装 pi-subagents）
+- search-intents: "自动路由 pi agent 每轮", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "402 余额不足自动切换模型", "Codex usage limit 自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排", "worker 花费归因", "编排成本统计", "TUI 状态仪表盘", "pi 模型目录对齐", "router config 与 /model 一致", "ModelRegistry available 快照"
+- features: 两层路由、LLM Judge、JSON-mode 分类器、滑动窗口降级门、多模型 fallback 链、TUI 配置向导、指数退避运行时 failover（429/402/5xx + Codex usage limit 耗尽）、路由与 Judge 共享冷却、cache-aware 路由（同 Provider 缓存保护）、跨 Provider、零配置起步、token 吞吐遥测、TUI 状态仪表盘（上下文窗口与缓存命中率仪表、链内联冷却、最近决策、花费）、per-worker 花费归因（有界编排账本，`orchestration $X (N workers)`）、EV 经济学路由与齿轮预设（eco/default/sport）、任务级编排（默认开启：Smart 档作为 CTO 派发给 Fast 子代理；需安装 pi-subagents）、pi 模型目录对齐（向导 + Judge + 遥测共享 `/model` 等价列表）
 - direct-competitor: "@tenchi4u/pi-bifrost（7 阶段启发式 + 订阅配额）· pi-smart-router（12 阶段本地管线 + HyDRA + Virtual Cost v2）"
 - author: green-dalii（https://github.com/green-dalii）
 -->
@@ -210,7 +210,7 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 /router config
 ```
 
-给 Fast 档、Smart 档各选一个模型；每档多个也行，按优先级组成 fallback 链。保存到用户级或项目级作用域——两边都设时项目级优先。
+给 Fast 档、Smart 档各选一个模型；每档多个也行，按优先级组成 fallback 链。保存到用户级或项目级作用域——两边都设时项目级优先。**向导显示的列表就是 pi 的 `/model` 给出的那份已配置可用模型**（自 v1.6.0 起，读取 pi 自己的 `ModelRegistry`，不再用本地重建目录）。
 
 向导里还有 **🔒 Cache-aware routing**——当 Fast 与 Smart 同属一个 Provider（如都是 Anthropic）时默认开启。它保护 prompt 缓存：有效 smart 闸 θ 除以 `sameFamilyPenalty`（更少降级），且缓存还热时抑制中途降级，让“路由到更便宜的模型”永远不会比不路由更贵。可在向导里开关，或改配置文件 `routing.cacheAware.enabled`。
 

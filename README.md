@@ -229,7 +229,7 @@ Orchestration is **on by default** (`auto` mode); this installs the subagent mac
 
 Pick a model for the Fast tier and one for the Smart tier — several per tier also works and forms a fallback chain. Save to user or project scope; when both exist, project wins.
 
-The wizard also exposes **🛡️ Cache-aware routing** — on by default when your Fast and Smart tiers share a provider (e.g. both Anthropic). It protects your prompt cache: the effective smart bar θ is divided by `sameFamilyPenalty` (fewer downgrades) and mid-session downgrades are suppressed while the cache is warm, so routing to a cheaper model never costs more than staying put. Toggle it there, or via the config file (`routing.cacheAware.enabled`).
+The wizard also exposes **🔒 Cache-aware routing** — on by default when your Fast and Smart tiers share a provider (e.g. both Anthropic). It protects your prompt cache: the effective smart bar θ is divided by `sameFamilyPenalty` (fewer downgrades) and mid-session downgrades are suppressed while the cache is warm, so routing to a cheaper model never costs more than staying put. Toggle it there, or via the config file (`routing.cacheAware.enabled`).
 
 **3. Verify**
 

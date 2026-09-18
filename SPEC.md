@@ -319,14 +319,29 @@ interface ShiftRouterConfig {
 | Model missing in provider | Warning |
 | Both tiers identical | Warning (routing becomes a no-op) |
 
-### 5.4 Model Store Sources
+### 5.4 Model Catalog Sources
 
-The router resolves models from two pi-agent files, merged in `loadModelsStore()`:
+**The catalog source is pi's own model registry** (`ctx.modelRegistry`, the
+public extension API) — the same list `/model` shows:
 
-| File | Role |
-|------|------|
-| `~/.pi/agent/models-store.json` | Built-in catalog |
-| `~/.pi/agent/models.json` | Custom providers (`{ "providers": { ... } }`), merged over the catalog |
+| Source | Role | Auth semantics |
+|--------|------|----------------|
+| `ctx.modelRegistry.getAvailable()` | **Primary** — every model of every provider pi has configured auth for (`AuthStatus.source` ∈ `stored` / `environment` / `models_json_key` / `models_json_command` / `runtime` / `fallback`) | pi's own `checkAuth` |
+| `~/.pi/agent/models-store.json` + `models.json` | **Fallback** — used only when no registry is available (headless invocations, unit tests), and for pricing when the registry has none | `auth.json` key, else inline `apiKey` with env expansion |
+
+`src/model-source.ts` is the single entry point (`listAvailableModels`,
+`isProviderAvailable`, `modelPricingFor`, `refreshRegistry`). Rationale: the
+registry-first path removes the drift that made the wizard show a *different,
+smaller* list than `/model` — measured on one machine as 5 providers / 413
+models (store) versus 39 providers / 1354 (pi's catalog), with 13 openrouter and
+2 deepseek models existing only in pi's copy, plus providers whose credentials
+(env vars, `models_json_command`, runtime login) the local auth heuristic cannot
+see. `/router config` calls `refreshRegistry()` first so a just-edited
+`models.json` is reflected.
+
+Model *resolution* (which concrete provider/model a tier runs) has always gone
+through `ctx.modelRegistry.find()`; the catalog/reporting surfaces listed above
+now use the same source, so listing and resolution can no longer disagree.
 
 Custom provider entries may set provider-level `baseUrl`, `api`, and `apiKey`; custom models are upserted by `id`. `apiKey` supports pi env-var expansion (`$VAR` / `${VAR}`, `$$` → `$`, `$!` → `!`). Variable names must start with a letter or underscore (POSIX env-var convention); patterns like `$1` or `$5` are preserved literally to avoid silent API-key truncation. Shell commands (`!cmd`) are resolved by pi at request time and are not available to the router, so such providers are skipped unless `auth.json` has a key — which always wins over an inline `apiKey`.
 
@@ -353,7 +368,7 @@ The cheapest-fallback pool includes **all providers** that have a valid API key 
 - **At the entry of `/router config`** — the wizard always re-reads `models-store.json` and `models.json` from disk so the picker shows the current catalog, not a startup snapshot (avoids the stale-list bug: providers may have been added or removed since pi started).
 - **In `invalidateConfigCache()`** — when the user saves config via `/router config` or `saveConfig()`, the merged-store cache is also cleared so the next read reflects current disk state.
 
-`models-store.json` is owned by pi-agent; the router's invalidation only affects what *our* `/router config` picker shows, not what pi-agent itself uses for inference. Editing `models-store.json` will still require a pi restart to take effect in pi's actual model picker (out of our control).
+`models-store.json` is owned by pi-agent; the router's invalidation only affects the fallback read path. With a registry present the picker mirrors pi's live registry, so edits to `models.json` show up after `refreshRegistry()` without a pi restart.
 
 `_authStore` is never invalidated by the router — it reflects pi-agent's own auth state.
 
@@ -466,7 +481,7 @@ For advanced users debugging routing decisions:
 
 ### 7.6 TUI Model Picker (Wizard)
 
-`/router config`'s model selection step mirrors pi's native `/model` UX:
+`/router config`'s model selection step uses **pi's own model registry** (SPEC §5.4), so the list is the same set `/model` offers — not a locally re-derived catalog. UX:
 
 - `Input` (search box) + 10-item viewport list, all events routed by a `ModelPickerComponent` container (implements `Focusable`).
 - Type-to-filter via `fuzzyFilter` from pi-tui.
@@ -569,6 +584,14 @@ retries are exhausted.
    to the map; network errors, timeouts, auth errors, and unparseable
    responses do not cool down (they are not failover signatures, see §8.5.3).
 
+**Judge endpoint resolution (registry-first, v1.6.0).** `resolveFastEndpoints()`
+prefers `ctx.modelRegistry.find()` + `getApiKeyForProvider()` over the local
+store, so a Judge endpoint may live on a provider authenticated through env
+vars / `models_json_command` / runtime login even when it is absent from
+`models-store.json`; the cheapest-fallback pool is likewise drawn from
+`getAvailable()`. Without a registry (headless, tests) the store + `auth.json`
+path is used unchanged. See §5.4.
+
 ### 8.5.3 Failover signatures
 
 - **Trigger cooldown**: HTTP 429, 402, 5xx (500/502/503/504); body containing
@@ -618,6 +641,10 @@ wall time; ledger cap 20, oldest dropped; reset per orchestration task).
 The dashboard Money section renders `orchestration $X (N workers)` whenever
 the task spent anything, so delegation cost is never buried in the
 main-agent totals.
+
+**Pricing source**: the registry's `Model.cost` (input / output / cacheRead /
+cacheWrite, USD per 1M tokens) is authoritative; `models-store.json` pricing is
+the fallback when no registry is present (§5.4).
 
 **Data source**: pi-agent's `message_end.usage` carries `input`, `output`, `cacheRead`, `cacheWrite`, and `cost.total` (USD) for every assistant message. The router attributes each message to whichever tier was active when it ran (`state.currentTier` at message_start).
 

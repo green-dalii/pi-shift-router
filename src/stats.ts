@@ -6,7 +6,7 @@
  */
 
 import type { RouterState, ShiftRouterConfig, Tier, TierUsage, TokenUsage, ModelsStore } from "./types.js";
-import { getModelPricing } from "./config.js";
+import { modelPricingFor, type ModelRegistryLike } from "./model-source.js";
 
 export interface CooldownInfo {
   provider: string;
@@ -73,6 +73,7 @@ export function computeStats(
   config: ShiftRouterConfig,
   now: number = Date.now(),
   store?: ModelsStore,
+  registry?: ModelRegistryLike,
 ): RouterStatsSnapshot {
   // Confidence buckets
   const minConf = config.routing.window.minConfidence ?? 0.5;
@@ -109,7 +110,7 @@ export function computeStats(
     : 0;
 
   // Cost telemetry
-  const cost = computeCostTelemetry(state, config, store);
+  const cost = computeCostTelemetry(state, config, store, registry);
 
   return {
     windowSize: state.window.length,
@@ -135,6 +136,7 @@ export function computeCostTelemetry(
   state: RouterState,
   config: ShiftRouterConfig,
   store?: ModelsStore,
+  registry?: ModelRegistryLike,
 ): CostTelemetry {
   const byTier: Record<Tier, TierSpendView> = {
     fast: cloneTierUsage(state.tierUsage.fast),
@@ -152,7 +154,7 @@ export function computeCostTelemetry(
     );
     const ref = smartModels[0];
     if (ref) {
-      const pricing = getModelPricing(store, ref.provider, ref.model);
+      const pricing = modelPricingFor({ registry, store }, ref.provider, ref.model);
       if (pricing) {
         baseline = { provider: ref.provider, modelId: ref.model, pricing };
       }

@@ -12,6 +12,7 @@ import { homedir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import {
   type ShiftRouterConfig,
+  type ModelRegistryLike,
   type ModelsStore,
   type AuthStore,
   type ProviderEntry,
@@ -298,11 +299,30 @@ export async function resolveFastEndpoints(
   storeOverride?: ModelsStore,
   authOverride?: AuthStore,
   env: Record<string, string | undefined> = process.env,
+  registry?: ModelRegistryLike,
 ): Promise<ProviderEndpoint[]> {
   const store = storeOverride ?? (await loadModelsStore());
   const auth = authOverride ?? (await loadAuthStore());
 
   async function resolve(provider: string, modelId: string): Promise<ProviderEndpoint | null> {
+    // Registry first: pi owns the catalog and the credential resolution, so a
+    // model authenticated via env vars / models.json command / runtime login is
+    // a valid Judge endpoint even when it is absent from models-store.json.
+    const registryModel = registry?.find?.(provider, modelId);
+    if (registryModel) {
+      const apiKey =
+        (await registry?.getApiKeyForProvider?.(provider)) ??
+        auth[provider]?.key ??
+        expandEnv(store[provider]?.apiKey, env);
+      if (!apiKey) return null;
+      return {
+        provider,
+        baseUrl: (registryModel.baseUrl ?? store[provider]?.baseUrl ?? "").replace(/\/+$/, ""),
+        apiType: registryModel.api ?? store[provider]?.api ?? "openai-completions",
+        apiKey,
+        modelId,
+      };
+    }
     const provEntry = store[provider];
     if (!provEntry) return null;
     const modelInfo = provEntry.models.find((m) => m.id === modelId);
@@ -338,17 +358,25 @@ export async function resolveFastEndpoints(
 
   // 2. Fallback: cheapest model with auth.
   const candidates: Array<{ provider: string; modelId: string; cost: number }> = [];
-  for (const [prov, entry] of Object.entries(store)) {
-    if (!(auth[prov]?.key ?? expandEnv(entry.apiKey, env))) continue;
-    for (const m of entry.models) {
+  const registryAvailable = registry?.getAvailable?.();
+  if (registryAvailable) {
+    for (const m of registryAvailable) {
       const cost = m.cost?.input ?? Number.MAX_SAFE_INTEGER;
-      if (cost >= 0) candidates.push({ provider: prov, modelId: m.id, cost });
+      candidates.push({ provider: m.provider, modelId: m.id, cost });
+    }
+  } else {
+    for (const [prov, entry] of Object.entries(store)) {
+      if (!(auth[prov]?.key ?? expandEnv(entry.apiKey, env))) continue;
+      for (const m of entry.models) {
+        const cost = m.cost?.input ?? Number.MAX_SAFE_INTEGER;
+        if (cost >= 0) candidates.push({ provider: prov, modelId: m.id, cost });
+      }
     }
   }
   candidates.sort((a, b) => a.cost - b.cost);
   if (candidates.length === 0) {
     if (config?.ux?.routerLogVerbose) {
-      console.warn("[ShiftRouter] Judge: no provider with valid API key found — cannot resolve judge endpoint");
+      appendRouterLog("[ShiftRouter] Judge: no provider with valid API key found — cannot resolve judge endpoint");
     }
     return [];
   }
@@ -356,7 +384,7 @@ export async function resolveFastEndpoints(
   const ep = await resolve(cheapest.provider, cheapest.modelId);
   if (ep) {
     if (config?.ux?.routerLogVerbose) {
-      console.warn(`[ShiftRouter] Judge: fast tier unavailable, falling back to cheapest: ${cheapest.provider}/${cheapest.modelId}`);
+      appendRouterLog(`[ShiftRouter] Judge: fast tier unavailable, falling back to cheapest: ${cheapest.provider}/${cheapest.modelId}`);
     }
     return [ep];
   }

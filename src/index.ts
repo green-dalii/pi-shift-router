@@ -137,11 +137,11 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
 
   // ── Init ────────────────────────────────────────────────────
 
-  async function init(ctx: { cwd: string; ui?: any }) {
+  async function init(ctx: { cwd: string; ui?: any; modelRegistry?: any }) {
     if (initialized) return;
     config = await loadConfig(ctx.cwd);
     state = createRouterState();
-    fastEndpoints = await resolveFastEndpoints(config);
+    fastEndpoints = await resolveFastEndpoints(config, undefined, undefined, process.env, ctx.modelRegistry as any);
     initialized = true;
     // Startup banner: makes stale dist/ builds detectable at a glance.
     // pi loads dist/index.js from this working copy at process start —
@@ -945,7 +945,9 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       } catch {
         /* keep old config on reload failure */
       }
-      fastEndpoints = await resolveFastEndpoints(config);
+      // No ctx in this command-reload callback — reuse the registry captured at
+      // session_start (statusBarRegistry), falling back to the store path.
+      fastEndpoints = await resolveFastEndpoints(config, undefined, undefined, process.env, statusBarRegistry as any);
       state.window = [];
       state.modelCooldowns.clear();
       state.tierUsage.fast = { calls: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0 };

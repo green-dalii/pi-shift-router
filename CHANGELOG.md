@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.5.1] — Verbose logs to a file; wizard emoji fix
+
+### Fixed
+
+- **Verbose logging no longer corrupts the TUI.** With `ux.routerLogVerbose`
+  on, diagnostics were written to stdout/stderr; each stray write landed
+  between pi's TUI frames, so the renderer's line accounting drifted and the
+  assistant's own message (e.g. the CTO summary) rendered split mid-sentence
+  with log lines spliced in and wrapped lines overlapping. All verbose
+  diagnostics (decisions, Judge calls, turn internals, audit lines) now
+  append to **`~/.pi/agent/logs/shift-router.log`** via `src/log.ts`.
+  The startup banner stays on stdout (it is the documented stale-build
+  check) and the "both tiers share the same model" hint is unchanged.
+  `PI_SHIFT_ROUTER_LOG` overrides the log path.
+- **Wizard: Cache-aware menu label no longer looks glued to its text.**
+  `🛡` carried a hidden VS16 and, more importantly, renders narrower than
+  the other menu emojis — replaced with `🔒` (same semantics: lock the
+  cache), which has a stable two-column advance.
+
+### Changed
+
+- Docs: `docs/CONFIG.md` / `docs/TROUBLESHOOTING.md` (both languages)
+  document where verbose logs go and why they never print to the console;
+  the wizard's verbose row names the file. ROADMAP's "verbose logs to file"
+  TBD is closed.
+
 ## [1.5.0] — Per-worker cost attribution
 
 ### Added

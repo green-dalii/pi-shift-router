@@ -33,6 +33,8 @@ Release history and planned work for **pi-shift-router**.
 | v1.4.1 | Failover on 402 Insufficient Balance / 余额不足 | ✅ |
 | v1.4.2 | Judge-outage hold, retry-aware audit, TPS smoothing, status dashboard | ✅ |
 | v1.4.3 | Codex usage-limit failover + housekeeping | ✅ |
+| v1.5.0 | Per-worker cost attribution (`orchestration $X (N workers)`) | ✅ |
+| v1.5.1 | Verbose logs to a file; wizard emoji consistency | ✅ |
 
 ## Planned
 

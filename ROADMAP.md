@@ -38,8 +38,13 @@ Release history and planned work for **pi-shift-router**.
 
 ## Planned
 
+**Priority order:** **Judge modes (v1.7.0)** → routing asymmetry (§2.3) → config-layer switch (§5) → Phase 3 breadth. The Judge-modes feature is orthogonal to the other two and is the enabler for the threshold re-derivation later (see sub-plan below); the routing-asymmetry revision must **not** be folded into it (θ stays untouched until real confidence data exists).
+
 | Feature | Version | Notes |
 |---------|---------|-------|
+| **Judge modes: fast-chain / dedicated LLM / decision model (Jev)** | **v1.7.0 (next)** | SPEC §8. Additive: the LLM judge is retained. `routing.judge.mode` with `fast-chain` (default, current behaviour), `custom` (dedicated Judge chain, reuses the chain editor), `decision` (typed-answer models — Jev/System One class). See the sub-plan below. |
+| Routing asymmetry (§2.3) — directional θ, fast-band removal, hold semantics, cache gate | v1.8.0 | The upgrade-eager / downgrade-sticky fix: today any decisive `smart` verdict upgrades (θ always < minConfidence) while downgrades need conf > 0.78 **and** 2 consecutive verdicts **and** a 5-minute cache gate. Re-derive thresholds from measured confidence data once Judge modes ship. |
+| Config-layer switch (§5) — pick the layer the wizard edits, patch writes | v1.9.0 | Layer picker + provenance badges + override warning; write only changed keys so the other layer is never polluted (today `saveConfig` writes the whole merged snapshot). |
 | Examples directory | ongoing | Sample configs (frontend / ML / cross-provider cost-saving) for documentation. |
 | Pi model-registry alignment | v1.6.0 ✅ done | The wizard/Judge/telemetry now read pi's own model registry (`ctx.modelRegistry.getAvailable()` / `find()` / `getProviderAuthStatus()` / `getApiKeyForProvider()`) instead of re-deriving a catalog from `models-store.json`. Fixes the picker showing a different, smaller list than `/model` (measured drift: 5 providers/413 models vs 39/1354; env-var and `models_json_command` credentials were invisible). Store paths remain as fallback. `src/model-source.ts`. |
 | Cost attribution (per-worker) | v1.5.0 ✅ done | Bounded per-worker ledger (`recordWorkerSpend`, cap 20) + task-spend accumulation; `/router status` Money section shows `orchestration $X (N workers)`. Aggregate spend was already in the status bar since v1.1. |
@@ -50,6 +55,29 @@ Release history and planned work for **pi-shift-router**.
 | Tool-result classification | TBD | SPEC §9: classify tool calls (long shell output may indicate debugging, not a question). |
 | ~~Verbose logs to file~~ | ✅ done | `routerLogVerbose` now appends to `~/.pi/agent/logs/shift-router.log` via `src/log.ts` instead of stdout. stdout writes interleaved with pi's TUI frames and split assistant text mid-sentence (reported 2026-09-17 with a CTO summary). pi ships no logging channel, so a file is the sink; `PI_SHIFT_ROUTER_LOG` overrides the path. |
 | Coverage reporting | ✅ done | `vitest --coverage` in CI (v8 provider, thresholds ≥90% lines/functions/statements, ≥85% branches on `src/router.ts` + `src/failover.ts`). Current: router 100% / failover 95.5%. |
+
+### Judge modes — implementation sub-plan (SPEC §8, v1.7.0)
+
+**Goal.** Keep the current LLM judge exactly as it is; add two more ways to run it — a dedicated Judge LLM chain, and a decision-model protocol (Jev and future System One-class models). Selecting a decision model must be done **inside the wizard** and must be validated before it is saved.
+
+**Config (types.ts).**
+```jsonc
+"routing": {
+  "judge": {
+    "mode": "fast-chain",        // "fast-chain" (default) | "custom" | "decision"
+    "models": [ { "provider": "…", "model": "…", "priority": 1 } ]   // used by custom + decision
+  }
+}
+```
+One `models` list; `mode` only selects the source. Absent `judge` ⇒ `fast-chain` ⇒ byte-identical to today.
+
+- [ ] **Phase A — config + resolver.** `routing.judge` schema + defaults; `resolveJudgeEndpoints()` selects `tiers.fast.models` (fast-chain) or `judge.models` (custom/decision); cheapest-model fallback applies to `fast-chain` only — a dedicated/decision chain with no resolvable endpoint **holds** instead of silently running an arbitrary model.
+- [ ] **Phase B — protocol adapter.** New `apiType: "typesafe-decisions"`: `POST {baseUrl}/v1/systemone`, body `{model, state, questions:{tier:{type:"choice",instructions,criteria:{fast,smart}}, orchestrate:{type:"noul",instructions,criteria:{true,false}}}}`; response mapping `tier = answers.tier.choice`, `confidence = answers.tier.probabilities[tier]` (tolerate a bare top-level map and a `confidence` field), `orchestrate = answers.orchestrate.noul >= 0.5`, no `reason`. Failures ⇒ hold; the existing chain failover/cooldown machinery is protocol-agnostic and needs no change.
+- [ ] **Phase C — wizard.** New `⚖️ Judge` row → sub-menu: `Reuse Fast tier chain (default)` / `Dedicated Judge models…` / `Decision model (Jev-style)…`. The latter two reuse `createChainEditor`. Candidates come from pi's registry (v1.6.0 alignment); the decision path filters to decision-capable endpoints, and **if none exist** it explains how to add the provider (custom provider in `models.json`, or an already-authenticated gateway route) and returns without writing. On selection, run a cheap live probe (one Noul question, ~$0.0000014, short timeout): persist only on success.
+- [ ] **Phase D — validation & tests.** Request-shape fixtures; Choice/Noul mapping incl. envelope tolerance; probability→confidence; Noul boundaries (0.49/0.5/0.51); malformed/missing answers ⇒ hold; back-compat (no `judge` key ⇒ fast-chain); resolver tests; decision-candidate filter + probe helper tests.
+- [ ] **Phase E — docs.** SPEC §8 (protocol), §5.2 (schema), §2.3 (confidence semantics note: native probabilities when mode=decision), §6 (wizard); docs/CONFIG ×2 + MODELS ×2; README ×2 + command table; CHANGELOG; MEMORY.md entry.
+
+**Risks / open items.** Response envelope must be confirmed against a live key (parse tolerantly meanwhile); gateway routes (OpenRouter / Vercel / Cloudflare) may differ — treat `baseUrl` as configurable; Jev's Chinese quality on our prompts is unmeasured → the retained LLM judge is the fallback; early access via TypeSafe console, so the probe must fail gracefully with an actionable message.
 
 ### Task-level orchestration — implementation sub-plan (SPEC §9.3)
 

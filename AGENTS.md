@@ -35,6 +35,7 @@ This document is the developer handbook for pi-shift-router. It defines the phil
 ## Collaboration Conventions
 
 - **SPEC-driven development.** SPEC changes are discussed before code. The SPEC is the source of truth for design decisions.
+- **MEMORY.md is the decision log.** It records *why* (rationale, rejected alternatives, gotchas, open questions) — specs record *what*. When a decision would otherwise be re-litigated by a future contributor (or by the agent after context loss), append an entry (newest first). Keep entries short; put detail in SPEC/ROADMAP and link them.
 - **Phased development.** MVP proves the core path first. Iterate on polish and breadth afterward.
 - **Commit messages use module prefix:** `feat:` / `fix:` / `refactor:` / `docs:` / `test:` / `chore:`.
 - **TDD on all logic changes.** Write failing tests first (red), then implement (green). The core routing, EV-decision, audit, and config logic MUST have test coverage — a change without a failing-then-passing test is incomplete. Contract changes may update existing tests, but only as a documented part of the change (the PR body lists which old-contract assertions moved); never silently weaken a test to make it pass.

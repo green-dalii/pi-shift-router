@@ -1,92 +1,112 @@
 # 模型选型目录
 
-> 本页只讲选型逻辑，不承诺固定搭配——各家 Provider 差异太大。数据快照于 [models.dev](https://models.dev/)，抓取时间 2026-08-05；用 `curl -s https://models.dev/api.json | jq` 看最新。
+> 这一篇教的是**怎么挑**，不是**该贴哪个 ID**——provider 怎么配是你自己的事。路由器直接读 pi 自己的模型目录（`ctx.modelRegistry.getAvailable()`），所以 `/router config` 显示的列表和 `/model` 完全一致，只含 pi 已配鉴权的 provider（auth.json / 环境变量 / `models.json` 命令 / 运行时登录）。拿不准的时候，那里就是答案。
+
+具体模型 ID 会过时，档位名不会。每个大厂都有一套自己的命名套路；知道哪个词是"便宜"、哪个词是"强"，看哪家的目录都不慌。
+
+## 档位名速查表
+
+| 便宜档 | 中间档 | 强档 | 家族 |
+|---|---|---|---|
+| **Haiku** / **Mini** / **Nano** | **Sonnet** | **Opus** / **Fable** | Anthropic |
+| **Luna** | **Terra** | **Sol** / **Astra** | OpenAI（codex 与 chat） |
+| **Flash-Lite** | **Flash** | **Pro** | Google Gemini |
+| **Plus** / **Turbo** | — | **Max** | 阿里 Qwen |
+| **Flash** / **Highspeed** | **Turbo** | 正代 | 智谱 GLM |
+| **Flash** | — | **Pro** | DeepSeek |
+| **Fast** | — | 正代 | 月之暗面 Kimi |
+| **Flash** | — | **Pro** / **UltraSpeed** | 小米 MiMo |
+| **Fast** | — | 正代 | xAI Grok |
+| **Mini** / **Lite** | 正代 | **Max** | Mistral |
+
+**速记**：凡是叫 **Lite / Flash / Haiku / Luna / Fast / Mini / Nano / Highspeed** 的就是便宜档，凡是叫 **Pro / Max / Opus / Sol / Astra / Fable** 的就是强档。同一家内部的字母套路也守这个规律（Anthropic：Haiku 4.5 < Sonnet 5 < Opus 5 < Fable 5.1）。
 
 ## 两条经验法则
 
-> **Fast 档**：如果你使用的 Provider 提供 `deepseek-v4-flash`（2026-07 发布），fast 首选它 —— 0731 刷新把质量拉到了接近 Opus 5 / GLM-5.2 的水平，但价格仍处在表中低位。
+> **Fast 档**：直接选 provider 自家的 **Flash / Luna / Haiku / Mini** 系列。2026 年的这一档早就跨过了"凑合能写代码"那道坎——独立基准经常发现 Flash 这一档反超上一代的旗舰。
 >
-> **Smart 档**：smart 始终走云。低于 ~80 GB 显存/统一内存的硬件跑本地 smart 极其不划算；96 GB 以上也几乎永远不如 flat-fee 套餐。
+> **Smart 档**：选 provider 自家的 **Opus / Sol / Max / Fable / Pro** 系列。Smart 一定走云；统一内存不到 ~128 GB 的本地 smart 几乎永远跑不过一份 flat-fee 订阅。
 
 ## Pattern 1 — 编程套餐（一个 key 走多模型）
 
-列出的是你可混合在 chain 中的候选 ID，不是唯一推荐搭配。适合“一个 key / 多模型”模式的 Provider 分两类：
+一份月费换一组精选模型，API key 是 OpenAI / Anthropic 兼容的，直接插进任何工具：Claude Code、Codex、OpenCode、Cline、Aider、本路由器都行。
 
-1. **订阅型编程套餐** —— 每月固定费用买到一批精选模型，通过 OpenAI/Anthropic 兼容的 API key 接入任意工具（Claude Code、Codex、OpenCode、Cline、Aider，或本路由器）。
-2. **按量付费网关** —— 一个账号聚合数百模型，想混用多家 Provider 又不想管理一堆 key 时最方便。
-
-下面 `smart` 候选**只放旗舰级**。轻量订阅套餐（OpenCode Go）和网关（OpenCode Zen）只要能真正提供配得上 `smart` 的模型，也一并收录——这两家现在都有了。
-
-| 订阅型编程套餐 | fast 🦾 候选 | smart 🧠 候选 | API 接入方式 |
+| 套餐 | 最便宜 🦾 | 最强 🧠 | 说明 |
 |---|---|---|---|
-| **Kimi Code**（Moonshot） | `moonshotai/Kimi-K2.7-Code` | `kimi-k3`（2.8 T、1 M 上下文） | 一个 key 通吃 Claude Code / Codex / OpenCode / Cline / Aider；$19–199/月 |
-| **GLM 编程套餐**（Z.AI） | `glm-5`、`glm-5-turbo` | `zai-org/GLM-5.2` | Z.AI devpack 支持 Claude Code / Cline / OpenCode；约 $18/月 |
-| **Qwen Code**（阿里） | `qwen3.7-plus`、`qwen3.6-flash` | `qwen3.8-max`、`qwen3.7-max` | 约 $50/月；约 9 万请求/月配额 |
-| **Windsurf**（Cognition） | 可选开源 + 前沿模型 | Pro/Max 档的前沿模型 | $20–200/月，quota 制 |
-| **OpenCode Go** | `DeepSeek V4 Flash`、`Qwen3.6 Plus`、`MiMo-V2.5` | `Grok 4.5`、`GPT 5.6 Luna`、`Kimi K3`、`GLM-5.2`、`Qwen3.8 Max` | 首月 $5，之后 $10/月固定费；OpenAI-compatible API key |
-| **GitHub Copilot** | 视你的套餐可用的模型 | 视你的套餐可用的前沿模型 | Copilot API（`api.githubcopilot.com`）；接进路由器前先读条款 |
+| **Kimi Code**（月之暗面） | Kimi K2.x Code | Kimi K3（约 2.8 T 参数、1 M 上下文） | $19–199/月，一个 key 通吃 Claude Code / Codex / OpenCode / Cline / Aider |
+| **GLM 编程套餐**（智谱） | GLM-5.x Highspeed / GLM-5.x-Flash | GLM-5.x 正代 | Z.AI devpack 支持 Claude Code / Cline / OpenCode；约 $18/月 |
+| **Qwen Code**（阿里） | Qwen 3.x Plus / Flash | Qwen 3.x Max | 约 $50/月；约 9 万请求/月配额 |
+| **Windsurf**（Cognition） | 套餐内可用模型 | Pro/Max 档的前沿模型 | $20–200/月，quota 制 |
+| **OpenCode Go** | DeepSeek V4 Flash、Qwen 3.x Plus、MiMo V2.x | Grok 4.x、GPT 5.x Luna/Terra、Kimi K3、GLM-5.x-Flash、Qwen 3.x Max | 首月 $5，之后 **$10/月固定**；OpenAI-compatible |
+| **GitHub Copilot** | 套餐内可用模型 | 套餐内的前沿模型 | `api.githubcopilot.com`；接进路由器之前先读条款 |
 
-| 按量付费网关 | fast 🦾 候选 | smart 🧠 候选 | API 接入方式 |
-|---|---|---|---|
-| **OpenCode Zen** | `DeepSeek V4 Flash`、`Qwen3.7 Plus`、`GPT 5.6 Luna` | `Claude Opus 5`、`GPT 5.6 Sol`、`Kimi K3`、`Gemini 3.1 Pro`、`Grok 4.5` | `https://opencode.ai/zen/v1/messages`（Anthropic 风格）/ `/v1/responses`（OpenAI 风格） |
-| **Alibaba Token Plan**（intl + CN） | `qwen3.7-plus`、`qwen3.6-flash`、`deepseek-v4-flash` | `qwen3.8-max`、`qwen3.7-max`、`kimi-k3` | OpenAI-compatible |
-| **Vercel AI Gateway** | 上述任意走同一网关 | 上述任意 | OpenAI-compatible |
-| **OpenRouter** | 200+ 个模型；`auto` **不能**当 Judge target（不透明） | 200+ 个模型 | OpenAI-compatible |
-| **Nebius Token Factory** | `deepseek-ai/DeepSeek-V4-Flash`、`moonshotai/Kimi-K2.7-Code` | `Kimi-K3`、`zai-org/GLM-5.2`、`Qwen/Qwen3.7-Max` | OpenAI-compatible |
-| **NovitaAI** | `deepseek-ai/DeepSeek-V4-Flash`、`Qwen/Qwen3.6-27B` | `moonshotai/Kimi-K3`、`Qwen/Qwen3.7-Max` | OpenAI-compatible |
+`smart` 这一列**只放前沿级别**——轻量套餐（OpenCode Go）真的能提供配得上 smart 的模型时才收进来。**对路由器来说，标准只有一条：稳定的 OpenAI-compatible `baseUrl` + 合法的 `apiKey`。** 满足这个就"路由器友好"。
 
-> **定价与模型阵容变得很快。** 订阅套餐会频繁改价和换模型（混合 credit / quota 结构、按周刷新上限、按模型超额计费）。接入路由器前，先去各 Provider 官网确认当前套餐与端点。对路由器来说，核心要求只有一个：稳定的 OpenAI-compatible `baseUrl` + `apiKey` —— 满足这个才叫“路由器友好”。
+## Pattern 2 — 按量付费网关（一处打通多家）
 
-## Pattern 2 — 本地模型按显存 / 统一内存分级
+| 网关 | 你能拿到什么 | 为什么选它 |
+|---|---|---|
+| **OpenCode Zen** | Anthropic / OpenAI / Google / xAI / Kimi / GLM 一站搞定，Anthropic 风格 + OpenAI 风格双端点 | 要把"强的 + 便宜的"放在同一张账单下，最划算的 flat-fee 池 |
+| **OpenRouter** | 380+ 个带价模型，自带 auto router | 目录最全；auto router 优化的是**质量**不是账单（他们自己说选到贵的"是设计如此"）——所以你应该把**某一档**指向 OpenRouter，而不是把整个路由器架在它上面 |
+| **Vercel AI Gateway** | 上面任意一家走一个网关 | 你已经在 Vercel 生态时最方便 |
+| **Alibaba Token Plan** | Qwen + DeepSeek + Kimi，一个 OpenAI-compatible key | 便宜，国内外同价 |
+| **Nebius Token Factory** | DeepSeek / Kimi / GLM / Qwen | 开源权重这一档上性价比不错 |
+| **Ollama cloud** | Ollama 云端跑的开放模型，OpenAI-compatible | 同一套本地 API 表面，GPU 更大 |
 
-下列推荐均在 2026-08 针对 HuggingFace `safetensors` 权重大小逐个核实。2025 年及以前的旧型号、端侧产物（<7 B）以及 Qwen3.5 / DeepSeek-V3 之前的型号均已排除。
-
-> fp16 只是 benchmark 产物，不是运行时格式。真实本地部署几乎全用 **q4-k-m / NVFP4 / MXFP4 / AWQ-int4 / 1–2 bit ternary**。下表 fast 档一律量化，不出现 fp16。
->
-> MoE 型号名里的 `AxxB` 后缀表示**每个 token 激活的参数**——影响的是计算速度，不是磁盘体积。GGUF / q4 文件会存下**每一个** expert 权重，体积按**总量**算。`DeepSeek-V4-Flash` 总量 284 B / 激活 ~13 B，UD-Q4_K_XL 约 155 GB（需要 192 GB+ 统一内存）；q4 不可能只有“~42 GB”，无论名字里激活多少参数。
-
-| 显存 / 统一内存 | 本地 fast 🦾 候选 | 量化 | 本地 smart 🧠 候选 |
-|---|---|---|---|
-| **≤ 32 GB**（RTX 4070 12 GB、RTX 4090 24 GB、M3 Pro 18 GB、M4 Pro 24 GB） | `LiquidAI/LFM2.5-8B-A1B`（8.5 B、2026-05）、`ibm-granite/granite-4.1-8b`（8.8 B、2026-04）、`Qwen/Qwen3.6-27B`（27.8 B、q4 ≈ 14 GB、当前 HF top）、`google/gemma-4-26b-a4b-it`（26.5 B、q4 ≈ 13 GB）、`Qwen/Qwen3.6-35B-A3B`（36 B 总量 / 3 B 激活、q4 ≈ 18 GB）、`poolside/Laguna-XS-2.1`（33.4 B 总量 / 3 B 激活、q4 ≈ 17 GB、agentic coding、2026-06）、`prism-ml/Ternary-Bonsai-27B-mlx-2bit`（27 B、1.58-bit ternary ≈ 7 GB、笔记本/手机级） | q4-k-m / NVFP4 | 云端前沿模型 |
-| **32–128 GB**（M2 Ultra 64 GB、A100 80 GB、RTX 6000 Ada 48 GB、RTX 4090 ×2） | `DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF`（27 B、MTP + NEO-MAX 后训练、HF 243 万下载、2026-07 —— 这一档后训练最出色的 pick）、`google/gemma-4-31B-it`（31.3 B、q4 ≈ 16 GB）、`poolside/Laguna-S-2.1`（117.6 B、q4 ≈ 59 GB — 需要 64 GB+） | q4-k-m / NVFP4 / q4 | `DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-MTP`（base 权重）或云端前沿模型 |
-| **≥ 128 GB**（M3 Ultra 192 GB、M2 Ultra 192 GB、NVIDIA DGX Spark 128 GB GB10） | `DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF`（同一 pick —— fast 档后训练质量胜过拼体积） | q4-k-m / NVFP4 / q4 | `unsloth/DeepSeek-V4-Flash-GGUF`（284 B 总量 / 激活 ~13 B、UD-Q4_K_XL ≈ 155 GB — 需要 192 GB+ 统一内存；128 GB 级机器用 1–2 bit ternary 备选） |
-
-说明：
-
-- **量化仓库以各 org 独立 HF repo 形式发布**（NVFP4 / AWQ-int4 / GGUF / 1–2 bit ternary）——ollama / vLLM / MLX 会自动识别。具体 repo 名以 org 页面为准，别默认 `-NVFP4` / `-GGUF` 后缀一定存在。
-- **任何暴露 OpenAI-compatible API 的运行时都可以**。常见选择：**ollama**（`ollama run qwen3.6:27b` 默认起 `:11434`）、**LM Studio**（MLX + GGUF）、**vLLM**、**llama.cpp** / **llama-server**、**exo**、**llamafile**。
-- **Judge 也需要 JSON-mode 端点**。Qwen 3.5+ 和 Gemma 4 都 `tool_call=true`，满足 Judge 的 JSON-mode 约束；但本地 Judge 会增加 ~0.5–2 s/turn。推荐：本地 fast + 本地或云 smart + Judge 放在你最信任的 smart 上。
+**所有网关共通的提醒**：当某一档指向网关时，网关的限流和稳定性就成了你整条链的一部分——网关一挂，挂的是它后面所有模型。**做关键 fallback 时不要两个都指向同一个网关**。
 
 ## Pattern 3 — 同 Provider 自带 tier ladder（最简）
 
-一个 Provider、一张账单、一个限流池。已有某 Provider 付费账户且不想多 key 管理时用这个。
+一个 provider、一张账单、一个限流池。已经有某家付费账户、不想多 key 管理，就用这个。
 
-| Provider | fast 🦾 | smart 🧠 | 备注 |
-|---|---|---|---|
-| **Anthropic** | `claude-sonnet-5` | `claude-opus-5` 或 `claude-fable-5` | Sonnet 5 是当前 fast 档。 |
-| **OpenAI** | `gpt-5.6-luna` | `gpt-5.6-sol` | GPT-5.6 内部 `luna` < `terra` < `sol` 三档。 |
-| **Google** | `gemini-3.5-flash-lite` | `gemini-3.6-flash` | Gemini 3.x，两档均 1 M 上下文。 |
-| **Qwen (Alibaba)** | `qwen3.7-plus` | `qwen3.8-max` | 原生 `plus` / `max` 分级。 |
-| **DeepSeek** | `deepseek-v4-flash` | `deepseek-v4-pro` | `flash` ≈ mini 价格档，`pro` ≈ 旗舰。 |
-| **Z.AI (GLM)** | `glm-5` 或 `glm-5-turbo` | `glm-5.2` | GLM-5 系列。 |
-| **xAI (Grok)** | `grok-4.5-fast` | `grok-4.5` | Grok 4.5 代。 |
-
-## Pattern 4 — 跨 Provider 拼装（最佳单项）
-
-需要在两个档都拿到各 Provider 的最强能力。默认 fast 选 `deepseek-v4-flash`（只要有）；默认 smart 选 `claude-opus-5`，用 `gpt-5.6-sol` 与 `kimi-k3` 作跨 Provider fallback。
-
-| 场景 | fast 🦾 | smart 🧠 |
+| Provider | `fast`（Flash / Haiku / Luna 这一档） | `smart`（Opus / Sol / Pro / Fable 这一档） |
 |---|---|---|
-| Coding + 最低价 | `deepseek/deepseek-v4-flash` | `anthropic/claude-opus-5` |
-| Coding + 多 Provider fallback | `deepseek-v4-flash` + `glm-5.2`（fallback） | `claude-opus-5` + `gpt-5.6-sol` + `kimi-k3`（fallback chain） |
-| Coding + flat-fee（最佳 $/质量） | `alibaba-token-plan/deepseek-v4-flash` | `alibaba-token-plan/qwen3.8-max` |
-| 1 M 上下文、长 repo / PDF 研究 | `deepseek-v4-flash` | `google/gemini-3.6-pro` 或 `kimi-k3` |
-| 多模态（图 / 视频） | `deepseek-v4-flash` | `anthropic/claude-opus-5`（视觉） 或 `google/gemini-3.6-pro` |
-| 多语言、中文优先 | `deepseek-v4-flash` | `alibaba/qwen3.8-max` |
-| 欧洲 / GDPR 优先 | `deepseek-v4-flash`（OpenRouter 转） | `mistral/mistral-medium-2604` |
+| **Anthropic** | Haiku | Sonnet → Opus → Fable |
+| **OpenAI** | Luna | Terra → Sol → Astra |
+| **Google** | Flash-Lite | Flash → Pro |
+| **阿里 Qwen** | Plus / Flash | Max |
+| **DeepSeek** | Flash | Pro |
+| **智谱 GLM** | Flash / Highspeed | 正代 |
+| **月之暗面 Kimi** | K2.x / K2.7-Code | K3 |
+| **小米 MiMo** | Flash | Pro / UltraSpeed |
+| **xAI Grok** | Fast | 正代 |
 
----
+具体的模型 ID 每次发版都会变，档位名不会变。`pi install` 完，**跑一次 `/model` 看现在你的 Luna / Flash / Pro 是哪一版**。
 
-**自 v1.6.0 起，向导读取 pi 自身的模型目录（`ctx.modelRegistry.getAvailable()`）**——所以 `/router config` 显示的列表与 `/model` 一致（只含 pi 已配置鉴权的 provider：auth.json / 环境变量 / `models.json` 命令 / runtime 登录）。本地 `models-store.json` 路径仅作为 headless/测试场景的兜底。
+## Pattern 4 — 跨 Provider 拼装（每档选最强的）
 
-实时定价与每个 Provider 完整模型列表见 [models.dev](https://models.dev/)。表中模型 ID 截至快照日均验证存在；若 Provider 返回 `model_not_found`，运行 `curl -s https://models.dev/api.json | jq '.<provider>.models | keys'` 查最新。
+要在两档都拿到各 provider 的最强能力。**我们自己默认**是 fast 用 **DeepSeek V4.x Flash**（便宜、专精代码），smart 用 **Anthropic Opus 或 Fable 这一档**；下表混合家族，给出"跨 provider fallback"的写法——这种 fallback 模式正是两档路由真正的用武之地。
+
+| 场景 | `fast` 🦾 | `smart` 🧠 |
+|---|---|---|
+| Coding + 最低价 | 任意 **DeepSeek V4 Flash** | 任意 **Anthropic Opus** 这一档 |
+| Coding + 多 Provider fallback | DeepSeek V4 Flash + GLM-5.x-Flash | Anthropic Opus + GPT-5.x Sol + Kimi K3 |
+| Coding + flat-fee（最佳 $/质量） | OpenCode Go 的 Flash 那一档 | OpenCode Go 里最强的那一档（Grok / GPT Luna / Kimi K3） |
+| 1 M 上下文、长 repo 或 PDF 研究 | 任意支持 1 M 上下文的 Flash 档 | **Kimi K3** 或 **Gemini Pro** |
+| 多模态（图 / 视频） | 任意 Flash 档 | **Anthropic Opus**（视觉） 或 **Gemini Pro** |
+| 多语言、中文优先 | 任意 Flash 档 | **Qwen Max** |
+| 欧洲 / GDPR 优先 | DeepSeek Flash（走 OpenRouter 转） | Mistral medium |
+
+真正关键的不是某一行的具体选择，而是**两档可以来自不同 provider**这件事——成本不对称帮你省钱，家族不对称帮你扛住单家故障。
+
+## 本地模型按显存 / 统一内存分级
+
+本地跑 `fast` 是这台路由器最甜的用法：同一个模型每轮都在跑，省下来的都是复利。本地 `smart` 在统一内存不到 128 GB 的机器上基本不划算。
+
+> **量化不是可选项。** 真正跑本地几乎都是 **q4-k-m / NVFP4 / MXFP4 / AWQ-int4 / 1–2 bit ternary**；fp16 是 benchmark 产物。MoE 型号名里的 `AxxB` 是**每个 token 激活的参数**（算力），不是磁盘体积——q4 文件存**每一个** expert，体积按**总量**算。
+
+| 硬件 | 本地 `fast` 候选 | 量化 |
+|---|---|---|
+| **≤ 32 GB**（RTX 4070 12 GB、RTX 4090 24 GB、M3 Pro 18 GB、M4 Pro 24 GB） | 任意 8–27 B **Flash 这一档**（LiquidAI、Granite、Qwen 3.x、Gemma 4）的 q4，留有余量 | q4-k-m / NVFP4 |
+| **32–128 GB**（M2 Ultra 64 GB、A100 80 GB、RTX 6000 Ada 48 GB、RTX 4090 ×2） | 27–35 B 后训练强的（比如带 NEO-MAX 后训练的 Qwen 3.x），或者 MiMo Flash / Laguna S 这种小 MoE | q4-k-m / NVFP4 / q4 |
+| **≥ 128 GB**（M3 Ultra 192 GB、M2 Ultra 192 GB、DGX Spark 128 GB） | 高质量 27 B 后训练版（这一档对 fast 来说仍胜过生堆 70 B），或者 200+ B MoE 的 1–2 bit ternary 变体 | q4-k-m / NVFP4 / q4 / 2-bit ternary |
+
+路由器对接的是 OpenAI-compatible API，所以常用运行时都直接可用：**ollama**（`ollama run <flash-model>` 默认起 `:11434`）、**LM Studio**（MLX + GGUF）、**vLLM**、**llama.cpp / llama-server**、**exo**、**llamafile**。路由器对运行时没有特殊绑定。
+
+**Judge 也需要 JSON-mode 端点。** 任何现代 Flash 档（Qwen 3.5+、Gemma 4、MiMo V2.x）都满足；本地 Judge 会多花 ~0.5–2 秒/轮。推荐组合：本地 fast + 本地或云 smart + Judge 放在你最信任的那个 smart 上。
+
+## 怎么验证
+
+- pi 列出的是你运行时能鉴权的一切。开发模式 `pi remove pi-shift-router && pi install .`（本仓库根），发布版 `pi install npm:pi-shift-router`，然后 `/model` 就是真相。
+- 目录本身可以用 [models.dev](https://models.dev/) 这类社区聚合——`curl -s https://models.dev/api.json | jq` 实时拉键名。
+- 单模型实时价以各 provider 官网为准；档位名就是官网价目表上的标签，不用记 ID 也能读价。

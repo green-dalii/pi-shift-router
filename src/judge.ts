@@ -66,10 +66,122 @@ function judgeFailureCode(status: number, bodyText: string): string | null {
   return null;
 }
 
-function judgeApiUrl(baseUrl: string, apiType: string): string {
+/**
+ * Decision-model protocol (SPEC §8.6) — typed answers + calibrated
+ * probabilities instead of generated text (TypeSafe Jev / System One class).
+ * The transport is one POST per judgement; all questions travel in one call.
+ */
+export const DECISION_API_TYPE = "typesafe-decisions";
+
+export function isDecisionApi(apiType: string): boolean {
+  return apiType === DECISION_API_TYPE;
+}
+
+/**
+ * Operational floors for decision endpoints, measured rather than assumed.
+ * Live runs against api.typesafe.ai (2026-09-18, 8 calls, 458–2265 input
+ * tokens) returned in **1.4–6.6 s**, dominated by service-side inference, not
+ * payload size. The published ~127 ms benchmark used far smaller inputs and does
+ * not describe this workload. With the LLM-judge default of 5000 ms, most
+ * decision calls would be aborted and the router would hold every turn.
+ */
+export const DECISION_MIN_JUDGE_TIMEOUT_MS = 15000;
+
+
+export function judgeApiUrl(baseUrl: string, apiType: string): string {
   const base = baseUrl.replace(/\/+$/, "");
+  if (isDecisionApi(apiType)) return `${base}/v1/systemone`;
   if (apiType.startsWith("anthropic")) return `${base}/v1/messages`;
   return `${base}/chat/completions`;
+}
+
+/** Fixed orchestration criteria text (the tier rubric comes from judge.md). */
+const ORCHESTRATE_INSTRUCTIONS =
+  "This turn should be orchestrated (a Smart main agent planning phases and delegating " +
+  "to Fast workers) rather than handled inline by a single agent.";
+
+/**
+ * Decision-protocol request body: one `choice` question for the tier and one
+ * `noul` (yes/no probability) question for orchestration. Requested explicit
+ * orchestration or "smart" intent lives in the tier rubric (judge.md).
+ */
+export function buildDecisionRequestBody(
+  endpoint: ProviderEndpoint,
+  prompt: string,
+): Record<string, unknown> {
+  return {
+    model: endpoint.modelId,
+    state: prompt,
+    questions: {
+      tier: {
+        type: "choice",
+        instructions: JUDGE_PROMPT,
+        criteria: {
+          fast: "Routine, well-specified work: execution, small fixes, following existing patterns.",
+          smart: "Complex, ambiguous, high-stakes, cross-cutting, or architecture-level work.",
+        },
+      },
+      orchestrate: {
+        type: "noul",
+        instructions: ORCHESTRATE_INSTRUCTIONS,
+        criteria: {
+          true: "Multi-phase work that benefits from delegation to workers.",
+          false: "Single-agent work; inline execution is appropriate.",
+        },
+      },
+    },
+  };
+}
+
+/** Read a typed answer from either an `answers` envelope or a bare map. */
+function decisionAnswers(raw: Record<string, unknown>): Record<string, any> {
+  const wrapped = (raw as any)?.answers;
+  return (wrapped && typeof wrapped === "object" ? wrapped : raw) as Record<string, any>;
+}
+
+/**
+ * The model version that answered, as the endpoint reports it. Jev returns the
+ * resolved id even for an alias request, which is what lets `jev-latest` be the
+ * default without losing visibility: a version move shows up in the verbose log
+ * instead of quietly shifting the distribution behind `θ`.
+ */
+export function resolvedModelOf(raw: Record<string, unknown>): string | undefined {
+  const model = (raw as any)?.model;
+  return typeof model === "string" && model.length > 0 ? model : undefined;
+}
+
+/**
+ * Map a decision response onto the router's parse contract (SPEC §8.6).
+ * Returns null (⇒ hold) when no usable tier answer is present: a decision model
+ * must never be guessed at, and an out-of-set choice is not a verdict.
+ */
+export function parseDecisionResponse(raw: Record<string, unknown>): ParsedJudgeResponse | null {
+  try {
+    const answers = decisionAnswers(raw);
+    const tierAnswer = answers?.tier;
+    const choice = typeof tierAnswer?.choice === "string" ? tierAnswer.choice.toLowerCase() : null;
+    if (choice !== "fast" && choice !== "smart") return null;
+
+    const probability = tierAnswer?.probabilities?.[choice];
+    const confidence =
+      typeof probability === "number"
+        ? probability
+        : typeof tierAnswer?.confidence === "number"
+          ? tierAnswer.confidence
+          : undefined;
+
+    const noulRaw = answers?.orchestrate;
+    const noul = typeof noulRaw === "number" ? noulRaw : noulRaw?.noul;
+    const orchestrate = typeof noul === "number" ? noul >= 0.5 : undefined;
+
+    return {
+      tier: choice as Tier,
+      ...(confidence !== undefined ? { confidence } : {}),
+      ...(orchestrate !== undefined ? { orchestrate } : {}),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Try to extract a tier answer from text (JSON or keyword). Exported for unit tests. */
@@ -158,11 +270,24 @@ async function classifyLLM(
       // Do NOT cool it down — that would block real turns on the model too.
       return { ok: false, code: null };
     }
+    // The id the endpoint says answered — for an alias (`jev-latest`) this is the
+    // version that came back, which is the signal that the distribution under our
+    // threshold may have moved.
+    const resolved = resolvedModelOf(raw);
+    if (verbose && resolved && resolved !== endpoint.modelId) {
+      appendRouterLog(
+        `[ShiftRouter] Judge version moved: requested ${endpoint.modelId}, answered ${resolved} ` +
+          `(re-check θ if verdicts shift)`,
+      );
+    }
     const result: JudgeResult = {
       tier: answer.tier,
-      source: "llm",
+      // Decision endpoints report a measured, calibrated probability; the
+      // routing algorithm treats both sources as measured signal (SPEC §8.6).
+      source: isDecisionApi(endpoint.apiType) ? "decision" : "llm",
       ...(answer.confidence !== undefined ? { confidence: answer.confidence } : {}),
       ...(answer.reason !== undefined ? { reason: answer.reason } : {}),
+      ...(resolved !== undefined ? { resolvedModel: resolved } : {}),
     };
     return { ok: true, result };
   } catch (err) {
@@ -175,6 +300,7 @@ async function classifyLLM(
 }
 
 function buildRequestBody(endpoint: ProviderEndpoint, prompt: string): Record<string, unknown> {
+  if (isDecisionApi(endpoint.apiType)) return buildDecisionRequestBody(endpoint, prompt);
   // Budget enough tokens for reasoning + JSON answer.
   // DeepSeek Reasoner-class models emit `reasoning_content` and the JSON answer in `content`;
   // both are bounded by `max_tokens`. 4000 leaves plenty of room for the chain-of-thought.
@@ -217,6 +343,7 @@ export interface ParsedJudgeResponse {
 }
 
 function parseResponse(raw: Record<string, unknown>, apiType: string): ParsedJudgeResponse | null {
+  if (isDecisionApi(apiType)) return parseDecisionResponse(raw);
   try {
     let contentText = "";
     let reasoningText = "";

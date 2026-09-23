@@ -11,7 +11,8 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   createRouterState,
-  processRoute,
+  planNoJudge,
+	processRoute,
   syncSessionModel,
   type RouterState,
 } from "../src/router.js";
@@ -364,3 +365,37 @@ describe("syncSessionModel (model_select sync)", () => {
 function currentModelIdIs(state: RouterState, id: string): boolean {
   return state.currentModelId === id;
 }
+
+
+describe("planNoJudge — the bottom rung of the judge ladder (SPEC §8.6)", () => {
+  const st = (over: any = {}) => ({
+    currentTier: "smart", currentModelId: "switched", currentProvider: "p",
+    sessionModel: { provider: "own", modelId: "my-model" },
+    manualOverride: { active: false },
+    orchestration: { active: false },
+    ...over,
+  }) as any;
+
+  it("restores the user's own session model when an earlier turn switched away", () => {
+    expect(planNoJudge(st()).restoreTo).toEqual({ provider: "own", modelId: "my-model" });
+  });
+
+  it("leaves the model alone when it is already the user's own", () => {
+    const s = st({ currentProvider: "own", currentModelId: "my-model" });
+    expect(planNoJudge(s).restoreTo).toBeNull();
+  });
+
+  it("does nothing when no session model was captured", () => {
+    expect(planNoJudge(st({ sessionModel: undefined })).restoreTo).toBeNull();
+  });
+
+  it("never undoes an explicit manual override", () => {
+    const s = st({ manualOverride: { active: true, provider: "pinned", modelId: "pinned-model" } });
+    expect(planNoJudge(s).restoreTo).toBeNull();
+  });
+
+  it("clears orchestration so a stale CTO prompt cannot outlive the judge", () => {
+    expect(planNoJudge(st({ orchestration: { active: true } })).clearOrchestration).toBe(true);
+    expect(planNoJudge(st({ orchestration: { active: false } })).clearOrchestration).toBe(false);
+  });
+});

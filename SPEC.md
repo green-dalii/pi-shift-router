@@ -262,9 +262,21 @@ For CoT models (e.g., DeepSeek Reasoner) that emit a separate `reasoning_content
 
 ### 4.6 Judge Failure Fallback
 
-There is **no heuristic rule** as a fallback. When the LLM Judge is unavailable (network error, auth error, malformed response), the Judge returns `{ tier: "fast", source: "fallback" }`. The router treats this as `stay` (no model switch) and only logs a warning. The user is not interrupted.
+There is **no heuristic rule** as a fallback — no keyword list, no scoring rule. A
+judge call produces either a measured verdict or nothing, and "nothing" is never
+converted into a tier guess.
 
-Additionally, when a Judge call fails with a **failover signature** (HTTP 429/5xx, or a body containing rate-limit / usage-limit / quota / `rate_limit_error`), the failed model is written into the shared `modelCooldowns` map via the `onFailure` callback. This means a rate-limited fast model is **not retried on subsequent Judge calls** — the next Judge invocation skips it via `isCooldown` and moves straight to the next fast-tier model. See §8.5.5 for the shared-map mechanism.
+Two mechanisms handle failure, both specified in one place elsewhere:
+
+- **Which endpoint is asked** — the availability ladder (§8.6): the configured
+  judge chain, then the LLM judge, then no routing at all.
+- **Which endpoint is skipped next time** — a call that fails with a *failover
+  signature* (HTTP 429/5xx, or a body carrying rate-limit / usage-limit / quota /
+  `rate_limit_error`) writes the model into the shared `modelCooldowns` map via
+  `onFailure`, so the next call skips it instead of re-burning the error
+  (§8.5.5). Network errors, timeouts and auth failures do **not** cool a model:
+  they are not failover signatures, and cooling on them would over-block the turn
+  path (§8.5.3).
 
 ---
 
@@ -292,6 +304,10 @@ interface ShiftRouterConfig {
   routing: {
     mode: "auto" | "manual" | "off";
     judgeTimeout: number;                                  // ms, default 5000
+    judge?: {                                              // v1.7.0, additive
+      mode: "fast-chain" | "custom" | "decision";          // default "fast-chain"
+      models?: ModelRef[];                                 // used by custom + decision
+    };
     window: { size: number; minConfidence: number; threshold?: number };
                                                             // size 5, minConfidence 0.5;
                                                             // threshold LEGACY (0.6 = dead)
@@ -365,6 +381,10 @@ The cheapest-fallback pool includes **all providers** that have a valid API key 
 
 **Cache invalidation**: `loadModelsStore()` caches the merged store in module-local state. The cache is invalidated in two places:
 
+- **Decision endpoints are judge-only.** `chatCapableModels()` removes
+  `typesafe-decisions` entries from the Fast/Smart pickers: pi has no streaming
+  implementation for that api value, so a decision model chosen as a tier would
+  fail at stream time on every turn.
 - **At the entry of `/router config`** — the wizard always re-reads `models-store.json` and `models.json` from disk so the picker shows the current catalog, not a startup snapshot (avoids the stale-list bug: providers may have been added or removed since pi started).
 - **In `invalidateConfigCache()`** — when the user saves config via `/router config` or `saveConfig()`, the merged-store cache is also cleared so the next read reflects current disk state.
 
@@ -481,6 +501,27 @@ For advanced users debugging routing decisions:
 
 ### 7.6 TUI Model Picker (Wizard)
 
+**Indicator vocabulary — one idiom per semantics, never mixed on a row.**
+
+| Row kind | Glyphs | Reads as |
+|----------|--------|----------|
+| Exclusive picker (provider, Judge mode) | `●` current / `○` other | "exactly one of these is chosen" (radio) |
+| Independent toggle (UX settings, cache-aware) | `☑` on / `☐` off | "this row is on/off by itself" (checkbox) |
+| Action row (Done, Back, Save) | none | — |
+
+Unifying everything on `●`/`○` was considered and **rejected**: the toggle menus
+allow all-on, all-off and every combination, so a filled circle would read as
+"the selected one" (radio semantics) and five filled circles wipe out the
+"which is current?" signal. The evidence points the same way: pi's UI documents
+`●` as a status *indicator* and its official extension example marks item state
+with `☑`/`☐`.
+
+What *was* the real inconsistency is the `✔`-suffix style (a second glyph pair
+for the same "current item" meaning as `●`) — that is gone. Toggle menus name
+their glyphs in the title (``(☑ on · ☐ off)``) because a bare box is easy to
+misread. Rows are produced by `toggleRow()` / `judgeModeOptions()` so a new menu
+cannot invent a third style, and tests assert the two idioms stay separate.
+
 `/router config`'s model selection step uses **pi's own model registry** (SPEC §5.4), so the list is the same set `/model` offers — not a locally re-derived catalog. UX:
 
 - `Input` (search box) + 10-item viewport list, all events routed by a `ModelPickerComponent` container (implements `Focusable`).
@@ -524,7 +565,7 @@ For advanced users debugging routing decisions:
 | **Coverage reporting (≥90% on router/failover)** | ✅ | v0.9.x (dev) | `vitest --coverage` in CI; router 100% / failover 95.5% |
 | **Cache-aware routing** | ✅ | v0.10.0 | §9.2: same-family threshold raise + warm-cache downgrade suppression |
 
-## 8.5 Runtime Failover (Exponential Backoff)
+### 8.5 Runtime Failover (Exponential Backoff)
 
 **Problem**: when the active model returns a rate-limit / server error (429,
 5xx), pi-agent retries internally (provider layer ×3, then agent layer ×3)
@@ -621,13 +662,183 @@ On failover, show a toast notification (unless `quietMode`):
 - Manual override (`/route-force`) bypasses cooldown (user explicitly asked).
 - A 2xx success for a model in cooldown clears it immediately (recovery).
 
-## 9. Future Direction (Optional Enhancements)
+### 8.6 Judge Modes and Protocols (v1.7.0)
 
-- **Cache-aware routing (v0.10.0)**: delivered — same-family threshold raise + warm-cache downgrade suppression, see §9.2.
-- **Task-level orchestration (planned v1.0.0)**: closed-loop plan → implement → review → escalate → accept workflow, see §9.3.
-- **Tool-result classification**: classify tool calls (long shell output may indicate debugging, not a question).
-- **Multilingual Judge *prompt* translations**: with-drawn — LLMs are multilingual; the English prompt handles non-English user input. Test inputs in zh / ja / es / fr through the real `classify()` if regressions surface.
-- **Per-tier thinking level**: withdrawn — tier classification already encodes prompt complexity, so a static per-tier thinking rule rarely saves more than it complicates.
+The Judge is a high-frequency, latency- and cost-sensitive classifier whose
+output is **thresholded** (`pSmart >= θ`, §2.3). The LLM judge stays the
+default; two more modes were added without changing it.
+
+`routing.judge.mode` selects where the Judge chain comes from:
+
+| Mode | Chain source | Notes |
+|------|--------------|-------|
+| `fast-chain` (default) | `tiers.fast.models` | Byte-identical to pre-v1.7.0 behaviour. Absent `routing.judge` ⇒ this mode. Cheapest-authenticated-model fallback applies (§4.3 step 2). |
+| `custom` | `routing.judge.models` | A dedicated Judge LLM chain (same chain-editor UX as Fast/Smart). No cheapest-model fallback: an unresolvable chain **holds position**. |
+| `decision` | `routing.judge.models` (decision-capable endpoints) | Typed-answer models (Jev / System One class). No cheapest-model fallback; failures **hold**. |
+
+**Decision protocol (`apiType: "typesafe-decisions"`).** `POST {baseUrl}/v1/systemone`,
+Bearer auth, one round trip for all questions:
+
+```jsonc
+{
+  "model": "<model id>",
+  "state": "<recent messages, assembled like the LLM judge prompt>",
+  "questions": {
+    "tier":        { "type": "choice", "instructions": "<rubric>",
+                     "criteria": { "fast": "…", "smart": "…" } },
+    "orchestrate": { "type": "noul", "instructions": "…",
+                     "criteria": { "true": "…", "false": "…" } }
+  }
+}
+```
+
+Response mapping (tolerant — accept an `answers` envelope or a bare top-level
+map):
+
+- `tier = questions.tier.choice` (must be one of the declared options, else hold)
+- `confidence = questions.tier.probabilities[tier] ?? questions.tier.confidence`
+  — a **calibrated probability**, not an elicited LLM confidence. `reason` is
+  absent by design (decision models do not generate prose; the dashboard omits it).
+- `orchestrate = questions.orchestrate.noul >= 0.5` (Noul returns 0–1, no confidence field)
+
+Failover/cooldown machinery is protocol-agnostic and unchanged (§8.5): a
+failover signature cools the endpoint; anything else holds.
+
+**Mode semantics.** `JudgeResult.source` records `"llm"` for `fast-chain`/`custom`
+and `"decision"` for decision endpoints (telemetry/logs; the routing algorithm
+treats both as measured signal). **θ is deliberately untouched by this feature**:
+switching to calibrated probabilities changes the confidence distribution, so
+thresholds (§2.3) must be re-derived from measured data in the follow-up
+routing-asymmetry work — see MEMORY.md.
+
+**Mode precedence: the LLM judge is the default path, Jev is opt-in Beta
+(v1.7.0).** The wizard orders the modes so the legacy behaviour leads and the
+unproven option comes last:
+
+| Order | Row | Status |
+|-------|-----|--------|
+| 1 | `🦾 Reuse the Fast tier chain (default)` | the pre-v1.7.0 behaviour (default config value) |
+| 2 | `🔬 Dedicated Judge LLM chain` | opt-in, same machinery as the default |
+| 3 | `🧮 Jev — decision model (Beta)` | **public beta**: limited independent validation, provider capacity still ramping |
+
+`JUDGE_MODE_ORDER` maps rows to modes, so presentation and dispatch stay
+independent. Jev is deliberately **not** a first-class judge: it is a decision
+model in public beta, its `confidence` is a rescaling of the top probability
+rather than a calibration claim, and a September 2026 evaluation found decision
+models trailing the per-task best LLM on 14 of 15 annotation tasks. Making it the
+default or the first row would push an unproven model class onto users who never
+asked for it; the honest presentation is "third, labelled Beta, with a fallback
+that always works". The default config value remains `fast-chain`, so no upgrade
+silently re-judges anyone with a different model class.
+
+**Unusable judge config degrades, it does not stall.** When a `custom` or
+`decision` chain resolves to zero endpoints — the model was retired, the key was
+removed, the provider disappeared — `resolveJudgeEndpoints()` falls back to the
+LLM judge (the Fast chain, i.e. the pre-v1.7.0 default) and **always logs the
+degradation**. Rationale: this is not the "cheapest authenticated model"
+substitution we rejected — it is a chain the user configured, and a rotted judge
+config must not hold every turn forever. The boundary stays sharp elsewhere:
+per-call failures (timeout, 5xx, malformed answer) still **hold**, because those
+are transient rather than config rot, and a verdict is still never fabricated.
+The wizard says which judge is actually in effect (`Jev unavailable — LLM judge
+active`), and the setup screen states that routing continues meanwhile.
+
+**Model id policy: alias by default, and make moves visible.** The Judge is
+configured with `jev-latest`, not a pinned build. Rationale: a pin fails the worst
+way (the day the vendor retires that build the Judge stops working and the router
+holds forever until a human edits config), whereas the alias cannot be retired.
+The alias's own hazard — a version change shifting the probability distribution
+behind θ — is answered with observability instead of immobility: Jev reports the
+resolved id in every response, so `resolvedModelOf()` records it on
+`JudgeResult.resolvedModel` and the verbose log emits a "version moved" line when it
+differs from the requested id. Pin only for byte-identical reproducibility, and
+accept the retirement failure mode that comes with it.
+
+**Judge availability ladder — never stall, never guess (v1.7.0+).** Resolution
+degrades in order, and the wizard does **no network I/O** at save time:
+
+| Rung | Condition | Behaviour |
+|------|-----------|-----------|
+| 1 | the chain the user configured for judging resolves | judge with it — a decision model in `decision` mode, a dedicated LLM chain in `custom`, the Fast chain in `fast-chain` |
+| 2 | that chain **resolves to nothing** (retired model, removed key, gone provider) **or fails at call time** (429 / 5xx / timeout / cooldown) | continue into the **LLM judge** — the user's own Fast chain, i.e. the pre-v1.7.0 default. The degradation is logged when rung 1 is unusable |
+| 3 | rung 2 is exhausted too (nothing resolves, or every endpoint failed this turn) | **stop routing**: no model switch, no orchestration (an active one is cleared), and the user's own `sessionModel` restored if an earlier turn switched it — *unless* a manual override is active, which is an explicit instruction the bottom rung must not undo. One user-visible notice per session |
+
+**Both rungs are one ordered list.** `resolveJudgeEndpoints()` returns
+`[configured chain…, LLM judge…]` (deduped), so a single `classify()` walk covers
+resolvability *and* call-time failure in the same turn — a 429 on the decision
+rung falls through to the LLM judge immediately rather than holding the turn. The
+walk's existing cooldown skipping and failover-signature cooling apply unchanged.
+`fast-chain` mode returns just the Fast chain (no duplicate rung). A verdict is
+never fabricated, and a malformed answer still holds rather than becoming a tier.
+
+**Backward compatibility / migration.** Pre-v1.7.0 configs carry no
+`routing.judge`; the merged default is `fast-chain`, so they keep byte-identical
+behaviour with no migration step. `normalizeJudgeMode()` defines the contract for
+the other shapes: the three known modes are honoured; a **models list with no
+mode** becomes `custom` (a merged default would otherwise silently ignore the
+list, so the resolver logs the inference); an **absent or unknown** mode becomes
+`fast-chain` — the safe legacy reading, never a bricked router. The wizard uses
+the same normalization, so the menu cannot display a mode the resolver would not
+honour.
+
+Rung 3 is implemented as the pure `planNoJudge()` so the policy is testable
+without the pi lifecycle.
+
+**Why the save-time probe was removed.** A probe proves the endpoint answers
+*this second* — and Jev is in beta, where capacity, revoked keys and regional
+flakiness all move — while costing a blocking round trip on the config UI (it
+showed up to the user as the Config screen vanishing for ~1 s: the chain editor
+had already closed, so there was nothing to render while a network call blocked
+the handler). With rungs 1–3 covering unreachable endpoints *and a notice*, the
+probe's only unique value — immediate feedback on a misconfiguration — is served
+better by local static validation (endpoint resolves: auth + baseUrl + the
+decision api marker) plus rung 2/3 at runtime. Feedback is not lost; it moves
+from save-time to first-turn, where it is actually true.
+
+**Wizard gate (no network at save time).** The two chain modes reuse the tier
+chain editor. For `decision`, candidates are filtered to decision-capable
+endpoints from pi's registry (SPEC §5.4); when none exists the wizard shows a
+**dismissible setup screen** (why it is unavailable, the exact `"api"` value to
+add, where it goes) and returns **without writing** — a toast is too transient
+for instructions the user must act on, and a permanently disabled row would hide
+the fix. A selection is then validated **locally** (the endpoint resolves: auth,
+baseUrl, and the decision api marker) and persisted; correctness against the live
+service is the runtime ladder's job, with a notice when it degrades.
+
+**Operational floors (measured).** Live calls to `api.typesafe.ai` (2026-09-18,
+3–8 calls per variant, 458–2265 input tokens) returned in **1.4–6.6 s**, median
+~5 s, with `output_tokens` reported (50) but unbilled. This is **provider-side
+capacity during Jev's public beta**, not a property of decision models and not
+payload or integration overhead (a 5× smaller payload was no faster). Treat it as
+temporary and re-measure rather than designing around it. Consequences:
+
+- The wizard raises `routing.judgeTimeout` to `DECISION_MIN_JUDGE_TIMEOUT_MS`
+  (15000) when decision mode is selected and the current value is lower, and
+  reports the change in its notification. With the LLM-judge default (5000) most
+  decision calls would be aborted and the router would hold every turn.
+- There is no save-time network probe (see the availability ladder above): the
+  wizard validates locally, and unreachable endpoints are handled at runtime.
+- Measured cost per call: ~$0.000095 (2265 input @ $0.042/M, output unbilled) vs
+  ~$0.00033 for the fast-tier LLM judge on the same rubric — cheaper, but ~3.5x
+  slower in this environment. Latency is the open question (ROADMAP: decision-mode
+  latency follow-up).
+
+**Judge UX contract.** The Judge is the compass `🧭` project-wide (status bar
+`🧭 judging…`, stats, status panel, wizard row) — never the scales `⚖️`. Inside
+the Judge menu the three modes carry the glyph of what they reuse or are:
+`🦾` reuse the Fast chain (the Fast tier's own glyph), `🔬` dedicated Judge LLM
+(`routing.judge.models`), `🧮` decision model (computes an answer, generates no
+text). The current mode is marked `●`, the others `○` (project convention), and
+every glyph is followed by exactly one space: advance width differs per glyph and
+font, so a missing separator reads as a layout bug (same class as the `🛡`→`🔒`
+fix of v1.5.1). These labels are pure functions (`judgeModeOptions`,
+`decisionSetupGuide`) so the copy stays under test.
+
+## 9. Deep Dives and Future Direction
+
+Sections 9.1–9.3 are **delivered** capabilities whose design detail is too long
+for the §8 status table. §9.4 lists what is still open; withdrawn ideas are
+recorded in MEMORY.md rather than kept here as a graveyard.
 
 ### 9.1 Cost telemetry — deep view (delivered v0.9.0)
 
@@ -660,7 +871,7 @@ Money · this session
   spent   $0.465  fast ▓▓░░░░░░░░ 10% · smart ▓▓▓▓▓▓▓▓░░ 90%
 ```
 
-### 9.2 Cache-aware routing (planned v1.0.0)
+### 9.2 Cache-aware routing (delivered v0.10.0)
 
 **Problem**: a prompt cache belongs to a model — it is the model's own key-value state,
 addressed by a byte-identical prefix. Crossing a model boundary is therefore a
@@ -713,7 +924,7 @@ Downgrades still happen, but only when the cache is already cold or the window
 majority is unambiguous. Cross-family setups are untouched (cache domains
 already distinct).
 
-### 9.3 Task-level orchestration (planned v1.0.0)
+### 9.3 Task-level orchestration (delivered v1.0.0)
 
 **Vision (user-driven)**: stop at *per-turn model routing* and graduate to a
 *task-level closed loop* — a virtual dev team. On a user task, Judge decides
@@ -724,23 +935,14 @@ reviews each result, sends failed work back with concrete feedback, takes over
 directly when a subagent repeatedly fails past a threshold, and does the final
 acceptance pass. This is the Teams / Orchestra pattern.
 
-**Two architectural layers (key correction).** Orchestration *authority* must
-live in the **LLM layer**, not in the extension:
-
-- **LLM layer (Smart main agent)** — owns planning, delegation, review,
-  escalation, acceptance. It uses pi's built-in **subagent tool** to spawn
-  isolated Fast worker processes. This is exactly how the official `subagent/`
-  extension and `pi-subagents` work: `spawn("pi", ["--mode","json","-p",
-  "--no-session","--model",<fast>,"--tools",...])` → independent process,
-  isolated context, JSON output, optional `worktree` isolation, parallel
-  fanout via `runs.all`. The Smart agent decides which Fast agents to spawn,
-  with what task, and how to aggregate.
-- **Plugin layer (pi-shift-router)** — stays a *router*, not an orchestrator.
-  It only (a) runs Judge, (b) decides *when* to enter orchestration mode, (c)
-  switches the main model to Smart and injects an orchestrator-context prompt
-  ("you are the CTO; delegate implementation to Fast subagents via the
-  subagent tool; review and iterate; take over when a worker fails ≥N times;…").
-  Everything after that is the Smart agent's own loop.
+**Two architectural layers.** Orchestration *authority* lives in the **LLM
+layer**, not in the extension. The Smart main agent owns planning, delegation,
+review, escalation and acceptance, using pi's subagent tool to spawn isolated
+Fast worker processes. The plugin stays a *router*: it runs the Judge, decides
+*when* to enter orchestration, switches the main model to Smart, and injects the
+orchestrator prompt — then the Smart agent's own loop takes over. (Why the plugin
+must not re-implement the loop, and the extension-API limits that force this
+split, are recorded in MEMORY.md.)
 
 **Why the plugin must NOT re-implement orchestration.** The extension API gives
 no control over pi's agent loop, so a plugin-side state machine would have to
@@ -751,48 +953,11 @@ pi already ships. The subagent tool already provides verified isolation and
 parallelism; re-building it in the plugin violates AGENTS.md
 (simplicity / DRY / delete-before-adding).
 
-**Verified pi mechanisms (0.84.1 source) supporting this design:**
-
-1. **Subagent spawn**: official `examples/extensions/subagent/index.ts` spawns
-   `pi --mode json -p --no-session --model <agent.model> --tools <list>` as a
-   child process; `--mode json` emits NDJSON events with `usage` (tokens/cost)
-   per worker — the cost telemetry (§9.1) can attribute subagent spend.
-2. **Agent definition**: subagents are markdown files with `name` /
-   `description` / `model` / `tools` frontmatter (agents.ts) — the Fast tier
-   can map to a pre-defined "engineer" agent.
-3. **Model switch for the main run**: `session.setModel()` writes
-   `agent.state.model` (agent-session.js:1203); `createLoopConfig()` reads it
-   per loop (agent.js:291). Already proven by v0.6.0 failover.
-4. **Parallelism & isolation**: `pi-subagents` `runs.all([...])` gives parallel
-   fanout; `worktree: true` gives per-worker git worktree isolation.
-
-**Verified ready-made capability in installed pi-subagents 0.47.1** (checked
-against its shipped `prompts/` and `agents/`):
-
-- **Builtin worker** (`agents/worker.md`) = the Fast engineer: strict tool
-  allowlist (read/grep/find/ls/bash/edit/write + `contact_supervisor`),
-  `defaultContext: fork`, `systemPromptMode: replace`. The `worker` name maps
-  directly onto the Fast tier.
-- **Builtin reviewer** (`agents/reviewer.md`) = the Smart reviewer: read-only
-  tools, `thinking: high`, no write access.
-- **`/review-loop` prompt** (`prompts/review-loop.md`) already implements the
-  closed loop: async worker implement → parallel fresh-context reviewers →
-  parent synthesizes feedback → forked fix-worker applies fixes → re-review
-  until clean or max rounds (default 3). This is exactly the
-  implement → review → redo → cap loop in the vision, already shipped.
-- **Model pinning** (`docs/models.md`): `subagents.defaultModel` (e.g. Fast
-  tier model) + `subagents.agentOverrides.<name>.model` per role. Precedence:
-  per-run override → agent frontmatter → agentOverrides → defaultModel → parent
-  model. So the orchestrator can pin `worker` to Fast and `orchestrator` to
-  Smart without touching pi-shift-router tiers.
-- **Programmatic RPC** (`docs/extension-api.md`): in-process event-bus RPC
-  `subagents:rpc:v1:*` with `spawn/status/steer/interrupt/stop/resume` —
-  another extension could trigger subagent runs without LLM involvement
-  (future option; the LLM-layer approach is preferred for v1).
-
-**Implication**: the orchestration loop itself does not need to be built by
-pi-shift-router at all. The plugin's whole job reduces to (a) Judge, (b) decide
-complex vs simple, (c) on complex: switch the main agent to the Smart model and
+**Verified mechanisms (pi 0.84.1 source).** The subagent tool spawns an isolated
+`pi` process with its own model, tools and session; the plugin can pin the worker
+model per spawn, and `worktree` isolation plus parallel fanout are available. No
+plugin-side process management is required — the plugin's whole job is (a) Judge,
+(b) decide complex vs simple, (c) on complex: switch the main agent to the Smart model and
 inject an orchestrator instruction that says "you are the CTO — plan, then
 delegate implementation to `worker` subagents and review with `reviewer`
 subagents, loop until clean (cap N), take over yourself if a worker fails ≥N
@@ -826,52 +991,14 @@ the plugin carries the tier info into the orchestration dynamically:
   for narrow Fast-tier execution. The orchestrator prompt should instruct
   workers to be self-contained (include all needed context in the task).
 
-**Worker task-prompt design principles (fresh-mode consequence — user-driven).**
-Because fresh workers inherit *nothing*, the Smart orchestrator's task string
-IS the worker's world. It must be engineered for coverage without bloat:
-
-1. **Task contract over prose.** Structure the task as a contract: goal,
-   constraints, acceptance criteria (how to verify done), files/repos to
-   touch, and explicit out-of-scope. A worker should be able to finish
-   without asking a question (though it may escalate via contact_supervisor
-   for genuine decisions).
-2. **Reference, don't paste.** For files > ~2k tokens, give the path and a
-   1-line role summary, not the content — the worker reads them with its own
-   tools (read/grep). Pasting large files wastes prompt budget and adds
-   noise the model must filter.
-3. **Signal density over volume.** Include only facts the worker needs to
-   decide correctly: relevant interfaces/APIs, naming conventions,
-   the exact failure observed (with error text), the expected behavior.
-   Omit context that only explains *why* a decision was made unless it
-   changes what the worker should build.
-4. **Acceptance criteria are executable.** "tests pass", "lint clean",
-   "diff matches spec" are verifiable; "make it better" is not. The
-   orchestrator prompt must teach Smart to write acceptance criteria the
-   reviewer can check mechanically.
-5. **Per-phase boundaries.** The plan decomposes the task into phases; each
-   worker task references its phase inputs (files/APIs produced by earlier
-   phases) without re-importing the whole plan.
-6. **Budget-aware self-check.** The orchestrator reviews each worker result
-   with the same coverage lens: if the worker had to ask or guessed, the
-   task prompt was under-specified — a signal to fix the task prompt, not
-   just re-run.
-
-These principles make fresh workers *narrow by design*: small deterministic
-context → low cost, low hallucination, fast. The cost/quality numbers above
-($0.004 vs $0.064) are the direct payoff of getting this right.
-- Tier chain semantics carry over: if the top Fast model is in cooldown
-  (§8.5), the plugin renders the next healthy model in the chain; the
-  orchestrator prompt always lists the models that are actually usable now.
-- Format compatibility: tier model refs are already `provider/model-id`
-  (e.g. `minimax-cn/MiniMax-M3`), which is exactly the form the `model`
-  override field expects — no translation layer needed.
-
-**Why not write `settings.json` `subagents.*` instead.** Static subagent model
-config would create a second source of truth that must be kept in sync with the
-tiers (DRY violation), and one extension mutating another's config is an
-implicit side effect (violates explicit-over-implicit). Dynamic injection keeps
-pi-shift-router the only model authority and applies per task, per run, with
-today's cooldown/window state baked in.
+**Worker task prompt.** A fresh worker inherits nothing, so the task string *is*
+its world. It must be a contract — goal, constraints, acceptance criteria, files
+to touch, explicit out-of-scope — and self-contained enough that the worker never
+needs to ask a question (it may still escalate a genuine decision via
+`contact_supervisor`). Reference large files by path rather than pasting them,
+include only facts needed to decide correctly (interfaces, conventions, the exact
+error text), and make acceptance criteria something the worker can execute. The
+concrete wording lives in `src/prompts/orchestrator.md`, not here.
 
 **Proposed flow:**
 
@@ -966,127 +1093,45 @@ caller injects the cooldown predicate, cooled endpoints are excluded, and an
 all-cooled chain skips the pass (deterministic checks still ran) — the audit
 must not re-burn an endpoint the same turn just cooled down.
 
-**Backward compatibility contract (must not break existing behavior):**
+**Backward compatibility contract.** Orchestration ships on by default (`auto`
+mode) and must not change any turn that is not a complex task with subagents
+available:
 
-1. **Default `auto`, one-command opt-out.** Orchestration ships on by default
-   (`auto` mode — v1.0.0 feature; `/router orchestrate off` restores plain
-   routing). Existing behavior is preserved in two ways: (a) **simple tasks
-   never orchestrate** — Judge's `fast` verdict keeps the existing direct
-   fast run, so routine turns are byte-identical; (b) **missing
-   pi-subagents degrades** — without the extension the injection is skipped
-   and complex tasks run exactly as today's smart-tier run. No new event, no
-   changed decision path for anything except `smart`+subagents-present
-   turns, which gain delegation.
-2. **Simple tasks never orchestrate.** Even with orchestration on, Judge's
-   `fast` verdict keeps the existing direct fast run. Orchestration only
-   engages on Judge `smart`/complex verdicts.
-3. **Config fully backward compatible.** All `orchestration.*` fields are
-   optional with defaults; existing configs parse unchanged (deepMerge from
-   DEFAULT_CONFIG, as §5 does today).
-4. **Failure degrades to today's path.** If the subagent tool is unavailable
-   (pi-subagents not installed), the orchestrator prompt injection is skipped
-   and the turn proceeds exactly as today's smart-tier run. No crash, no
-   deadlock, no partial state.
-5. **Abort/reset.** User message or `/router orchestrate off` mid-loop cancels
-   pending runs and resets orchestrator state; the session continues as a
-   normal smart/fast session.
-6. **Existing features unaffected.** §8.5 failover, §9.1 cost telemetry, §9.2
-   cache-aware, §4 Judge, window (§3) all keep their exact current behavior
-   in both modes.
+1. **Simple tasks never orchestrate.** A `fast` verdict keeps the byte-identical
+   direct fast run; only `smart` verdicts enter the orchestration path.
+2. **Missing `pi-subagents` degrades silently.** Without the extension the
+   orchestrator injection is skipped and the complex turn runs exactly as the
+   pre-orchestration smart-tier run — no crash, no deadlock, no partial state.
+3. **Config parses unchanged.** Every `orchestration.*` field is optional with a
+   default (§5 merge behaviour); old configs need no migration.
+4. **Abort/reset always available.** A user message or `/router orchestrate off`
+   mid-loop cancels pending runs and resets orchestrator state; the session
+   continues as a normal routed session. `resetOrchestration()` also runs on
+   `session_start` so a new session never inherits a stale planning frame.
 
-**v1.1.0 field findings (implemented):**
+**Risks, and how each is contained.** Review-loop convergence: only blocking
+issues may be flagged, every re-delegation carries a structured failure report
+(what failed / where / the acceptance test to re-run), and repeating the same
+feedback twice triggers takeover instead of re-delegating. Worker-output variance:
+each worker is fresh-context, so the task prompt must be self-contained.
+Runaway cost: `orchestration.maxRounds` and `escalationThreshold` are enforced
+**plugin-side** (`recordWorkerOutcome` + `tool_call` blocking), not suggested in
+the prompt. Interrupts mid-orchestration: cancel/reset semantics via
+`resetOrchestration`.
 
-1. **`subagent` availability detection bug (root cause of "orchestration never
-   triggers").** The original check probed `pi.tools?.subagent` and
-   `pi.toolManager?.get("subagent")` — neither exists on `ExtensionAPI`
-   (`pi.tools` is an internal `Map` on the loaded `Extension` object, and
-   there is no `toolManager` at all), so the gate was *always false* and
-   orchestration could never engage, even with an explicit user request.
-   Correct API: `pi.getAllTools(): ToolInfo[]` (all registered tool
-   definitions, including extension tools) and `pi.getActiveTools(): string[]`
-   (agent's active tool names). pi-subagents registers `subagent` via
-   `pi.registerTool`, and pi's `_refreshToolRegistry` auto-activates
-   newly-registered tools, so both APIs reflect it. **Rule: never probe
-   `pi.<field>` dot-access for tools — use the `get*Tools()` methods.**
-2. **Judge `orchestrate` signal (explicit, not inferred).** `tier` says which
-   model; `orchestrate: true|false` says *how a smart turn executes* —
-   directly, or by delegating to Fast subagents. Emitted inside the same
-   JSON object; absent = no opinion (caller falls back to the tier default:
-   smart → orchestrate, preserving v1.0.0). `false` on a smart verdict is an
-   explicit veto (smart runs the turn directly); `true` is an explicit go
-   (e.g. user asks to split into parallel subtasks). Only meaningful on smart turns —
-   fast never orchestrates regardless. This decouples *complexity* (which
-   model) from *scale/decomposability* (whether to delegate) — a task can be
-   judgment-heavy but small (smart, no orchestration) or simple-scope but
-   large (smart, orchestrate).
-3. **Orchestration observability.** Status bar animates during Judge
-   (`🧭 judging` + cycling dots — a static badge read as "hung" during the
-   1-2s API call) and during orchestration. Label contract (v1.4.0): the
-   wand 🪄 is reserved for delegation IN FLIGHT — planning shows the plain
-   tier badge with throughput (`[🧠 deepseek] • 42 tok/s`, no wand), and
-   only spawned workers get the dedicated label with completion count plus
-   AVERAGE per-worker throughput across completed workers —
-   `🪄 Done(2)/Total(3) • ~30 tok/s avg` — stable under concurrency (not
-   latest-single-completion, which jumps). `tool_call` records spawn
-   wall-clock per `toolCallId`; `tool_result` pairs it back, computes
-   tokens/sec from `usage.output`, and pushes into
-   `orchestration.workerSpeeds` while folding `usage.cost.total` into
-   `orchestration.spend` and appending a bounded per-worker ledger entry
-   (`recordWorkerSpend`, cap 20) that the `/router status` Money section
-   renders as `orchestration $X (N workers)`. Router-off turns keep telemetry too:
-   `⛔ • 55 tok/s`. `/router status` shows workers `done/spawned` while
-   active. A leaked orchestration state (interrupted turn that skipped
-   agent_end) is swept at the start of the next turn, so a stale planning
-   frame can never keep painting over the live badge.
+### 9.4 Future work
 
-**Open design decisions (to be settled before code):**
+- **Tool-result classification.** Classify tool calls, not just user messages —
+  long shell output may indicate debugging rather than a question, which is
+  signal the current prompt-only Judge cannot see.
+- **Threshold re-derivation for calibrated probabilities** (§8.6). Decision
+  models return a calibrated distribution, not an LLM `confidence`; θ and
+  `minConfidence` are still on the LLM scale, so the switch rate shifts under
+  decision mode until they are re-derived from measured data.
+- **Decision-mode latency re-measurement.** The 1.4–6.6 s currently measured is
+  provider-side beta capacity, not a property of the model class. Re-measure as
+  capacity comes online; if seconds persist, position decision mode as
+  batch/background-only.
 
-1. **Entry trigger** (settled 2026-08-13): auto-inject on Judge `smart` when
-   orchestration is in `auto` mode, with a visible `🪄` status; abort via user
-   message or `/router orchestrate off`. No confirmation prompt — the judge
-   already gates on complexity.
-2. **Worker mapping**: one pre-defined "engineer" Fast subagent, or multiple
-   specialized workers (frontend / backend / tests)? Derived from the Fast tier
-   chain.
-3. **Review loop**: Smart reviews each phase result inline (natural for the
-   orchestrator prompt) vs a dedicated review subagent. (Default: inline.)
-4. **Escalation threshold** N=2, configurable via `orchestration.*` config.
-5. **Default `auto`** (settled 2026-08-13: v1.0.0 feature ships on by default so
-   users experience it; `/router orchestrate off` is the one-command opt-out).
-6. **Interplay with §9.2**: the main-agent switches honor the warm-cache guard.
-7. **Orchestration lifecycle (session-scoped state)**: orchestration spans
-   multiple user turns (Smart plans in turn 1, worker executes as a subagent,
-   Smart reviews, user continues). The plugin must remember "we are in an
-   orchestration session" so `before_agent_start` keeps the main model Smart
-   and keeps the orchestrator context active, until the orchestrator signals
-   completion. Proposed model:
-   - `orchestration.active` (session state, not config) set when Judge says
-     complex AND orchestration mode is `auto`; cleared when Smart's run signals
-     completion (a defined output marker in the orchestrator instruction, e.g.
-     the final acceptance pass ends with a sentinel) or on abort.
-   - While active: main agent stays Smart for subsequent turns; the orchestrator
-     context is not re-injected on every turn (it persists in session history)
-     but the model lock persists.
-   - Exit: sentinel output OR `elapsed/budget` cap OR user abort
-     (`/router orchestrate off`). After exit, `before_agent_start` resumes
-     normal auto routing.
-   - Simpler MVP alternative: orchestration is *single-turn* — the orchestrator
-     prompt runs one Smart turn that does plan + delegate + review + accept all
-     inside that turn (subagents are spawned synchronously within the turn).
-     No cross-turn state needed. Trade-off: a long task holds the turn until
-     done; no user checkpoints mid-task. **Default proposal: single-turn MVP,
-     cross-turn lifecycle as Phase 3 extension.**
-
-**Risks**: review-loop convergence (a picky orchestrator can reject good work —
-the injected prompt must only flag blocking issues; **v1.2.0 added a
-convergence protocol** — every re-delegation must carry a structured failure
-report (what failed / where / acceptance test to re-run) and repeating the
-same feedback twice triggers takeover instead of re-delegation); subagent
-output quality variance (each worker is fresh-context, so the task prompt must
-be self-contained); orchestration runaway cost (needs a session budget or max
-phase cap; **v1.2.0 enforces maxRounds + escalationThreshold plugin-side via
-`recordWorkerOutcome` + `tool_call` blocking** — the caps are no longer
-prompt-side suggestions); state robustness (user interrupts mid-orchestration
-need cancel/reset semantics). Suggested build order: prove one Smart-plan →
-Fast-subagent-execute → Smart-accept loop first, then add review iteration and
-escalation.
+Withdrawn ideas (multilingual Judge-prompt translations, per-tier thinking level)
+are recorded in MEMORY.md with their rationale, not kept here.

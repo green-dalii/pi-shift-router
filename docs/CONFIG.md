@@ -18,6 +18,7 @@
 ## JSON-only settings (advanced, not in the TUI)
 
 - `routing.judgeTimeout`, `routing.window.minConfidence`, `routing.economics.reworkPenalty`
+- `routing.judge.mode` / `routing.judge.models` (Judge LLM chain or a decision model — see below)
 - `ux.quietMode`, `ux.routerLogVerbose` (verbose writes to `~/.pi/agent/logs/shift-router.log`)
 
 After hand-editing, re-run `/router config` once to reload, or restart pi.
@@ -79,8 +80,8 @@ tiers:
 enabled:  true
 tiers:
   fast:
-    - { provider: deepseek,   model: deepseek-v4-flash, priority: 1 }
-    - { provider: z.ai,       model: glm-5.2,           priority: 2 }
+    - { provider: deepseek,   model: deepseek-v4.1-flash, priority: 1 }
+    - { provider: z.ai,       model: glm-5.3-flash,           priority: 2 }
     - { provider: xai,        model: grok-4.5-fast,     priority: 3 }
   smart:
     - { provider: anthropic,  model: claude-opus-5,     priority: 1 }
@@ -95,6 +96,8 @@ tiers:
 | `enabled` | `true` | Master switch. Use `/router off` to disable. |
 | `tiers.<tier>.models[]` | `[]` | Ordered by `priority`. First hit wins; rest are runtime fallbacks. |
 | `routing.judgeTimeout` | `5000` | ms. Judge API call timeout. |
+| `routing.judge.mode` | `"fast-chain"` | Judge chain source: `fast-chain` (reuse the Fast tier — default), `custom` (dedicated `routing.judge.models` LLM chain), `decision` (typed-answer decision models, Jev/System One class). |
+| `routing.judge.models` | `[]` | Model chain used by `custom` / `decision` (priority order, same shape as a tier chain). Ignored by `fast-chain`. |
 | `routing.window.size` | `5` | Decision-history cap (window entries kept for display + streak analysis). |
 | `routing.window.minConfidence` | `0.5` | Judge confidence below this = no signal (hold: never switch, breaks a fast streak). |
 | `routing.economics.mode` | *(unset)* | Named gear preset from `/router mode` — `eco` (R=2, θ=0.5, cheaper: only clearly-needed turns run smart), `default` (R=3, θ≈0.33), `sport` (R=5, θ=0.2, eager: any real chance escalates). Higher R → lower θ → more eager Smart (θ = 1/R). When present it is **authoritative** over `reworkPenalty`; clear it (or edit the file) to go back to a manual R. A legacy `window.threshold` (non-default value only) still wins over both. |
@@ -130,6 +133,30 @@ Every knob is a trade-off. Pick by workload:
 
 **`routing.judgeTimeout`** (ms) — Judge API call timeout. Default `5000`. Raise on slow providers, lower on flaky networks.
 
+**The judge ladder.** Whatever mode you pick, the router walks two rungs and never guesses:
+
+1. **Your judge chain** — a Jev decision model (`decision`), a dedicated LLM chain (`custom`), or the Fast chain (`fast-chain`).
+2. **Your LLM judge** — the Fast-tier chain (the pre-v1.7.0 default). Rung 1 lands here when it cannot resolve (retired model, removed key, gone provider) **or** when it fails at call time (429 / 5xx / timeout / cooldown) — the same turn, not the next one.
+3. If rung 2 is exhausted too: **routing stops** for the turn — no model switch, no orchestration, and the model you started the session with is restored (a manual `/route-force` override is respected). One notice per session. The worst case is "as if this plugin were not installed".
+
+**Old configs need no migration.** A pre-v1.7.0 config has no `routing.judge` at all, and the default is `fast-chain` — identical behaviour to before. Two other shapes are handled: a `judge.models` list without a `mode` is migrated to `custom` (otherwise the merged default would silently ignore it), and an unknown/typo'd `mode` degrades to `fast-chain` rather than breaking routing. The wizard displays the normalized mode, so the menu always matches what the router does.
+
+**Decision mode needs more than the default.** Measured against `api.typesafe.ai` (2026-09-18): **1.4–6.6 s** (median ~5 s), and a 5× smaller payload is no faster — the wait is provider-side compute during Jev's public beta, not payload or integration overhead. So `/router config` → `🧭 Judge` → `🧮 Decision model` **raises this to 15000 ms** if your value is lower, and says so in its notification. Below ~15 s, most decision calls abort on timeout and the router silently holds every turn. Expect this to fall as beta capacity comes online.
+
+**`routing.judge`** — the Judge runs in one of three modes (wizard: `/router config` → 🧭 Judge):
+
+1. `fast-chain` (default) — reuse the Fast tier chain. Nothing extra to configure; identical to earlier versions. If the chain resolves to nothing, the router falls back to the cheapest authenticated model (legacy behaviour).
+2. `custom` — a dedicated Judge LLM chain in `routing.judge.models`, edited with the same chain editor as the tiers. Useful when you want a cheaper or stricter classifier than your Fast tier. **No** cheapest-model fallback: an unresolvable chain holds position instead of judging on a model you did not pick.
+3. `decision` — a **decision model** (TypeSafe Jev / System One class) that returns typed answers with calibrated probabilities instead of text. The wizard offers only decision-capable endpoints and validates the choice **locally** (auth + baseUrl) — there is no save-time network probe. If the endpoint turns out to be unusable at runtime, the router degrades instead of stalling: **Jev → your LLM judge → routing off** (no model switch, no orchestration, one notice). Decision-mode failures never hold a fabricated verdict.
+
+**Model id: use `jev-latest`.** Jev returns the resolved version in every response (`"model": "jev-1.13.0"` even when asked for the alias), and the router logs it when it changes, so an alias move is visible rather than silent. Pinning (`jev-1.13.0`) trades that resilience for byte-identical reproducibility — and fails hard on the day the vendor retires the build. Prefer the alias; watch the log.
+
+Decision transport (used by mode 3): `POST {baseUrl}/v1/systemone` with `{model, state, questions:{tier:{type:"choice",…}, orchestrate:{type:"noul",…}}}`. The router reads `tier.choice`, uses `tier.probabilities[tier]` as the confidence, and thresholds `orchestrate.noul >= 0.5`. There is no `reason` for decision mode (the model generates no prose), so the dashboard's "Last:" line shows the tier + probability only.
+
+**Order: legacy default first, Jev last as Beta.** The wizard lists `🦾 Reuse the Fast tier chain (default)`, then `🔬 Dedicated Judge LLM chain`, then `🧮 Jev — decision model (Beta)`. Jev is public beta — less independently validated than an LLM judge, with provider capacity still ramping — so it is opt-in rather than the recommended default. The config default stays `fast-chain`, so an upgrade never re-judges you with a different model class. If a dedicated or decision chain resolves to nothing (model retired, key removed, provider gone), the router **falls back to the LLM judge and logs it** rather than holding every turn — and the wizard row tells you what is actually judging (`Jev unavailable — LLM judge active`). Per-call failures still hold: those are transient, not config rot.
+
+Note: switching to a decision model changes the *distribution* of confidence values. Thresholds (`θ`, `minConfidence`) were tuned for LLM confidence; re-tune them once you have measured data from the decision model (`/router status` shows the recent verdict window).
+
 **`routing.window.size`** — Decision-history cap. Default `5`. Larger keeps more context for the downgrade streak; entries beyond it are discarded.
 
 **`routing.economics.reworkPenalty`** (≥1) — how many price-deltas a wrong downgrade costs (rework multiplier). **θ = 1 / reworkPenalty** is the expected-cost smart bar (SPEC §2.3): the judge's confidence is read as `pSmart` (smart verdict: `c`; fast verdict: `1−c`), and the turn runs smart whenever `pSmart ≥ θ`. Because rework costs more than the saved delta, borderline verdicts lean smart. NOTE the direction: **higher R → lower θ → MORE eager Smart**.
@@ -162,11 +189,11 @@ Upgrades (fast → smart) are never affected. Cross-family setups are untouched.
 
 ```text
 pi-shift-router — Mode: AUTO ✅
-Current: [🦾 deepseek-v4-flash]
+Current: [🦾 deepseek-v4.1-flash]
 
 Tiers:
-  🦾 Fast — MiniMax-M3, meta/muse-spark-1.2-contributor, deepseek-v4-flash, ...
-  🧠 Smart — deepseek-v4-flash, meta/muse-spark-1.2-contributor
+  🦾 Fast — MiniMax-M3, meta/muse-spark-1.2-contributor, deepseek-v4.1-flash, ...
+  🧠 Smart — deepseek-v4.1-flash, meta/muse-spark-1.2-contributor
 
 Session:
   Turns: 12   Upgrades: ↑2   Downgrades: ↓1

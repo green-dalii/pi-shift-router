@@ -1,7 +1,7 @@
 {
   "name": "pi-shift-router",
-  "version": "1.6.0",
-  "description": "An LLM judge routes every Pi agent turn to the right model \u2014 fast execution for routine work, smart reasoning for hard problems \u2014 with multi-model failover and automatic orchestration.",
+  "version": "1.7.0",
+  "description": "Per-turn model routing for Pi: a small judge picks the cheap or the strong tier for each message, with multi-model failover, task-level orchestration, and an optional decision-model judge (Jev) that answers with a calibrated probability instead of prose.",
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -25,7 +25,14 @@
     "model-switching",
     "agent-routing",
     "auto-router",
-    "cost-optimization"
+    "cost-optimization",
+    "jev",
+    "typesafe",
+    "decision-model",
+    "calibrated-probability",
+    "system-one",
+    "judge-model",
+    "model-tier-routing"
   ],
   "license": "MIT",
   "homepage": "https://shiftrouter.greenerai.top",

@@ -11,11 +11,11 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.zh-CN.md
 - docs: README.md / README.zh-CN.md / docs/CONFIG.zh-CN.md / docs/MODELS.zh-CN.md / docs/TROUBLESHOOTING.zh-CN.md
 - first-published: v0.4.0
-- latest: v1.6.0
+- latest: v1.7.0
 - last-updated: 2026-09
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
-- search-intents: "为什么要做模型路由", "模型分层 价格跨度", "LLM 路由 省钱", "OpenRouter auto router 替代", "Jev 怎么用", "TypeSafe Jev 决策模型", "Jev 校准概率 路由器", "决策模型 HTTP API", "自动路由 pi agent 每轮", "可插拔 Judge 模型", "Jev 作为 Judge", "决策模型做路由判定", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "402 余额不足自动切换模型", "Codex usage limit 自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排", "worker 花费归因", "编排成本统计", "TUI 状态仪表盘", "pi 模型目录对齐", "router config 与 /model 一致", "ModelRegistry available 快照"
-- features: 两层路由、任务级编排（Smart 档作为 CTO 派发给 Fast 工程师）、可插拔 Judge（复用 Fast 链 / 独立 Judge LLM / 决策模型如 Jev —— 详见"Jev 是怎么接入的"小节）、LLM Judge、JSON-mode 分类器、滑动窗口降级门、多模型 fallback 链、TUI 配置向导、指数退避运行时 failover（429/402/5xx + Codex usage limit 耗尽）、路由与 Judge 共享冷却、cache-aware 路由（同 Provider 缓存保护）、跨 Provider、零配置起步、token 吞吐遥测、TUI 状态仪表盘（上下文窗口与缓存命中率仪表、链内联冷却、最近决策、花费）、per-worker 花费归因（有界编排账本，`orchestration $X (N workers)`）、EV 经济学路由与齿轮预设（eco/default/sport）、任务级编排（默认开启：Smart 档作为 CTO 派发给 Fast 子代理；需安装 pi-subagents）、pi 模型目录对齐（向导 + Judge + 遥测共享 `/model` 等价列表）
+- search-intents: "为什么要做模型路由", "模型分层 价格跨度", "LLM 路由 省钱", "OpenRouter auto router 替代", "Jev 怎么用", "TypeSafe Jev 决策模型", "Jev 校准概率 路由器", "决策模型为什么比 LLM Judge 更契合", "拿概率回答的判定器", "System One 决策模型 路由", "决策模型 HTTP API", "自动路由 pi agent 每轮", "可插拔 Judge 模型", "Jev 作为 Judge", "决策模型做路由判定", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "402 余额不足自动切换模型", "Codex usage limit 自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排", "worker 花费归因", "编排成本统计", "TUI 状态仪表盘", "pi 模型目录对齐", "router config 与 /model 一致", "ModelRegistry available 快照"
+- features: 两层路由、任务级编排（Smart 档作为 CTO 派发给 Fast 工程师）、可插拔 Judge（复用 Fast 链 / 独立 Judge LLM / 决策模型如 Jev（Beta、可选）—— 见 Jev 小节）、LLM Judge、JSON-mode 分类器、滑动窗口降级门、多模型 fallback 链、TUI 配置向导、指数退避运行时 failover（429/402/5xx + Codex usage limit 耗尽）、路由与 Judge 共享冷却、cache-aware 路由（同 Provider 缓存保护）、跨 Provider、零配置起步、token 吞吐遥测、TUI 状态仪表盘（上下文窗口与缓存命中率仪表、链内联冷却、最近决策、花费）、per-worker 花费归因（有界编排账本，`orchestration $X (N workers)`）、EV 经济学路由与齿轮预设（eco/default/sport）、任务级编排（默认开启：Smart 档作为 CTO 派发给 Fast 子代理；需安装 pi-subagents）、pi 模型目录对齐（向导 + Judge + 遥测共享 `/model` 等价列表）
 - direct-competitor: "@tenchi4u/pi-bifrost（7 阶段启发式 + 订阅配额）· pi-smart-router（12 阶段本地管线 + HyDRA + Virtual Cost v2）"
 - author: green-dalii（https://github.com/green-dalii）
 -->
@@ -39,31 +39,31 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 
 [English](README.md) | [简体中文]
 
-[🌐 项目官网](https://shiftrouter.greenerai.top) | [⚙️ 工作原理](#工作原理) | [🚀 为什么是现在](#为什么是现在) | [🚀 快速开始](#快速开始) | [🧭 Jev：用数字回答的判定器](#jev用数字回答的判定器可选判定后端v170) | [⚖️ 对比其它方案](#对比其它方案) | [❓ 常见问题](#常见问题) | [🔧 配置参考](docs/CONFIG.zh-CN.md) | [🩺 故障排查](docs/TROUBLESHOOTING.zh-CN.md)
+[🌐 项目官网](https://shiftrouter.greenerai.top) | [⚙️ 工作原理](#工作原理) | [🚀 为什么是现在](#为什么是现在) | [🚀 快速开始](#快速开始) | [🧭 Jev：用数字回答的判定器](#jev让决策模型来当判定器beta) | [⚖️ 对比其它方案](#对比其它方案) | [❓ 常见问题](#常见问题) | [🔧 配置参考](docs/CONFIG.zh-CN.md) | [🩺 故障排查](docs/TROUBLESHOOTING.zh-CN.md)
 
-你已经为两档智能付了钱，只是没法按轮次使用它。
+你为两档智能付了钱，但每轮只能用其中一档。
 
-你发出的每条消息都在做一个无声的赌注：**这活儿难到值得用贵模型吗？** 赌高了，你在 `改名一个变量` 上烧掉旗舰价；赌低了，模型给你一个应付式的架构方案。于是多数人干脆选定一个模型、永不更换，然后默默接受这两份损失。
+你发出的每条消息都是一次下注：这活儿值不值得上贵模型？赌高了，改个变量名也在烧旗舰价；赌低了，架构问题拿回一个浅补丁。于是多数人干脆选定一个模型不再改，两种亏都默默吃下。
 
-pi-shift-router 把这个赌注拿掉。每轮开始前，一个小判定器读你的消息、选定档位，然后由这一档接管整轮：思考、工具调用、改代码。你配两条链，路由器只在"贵模型能改变结果"的地方花贵模型的钱。
-
-它以 [pi-coding-agent](https://github.com/earendil-works/pi) 扩展的形式运行——没有独立进程、没有额外配置：`pi install`、重启 pi，立刻开箱即用。
+这个扩展把这一注取消掉。一个小判定器读你的消息、选一档，这一档就带着整轮跑完——思考、工具调用、改文件。你配两条链，贵的那条只花在真正改变结果的地方。它以 [pi-coding-agent](https://github.com/earendil-works/pi) 扩展的形式运行：没有服务端，没有每次调用的额外设置。
 
 ```text
-🦾 [deepseek-v4.1-flash] → 修一下这个失败的测试
+🦾 [deepseek-v4.1-flash] → fix the failing test
 🧭 judging…
-🧠 [claude-fable-5]              ← "设计认证流程" → 立即升级
+🧠 [claude-fable-5]              ← "design the auth flow" → upgraded instantly
 ⚠️ deepseek-v4.1-flash 429 → switching to glm-5.3-flash — retry in 1m
-🦾 [glm-5.3-flash]                    ← 同档 failover
+🦾 [glm-5.3-flash]                    ← same-tier failover
 ```
 
-而当任务真的很大时，光靠选模型不够——Smart 档不再是一个模型，而是一个 **CTO**：规划、把实现派发给 Fast 工程师子代理、逐项审核、迭代。我们称之为**任务级编排**，复杂任务默认开启。
+任务真的很大时，光选对模型还不够：Smart 档会变成 CTO——规划、把实现派给 Fast 子代理、逐项审核、迭代。这就是任务级编排，复杂任务默认开启。
 
-> **编排前置依赖：** 高级编排（Smart 档作为 CTO 派发给 Fast 子代理）需要安装 [`pi-subagents`](https://www.npmjs.com/package/pi-subagents) 扩展（`pi install npm:pi-subagents`）。未安装时路由器照常工作——只有基础两档路由；复杂任务直接在 Smart 档上运行，不做派发。
+> **编排需要 [`pi-subagents`](https://www.npmjs.com/package/pi-subagents)**（`pi install npm:pi-subagents`）。没装也能照常路由，只是复杂任务直接在 Smart 档上跑，不做派发。
 
-- **升级立即**，降级要连续 2 轮 fast——不会来回抖。
-- 每档可配多模型链，429/5xx 指数退避冷却，任务不中断。
-- 一个配置文件——配好模型之前是 no-op，之后路由开箱即用（复杂任务自动编排）。唯一运行时依赖是宿主导入的 `@earendil-works/pi-tui`。
+判定器本身有三种模式，第三种是另一类模型：**Jev**，用概率而不是文字回答的决策模型。没有东西需要解析，一次判定约 \$0.0001，默认关闭、标注 Beta——[完整的实话在这里](#jev让决策模型来当判定器beta)。
+
+- 升级立刻生效；降级要连续两轮 `fast`。
+- 每档都是 fallback 链，配指数退避冷却，429 不会中断你的会话。
+- 一个配置文件；没配模型之前它什么都不做。
 
 ```bash
 pi install npm:pi-shift-router   # 然后：/router config → /router status
@@ -73,9 +73,9 @@ pi install npm:pi-shift-router   # 然后：/router config → /router status
 
 ## 为什么是现在
 
-过去一年发生了三件事，它们合起来让"每轮路由"从聪明技巧变成了默认做法。
+最近发生的三件事，让"每轮路由"从聪明技巧变成了合理默认。
 
-**1. 厂商自己把家族切成了阶梯——跨度大得惊人。**
+**1. 厂商把自家家族切成了阶梯，同一家族内价差很大。**
 
 | 家族 | 最便宜档 | 最强档 | 价差 |
 |---|---|---|---|
@@ -86,17 +86,15 @@ pi install npm:pi-shift-router   # 然后：/router config → /router status
 | MiMo | $0.14 | $1.31 | **9×** |
 | DeepSeek | V4.1 **Flash** $0.30 | V4 Pro $1.32 | **4×** |
 
-价格取自 pi 自带目录的输入价（41 个 provider、**1443** 个带价模型）——打开 `/model` 就能自己核对。而便宜档往往**已经够用**：Z.ai 把 GLM-5.3-Flash 定在 GLM-5.3 的九分之一价格；一项独立对比显示 MiMo-V2.6-Flash 在某个基准上**反超** Pro 档，价格却只有三分之一。"更大就是更好"不是策略，**配对**才是。
+价格取自 pi 自带目录的输入价（41 个 provider、**1443** 个带价模型）——打开 `/model` 就能核对。便宜档往往已经够用：一项独立对比显示 MiMo-V2.6-Flash 在某个基准上反超 Pro 档，价格只有三分之一。
 
-**2. 聚合商把几百个模型汇成一片池子——多到没法手工选。**
+**2. 可选项多到没法手工选。**
 
-光 OpenRouter 就有 **380** 个带价模型，从 Mistral Nemo（$0.019）到 GPT-5.5 Pro（$30）横跨 **1579×**。再加上 Cloudflare AI Gateway（51）、Vercel（236）、`opencode`（70）、Ollama 云端模型，以及像 OpenCode Go 那样 **$10/月 28 个模型**的包月池——在包月里，切换的边际成本是零，**不做路由就是纯浪费**。
+光 OpenRouter 就有 **380** 个带价模型，从 Mistral Nemo（$0.019）到 GPT-5.5 Pro（$30）横跨 **1579×**。再加上 Cloudflare AI Gateway（51）、Vercel（236）、`opencode`（70）、Ollama 云端模型，以及像 OpenCode Go 那样 $10/月 28 个模型的包月池——包月里切换不额外花钱。
 
-**3. 判定器本身成了一种模型类别。**
+**3. 判定本身成了一种专门的模型类别。**
 
-以前要判断"这轮难不难"，得调一个前沿 LLM，再从它写的一段话里抠 JSON。2026 年 9 月 TypeSafe 发布了 **Jev**——第一个 *System One* 模型：你给它 state 和类型化问题，它返回带校准概率的类型化答案，而且从不生成一句话。LiteLLM 在自家 Auto Router 里实现了同一思路，并测出 `jev` 分类器比 Haiku 级 LLM 分类器**快 5.43 倍、成本低 96%**。
-
-最后一公里一直是"总得有个东西在每一轮做选择"。现在，这个选择本身很便宜。往下读[为什么决策模型更适合当判定者](#jev用数字回答的判定器可选判定后端v170)——以及我们**不**为它吹的那些话。
+以前判断"这轮难不难"，得调一个前沿模型，再从它写的话里抠 JSON。2026 年 9 月 TypeSafe 发布了 **Jev**，一个 *System One* 模型：给它 state 和类型化问题，返回带概率的类型化答案，不生成一句话。用分类模型做分类，既更便宜也更不容易碎——[细节和代价在这里](#jev让决策模型来当判定器beta)。
 
 ---
 
@@ -109,56 +107,35 @@ pi install npm:pi-shift-router   # 然后：/router config → /router status
 | **只用一个强模型** | 永远不会选错。 | 你会永久地为 `修个拼写错误` 付旗舰价。 |
 | **全靠手动** | 免费。 | 直到你第一次忘了切回来——而这就是问题的全部。 |
 
-**一句话的区别**：我们在你的 agent 里、用你的链、按**任务形态**路由；每个判定都可见（`/router status`），两档划分由你定义，而且它还能扛住限流和 402。
+一句话的区别：本插件按**任务形态**、在你自己的 agent 里、在你定义的两条链之间路由，每个判定都能在 `/router status` 里看到。
 
 ---
 
 ## 工作原理
 
-每轮开始前只做一次便宜调用：Fast 档模型（通常是你最便宜的）读你的消息，判为 `fast`（例行）或 `smart`（重要），并给出**置信度**（0–1，多确信）。判定之后，选中的档位整轮干活。
+每轮只做一次便宜调用。Fast 档模型（通常是你最便宜的）读你的消息，判为 `fast`（例行）或 `smart`（值得上贵模型），并给出 0–1 的置信度。整个系统只有这一处判定；选中的档位随后跑完整轮。
 
-**先从「错的方向不对称」说起——后面所有规则都从这一点长出来。** 每次切换都有两种错法，代价完全不同：
+**默认为什么偏向"多花钱"。** 判错的代价在两个方向上完全不同。把简单任务升档，只多付一次价差；把难任务留在便宜档，要重做一轮，还得再付一次贵模型的钱，外加你的时间。所以路由器不该 50/50 地赌：
 
-- **简单任务升了档**（routine 活花 smart 的钱）：多付一次差价——小、有界、看得见。
-- **复杂任务留在便宜档**：它搞砸，你整轮重来，最后还得花 smart 的钱——外加你的时间。通常比第一种贵好几倍。
+> 当这轮需要 smart 的概率不低于 θ 时，就走 smart。默认 **θ ≈ 0.33**。
 
-一个分不清「简单 / 复杂」的经理，不该在 50/50 处下注。**当任务可能是难的，便宜档才是那个冒险的选择**——所以路由器的闸向「花钱」一侧倾斜：
+置信度就是这个概率。`smart` 且置信度 0.9，意味着 90% 需要；`fast` 且 0.9，意味着 10%——所以一个很确定的 `fast` 是最强的"保持便宜"信号。低于 `minConfidence`（0.5）的判定直接忽略，路由器停在原处。
 
-> **如果这一轮需要 smart 的概率 ≥ θ，就跑 smart；否则跑 fast。** 默认 **θ ≈ 0.33**。
+| 判定 | 置信度 | 需要 smart 的概率 | 结果 |
+|---|---|---|---|
+| `smart` | 0.9 | 0.90 | 🧠 smart |
+| `smart` | 0.2 | 0.20 | 🦾 fast——这次判定太弱 |
+| `fast` | 0.9 | 0.10 | 🦾 fast |
+| `fast` | 0.6 | 0.40 | 🧠 smart——"大概是简单"还不够简单 |
+| 任意 | < 0.5 | — | 保持：不猜 |
 
-**置信度就是那个概率。** Judge 判 `smart`、置信度 `c` → 概率 `c`；判 `fast`、置信度 `c` → 概率 `1 − c`（**越确信 fast，越说明几乎肯定是简单活**）。看表：
+0.33 是怎么来的：两档的价差在比较中会被约掉，真正决定阈值的是"翻车有多疼"相对于这档价差的比例（`reworkPenalty`，默认 3——翻车约等于 3 倍价差，所以三分之一的可能需要好模型就值得升）。`/router sport` 把惩罚提到 5，路由更激进（θ = 0.2）；`/router eco` 降到 2，更保守（θ = 0.5）。
 
-| Judge 判定 | 置信度 | 需要 smart 的概率 | vs θ | 结果 |
-|---|---|---|---|---|
-| `smart` | 0.9 | 0.9 | ≥ | 🧠 smart |
-| `smart` | 0.2 | 0.2 | < | 🦾 fast —— 弱判定被驳回 |
-| `fast` | 0.9 | 0.1 | < | 🦾 fast |
-| `fast` | 0.6 | 0.4 | ≥ | 🧠 smart —— 拿不准是不是简单活 |
-| 任意 | < 0.5 | （无信号） | —— | hold —— 停在当前档位，不猜 |
+**两条防线防止来回抖。** 升级立即生效；降级要连续两轮 `fast`。另外两档共用同一个 provider 时，路由器会抬高门槛，并在 prompt 缓存还热时拒绝降级——因为中途换档会让下一个模型按全价重读整段对话。
 
-**0.33 从哪来——保险的数学。** 把差价想成「避免搞砸」的保费：
+判定必须机器可读：OpenAI 兼容端点用 `response_format: json_object`（非 JSON 会被 API 拒绝），Anthropic 用 `{` 前缀强制 JSON。判定期间状态栏显示 `🧭 judging…`。判定调用失败时，路由器保持当前档位，不猜。
 
-| 策略 | 期望成本 | 为什么 |
-|---|---|---|
-| 跑 smart | `f + Δ` | 先付保费，没有搞砸风险 |
-| 跑 fast | `f + P·Δ·R` | 省下保费；但任务其实需要 smart（概率 `P`）时，搞砸要付 `R×` 差价 |
-
-`f` = fast 档成本，`Δ` = smart − fast（保费），`R` = `reworkPenalty`，`P` = 需要 smart 的概率。只要平均来看跑 smart 更便宜就升级：
-
-```
-f + P·Δ·R > f + Δ   ⟺   P > 1/R
-```
-
-差价被约掉了：**规则不关心你选的模型贵不贵，只关心「搞砸的代价相对差价有多大」**。默认 `R = 3` → θ ≈ 0.33：有三分之一概率需要 smart，就值得升级。**R 越大闸越低**：`R = 5` → θ = 0.2（更积极——`/router sport`），`R = 2` → θ = 0.5（更保守——`/router eco`）。
-
-**两道护栏防止来回抖：**
-
-- **升级立即**：pSmart ≥ θ 就升。**降级要连续 2 轮** pSmart < θ——一句「谢谢」永远降不下来。
-- **缓存门**。Prompt 缓存属于单个模型——中途换档，新模型要以全价重读整个对话。当 Fast 与 Smart 同属一个 Provider 时，路由器把 θ 再除一档（更少降级），并在缓存还热时拒绝降级。升级永不受影响；跨 Provider 配置不共享缓存，行为不变。
-
-判定调用对输出格式很严格，小模型也能稳定解析：OpenAI 兼容端点用 `response_format: json_object`（非 JSON 直接被打回），Anthropic 用 `{` 前缀预填强制 JSON 开头。判定期间状态栏显示 `🧭 judging…`。判定失败时停在当前档位，不猜。
-
-**Judge 模式（v1.7.0）。** `/router config` → 🧭 Judge 提供三种模式：复用 Fast 档链（默认，无需额外配置）、**独立的 Judge LLM 链**（编辑方式与档位链相同）、**决策模型**（TypeSafe Jev / System One 类）。Jev 后端从请求形态到响应解析、再到路由器如何消费——见 [Jev：用数字回答的判定器（Beta）](#jev用数字回答的判定器beta-判定后端v170) 一节。
+**三种判定模式（v1.7.0）。** 复用 Fast 档链（默认，无需额外配置）、独立的 Judge LLM 链（编辑方式与档位相同）、或决策模型——见 [Jev](#jev让决策模型来当判定器beta)。
 
 ### 当 Provider 挂掉时
 
@@ -173,91 +150,31 @@ Judge 与路由共用同一张冷却表（判定失败也会走完整条 fast �
 
 ---
 
-## Jev：用数字回答的判定器（Beta 判定后端，v1.7.0+）
+## Jev：让决策模型来当判定器（Beta）
 
-判定器只干一件事：产出 `p(smart)`。LLM 写出一句话，然后祈祷路由器能解析它。
-Jev——[TypeSafe 的决策模型](https://docs.typesafe.ai/introduction/quickstart)——直接把概率交给你。
-
-> **Beta：可选，永远不是默认。** Jev 处于公测——能力与价格都诱人，但独立验证少于 LLM 判定
-> （2026 年 9 月的研究发现决策模型在 15 项标注任务中有 14 项落后于最佳 LLM），Provider 算力
-> 也仍在爬坡。所以它排在 `🧭 Judge` 的**第三**行、标明 Beta，默认仍是*复用 Fast 档链*。
-> 无论哪种情况都会回退：Jev → 你的 LLM 判定 → 关闭路由。
-
-### 两种模型
-
-| | LLM 判定（默认） | Jev（决策模型） |
-|---|---|---|
-| 输出 | 自然语言 → 得解析成 JSON | `choice` + 每个选项的概率 |
-| 失败方式 | JSON 坏、结构错、拒答 | 字段缺失 |
-| 计费 | 输入 **+ 输出** | 只算输入 |
-| 解释自己 | 它写的 `reason` | 什么都不写 |
-| 信号 | 自报的 `confidence` | 校准概率 |
-
-Jev 有三个原语（Choice / Score / Noul），路由器只需要两个：**Choice** 决定档位
-（`fast` / `smart`），**Noul** 决定是否编排（校准的 yes/no，按 `≥ 0.5` 读）。两个问题走同一次请求。
-
-### 它不只是更便宜，而是更合适
-
-- **路由器阈值化的东西本来就是数字。** `pSmart ≥ θ` 是算术。Jev 的答案不需要解析这一步——
-  删掉一步就删掉一整类失败：没有 JSON 模式、没有坏回复、不会因为模型多加一个逗号就"判定失败 → 保持原档"。
-- **每一轮都在付费。** 判定跑在每条消息之前；没有输出 token，一次判定约 \$0.0001。
-- **校准概率正是 EV 需要的输入。** 判错要付两份代价——档位错、花费错——而 `router.ts` 是按概率定价的，
-  不是按模型对自己的评价。
-
-最巧妙的地方：**一个分类器的输出，恰好就是它消费者的输入**——一个概率，一种路由器本来就会读的形状。
-
-### 与 LiteLLM 基准验证过的同一种形态
-
-2026 年 9 月，LiteLLM 在自家 Auto Router 里加了 `jev` 分类器：**一个 `questions.tier` 的 Choice，`criteria` 描述你配置的档位**，选中档位随后跑完整请求——实测**比 Haiku 级分类器快 5.43 倍、成本低 96%**。这也正是本项目的设计，只是它面向 coding agent 而非网关：判定选档，该档的链接管整轮，路径上其它环节一律不动。
-
-### Jev 是可选 Beta，你的 LLM 判定才是默认与回退
-
-`/router config` → `🧭 Judge` 的顺序是：`🦾 Reuse the Fast tier chain (default)` → `🔬 Dedicated Judge LLM chain` → `🧮 Jev — decision model (Beta)`——老行为在前，未经充分验证的选项在后且为可选。如果 Jev 用不了——没有可用端点、模型下架、你删了 Key——**路由会继续用 LLM 判定工作**，而不是卡死；日志会记录这次降级，菜单也会告诉你实际在判定的是谁（`Jev unavailable — LLM judge active`）。
-
-边界我们在该划的地方划得很清楚：**配置腐化**会平滑降级，但**瞬时故障**（超时、5xx、返回格式坏）仍然**保持原档**，不会在半路悄悄换判定器。默认值也仍是 `fast-chain`：升级不会在你没要求的情况下，用另一类模型来判定你。
-
-### 我们与热潮的分歧
-
-决策模型（按行业时间算）才一周大，而证据是混合的：2026 年 9 月的独立研究在 15 项标注任务中发现，决策模型在其中 **14 项**落后于当项最佳 LLM。所以我们把它做成**推荐**选项而非强制选项：LLM 判定仍是一等路径，决策模式是显式可选，θ 在能从实测数据重推之前保持不动（v1.8.0）。
-
-### 请求与回答
+判定器每轮只回答一个问题：这活难不难？多数路由器的做法是问一个 LLM，再从回复里抠 JSON。Jev 是另一类模型——你给它一个带选项的问题，它直接回选项和概率：
 
 ```jsonc
-// POST /v1/systemone —— 两个问题，一次往返
-{
-  "model": "jev-latest",
-  "state": "<最近几轮消息，组装方式与 LLM 判定的提示一致>",
-  "questions": {
-    "tier":        { "type": "choice",  "instructions": "<judge.md 的 rubric>",
-                     "criteria": { "fast": "…", "smart": "…" } },
-    "orchestrate": { "type": "noul",    "instructions": "…",
-                     "criteria": { "true": "…", "false": "…" } }
-  }
-}
-```
-
-```jsonc
-// 实测响应
+// POST /v1/systemone —— 实际返回就是这个
 { "model": "jev-1.13.0",
   "answers": {
-    "tier":        { "type": "choice", "choice": "fast",
-                     "probabilities": { "fast": 0.99, "smart": 0.01 },
-                     "confidence": 0.97 },
-    "orchestrate": { "type": "noul", "noul": 0.13 } },
-  "usage": { "input_tokens": 2265, "output_tokens": 50 } }  // 输出会回传，但不计费
+    "tier":        { "choice": "fast", "probabilities": { "fast": 0.99, "smart": 0.01 } },
+    "orchestrate": { "noul": 0.13 } } }
 ```
 
-| 字段 | 决定什么 |
-|---|---|
-| `tier.choice` | `fast` 或 `smart`——其他值一律 **保持原档** |
-| `tier.probabilities[tier]` | θ 真正消费的数字（`0.99`） |
-| `orchestrate.noul` | `≥ 0.5` 时 smart 判定才可能委派 |
-| `usage.input_tokens` | 唯一计费的一侧 |
+路由器需要的全在这份响应里：拿 `0.99` 跟 θ 一比，完事。没有 JSON 模式、没有解析步骤，也就没有了"模型多加一个逗号导致判定失败"这一整类故障。字段缺失＝没有判定，路由器保持原档。同一次调用还顺带回答了要不要编排（`noul ≥ 0.5`），复杂任务不需要判两次。
 
-> `confidence` 不是第二个意见：它是 `(N·p_max − 1)/(N − 1)`——最高概率的换算（上例 `0.99` → `0.97`）。
-> 所以路由器读 `probabilities[tier]`，并记录**实际回答的版本**——因为版本一动，θ 背后的分布可能就变了。
+便宜也是同一个原因：判定只花输入 token，一次约 **\$0.0001**。LiteLLM 在 2026 年 9 月把同样的思路做进自家 Auto Router，实测 `jev` 分类器比 Haiku 级快 **5.43 倍**、便宜 **96%**。
 
-### 用 `jev-latest`，并盯住版本
+### 代价
+
+Jev 在公测，实话是：
+
+- **现在慢。** 我们实测每次 **1.4–6.6 秒**（中位约 5 秒），而且把 prompt 缩小 5 倍也不会变快——那是 Provider 算力还在爬坡，不是集成层能解决的。同一份 rubric 交给快的 LLM 判定约 1.4 秒。批处理、后台任务、高吞吐路由合适；交互式对话仍然用 LLM 判定更好。
+- **证据是混合的。** 2026 年 9 月的独立评测发现，决策模型在 15 项标注任务中有 14 项落后于当项最佳 LLM。
+- **所以它是可选项。** `/router config` → `🧭 Judge` 里两个 LLM 方案排在前，Jev 排第三并标注 Beta。升级不会改变你的默认。
+
+### 接入它
 
 pi 没有内置 Jev provider，需要在 `~/.pi/agent/models.json` 加一个：
 
@@ -265,39 +182,18 @@ pi 没有内置 Jev provider，需要在 `~/.pi/agent/models.json` 加一个：
 { "providers": { "typesafe": {
     "baseUrl": "https://api.typesafe.ai",
     "api": "typesafe-decisions",     // 本插件识别决策端点的标记
-    "apiKey": "$TYPESAFE_API_KEY",   // 或直接写字面 Key
+    "apiKey": "$TYPESAFE_API_KEY",
     "models": [ { "id": "jev-latest", "name": "Jev", "input": ["text"],
                   "contextWindow": 64000, "cost": { "input": 0.042, "output": 0 } } ] } } }
 ```
 
-默认用 `jev-latest` 是刻意的。固定版本会以最糟的方式坏掉：厂商下架那个 build 的那天，判定器直接罢工。
-别名不会下架，而且它的变动是可见的——响应永远回传实际回答的版本，路由器发现变化就写日志。
-只有当你需要逐位可复现时，才固定 `jev-1.13.0`。
-
-然后 `/router config` → `🧭 Judge` → `🧮 Jev — decision model (Beta)` → `typesafe/jev-latest`。
-向导只在**本地**校验选择（保存时不发网络请求），并把 `judgeTimeout` 抬到 15 秒（会明确告诉你——默认 5 秒会让大多数决策调用被超时打断）。若 Jev 不再响应，路由器沿阶梯降级而不是卡住：**Jev → 你的 LLM 判定 → 关闭路由**，并把你会话开始时用的模型还给你，只提示一次。
-Key 在 [TypeSafe 控制台](https://console.typesafe.ai/settings/keys) 领取，Jev 目前是早期访问。
-Jev 在本插件里只做判定：它不会出现在 Fast/Smart 选择器里，因为 pi 无法把该协议当聊天模型流式调用。
-
-### 今天的延迟是公测算力，不是模型属性
-
-实测：**每次判定 1.4–6.6 秒**（中位约 5 秒），而且 payload 缩小 5 倍也不会更快——
-等待来自 Jev 公测期间的 Provider 侧算力，不是集成层能优化掉的东西。同一份 rubric 交给一个快的 LLM 判定：约 1.4 秒。
-
-所以：把决策模式用在"确定性 + 成本比几秒钟更重要"的地方——批处理、后台任务、高吞吐路由；
-交互式对话先继续用 LLM 判定，等公测算力上来了再切——那时这里一行都不用改，协议完全相同。无论哪种模式，失败都是**保持原档**：
-绝不伪造判定，也绝不丢给你没选过的模型。
-
-### 我们不做的事
-
-`θ` 和 `minConfidence` 仍在 LLM 的尺度上；为校准概率重新推导是 v1.8.0 的工作（SPEC §2.3）。
-仪表盘不显示 `reason`——决策模型不写文字。审计日志保留完整响应。
+Key 在 [TypeSafe 控制台](https://console.typesafe.ai/settings/keys) 领（早期访问）。然后 `/router config` → `🧭 Judge` → `🧮 Jev — decision model (Beta)` → `typesafe/jev-latest`。保存时不发网络请求，向导会顺手把 `judgeTimeout` 抬到 15 秒——默认 5 秒会把大多数决策调用掐断。Jev 不响应时，路由器降到你的 LLM 判定而不是卡住；再不行就退回纯路由。它不会出现在 Fast/Smart 选择器里：pi 无法把该协议当聊天模型流式调用。
 
 ---
 
 ## 任务级编排（v1.0.0）
 
-单轮路由决定*哪台模型*跑这一轮；任务级编排决定*复杂任务怎么执行*。当判定说 `smart` 且编排处于 `auto` 模式（默认）时，路由器把这一轮交给 Smart 档当 **CTO**：它规划工作、把实现派发给 Fast 工程师子代理、逐项审核并迭代，直到工作干净——最后做一次最终验收。简单任务（`fast` 判定）永不触发编排，照旧走普通路由，逐字节不变。
+平时路由只决定这一轮用哪个模型。当判定说 `smart` 且编排处于 `auto`（默认）时，Smart 档还会接管这一轮*怎么跑*：规划工作、把实现派给 Fast 子代理、逐项审核、迭代到干净，最后做一次验收。`fast` 判定不会触发这些，那些轮次照旧走普通路由。
 
 ### 一个编排轮次怎么跑
 
@@ -307,11 +203,11 @@ Jev 在本插件里只做判定：它不会出现在 Fast/Smart 选择器里，�
 4. **审核。** Smart 按验收标准读每个 worker 的结果。失败阶段带着具体反馈回到 worker——或连续失败 N 次后由 Smart 亲自接管。
 5. **验收。** 以一段简短的 CTO 总结 + 最终验收收尾。
 
-### 为什么用 fresh 上下文 worker
+### worker 为什么要 fresh 上下文
 
 worker 以 `context: "fresh"` 运行——不继承会话历史。任务字符串*就是它的全部世界*，所以必须是一份精确契约：目标、约束、验收标准、范围外。这让每个 worker 的上下文都很小（快、便宜、专注——实测窄任务约 $0.004，继承 176k token fork 约 $0.06），也是让 anthropic 兼容端点保持思考开启的已验证方式（fork 模式会被强制 `thinking: off`）。
 
-### 硬上限（路由器负责的部分）
+### 硬上限
 
 插件强制执行两个数字，与 Smart 想做什么无关：
 - **`orchestration.maxRounds`**（默认 3）——每个任务最多 delegate→review 轮数。
@@ -319,9 +215,9 @@ worker 以 `context: "fresh"` 运行——不继承会话历史。任务字符�
 
 循环在 Smart 说完成、或命中上限时停止——两者任一即停。
 
-### 验收审计（托底 review，v1.3.0；v1.4.0 起限定委派域）
+### 验收审计
 
-因为验收是 Smart 档自己的判断，插件在每个**实际委派过 worker（`spawned ≥ 1`）**的编排轮次结束时（`agent_end`）再加一道**硬兜底审计**。自执行轮（`spawned = 0`——CTO 判断它简单到可以自己做）**完全豁免审计**：零 violation、零警告，仅在 `/router status` 标记 `(self-executed)`。CTO-summary 输出契约只在真正派发过 worker 时才生效。
+验收是 Smart 档自己的判断，所以插件在每个**实际委派过 worker**（`spawned ≥ 1`，在 `agent_end` 检查）的编排轮结束后再加一道意见。自己做完的轮次（`spawned = 0`）完全跳过审计——没有警告，只在 `/router status` 标一个 `(self-executed)`。
 
 1. **确定性检查（零成本）：** 所有 worker 都已回包（`done == spawned`）、最后一条消息带 **CTO 总结**（输出契约标记）、以及是否命中硬上限。
 2. **LLM 审计（默认开启，Fast 档一次小调用）：** 审计 prompt 读取**原始用户目标**（进编排时快照）、CTO 总结与 worker 结果，从三个维度核验：
@@ -329,7 +225,7 @@ worker 以 `context: "fresh"` 运行——不继承会话历史。任务字符�
    - **目标对齐（Goal alignment）** —— 交付物确实回应了用户请求（无范围漂移、核心诉求有答）。
    - **交付质量（Delivered quality）** —— worker 输出完整，不是占位/TODO 充数，无空结果、无“没做完”。
 
-审计从不阻断已完成轮次——它只**标记**：`console.warn` + toast，且 `/router status` 的 `Last audit` 显示最近一次编排运行的结果。用 `orchestration.audit.enabled`（默认 `true`）开关。审计是 CTO 自审下方的安全网：循环硬性终止，验收主张被核验而非被信任。
+审计不阻断已完成的轮次，只做标记：`console.warn` 加一个 toast，`/router status` 的 `Last audit` 显示最近一次运行的结果。用 `orchestration.audit.enabled`（默认 `true`）关闭。这是整个循环里唯一不采信 CTO 自审的环节。
 
 ### 什么时候不触发
 
@@ -434,19 +330,17 @@ Money · this session
 
 ### 其它 pi 路由器
 
-|  | 🦾 **pi-shift-router**（本插件） | [@tenchi4u/pi-bifrost](https://pi.dev/packages/@tenchi4u/pi-bifrost?name=router&type=extension) | [pi-smart-router](https://pi.dev/packages/pi-smart-router?name=router&type=extension) |
+|  | pi-shift-router（本插件） | [@tenchi4u/pi-bifrost](https://pi.dev/packages/@tenchi4u/pi-bifrost?name=router&type=extension) | [pi-smart-router](https://pi.dev/packages/pi-smart-router?name=router&type=extension) |
 |---|---|---|---|
-| **怎么定的** | ✅ **一个 LLM 说了算，写在明处**——重要的就升级，例行的就留下 | 7 步规则 + 历史技巧——情况越多，越难理清 | 12 步本地流水线（不用 LLM）——最复杂，也最重 |
-| **档位** | ✅ **就两档 `fast` / `smart`** · 一个心智模型，一晚上读完 | 4 档（`quick` / `general` / `writing` / `frontier`）——档越多，学越多 | 3 档还带本地档（LM Studio / Ollama）——多数时候用不上 |
-| **难任务怎么干** | ✅ **Smart 当 CTO**——定计划、拆给 Fast 去做、逐项验收、来回迭代 | 每次只选一个模型自己干——不编排 | 顺手叫一次强模型帮看——不算团队作战 |
-| **省钱** | ✅ **给你算真省了多少**——每轮都计账，对比“全走 smart 会花多少”（`/router status`） | 省的是订阅配额，不是钱 | 用公式估成本（论文级，非账单） |
-| **挂了怎么办** | ✅ **接着干**——同档自动换人 + 越挂越久的冷却（1m→6h），判定也共享 | 阈值熔断，可能跨档换 | 熔断 + 档内回退 |
-| **缓存** | ✅ **护住你的 prompt 缓存**——更便宜永不更贵 | 维护自己的缓存 | 也护缓存，算法不同 |
-| **上手** | ✅ **约 9 条命令 + 一个可视化编辑器**——5 分钟可上线 | 4 份配置要合并 | 15+ 环境变量——更陡峭 |
-| **轻重** | ✅ **0 依赖 / ~409 KB** | 0 依赖 / 2.5 MB | 要本地数据库 + 机器学习模型 / ~2.5 MB + 额外下载 |
-| **适合谁** | ✅ **要清晰的路由、真实的省钱、开箱的编排，就从这里开始** | 要规则密集 + 配额技巧 | 要本地优先 + 研究向遥测 |
+| **怎么判** | 一段你能读的 LLM 提示词（`src/prompts/judge.md`），或决策模型 | 7 步规则 + 历史启发式 | 12 步本地流水线，不用 LLM |
+| **档位** | 2 档（`fast` / `smart`） | 4 档（`quick` / `general` / `writing` / `frontier`） | 3 档，含 LM Studio / Ollama 本地档 |
+| **复杂任务** | Smart 档编排：规划、派发给 Fast worker、审核 | 只做单轮路由 | 在强模型上做一次辅助调用 |
+| **花费** | 每会话相对"全部走 smart"的实测节省金额 | 省的是订阅额度，不是钱 | 用公式估算，不是你的账单 |
+| **Provider 故障** | 同档 fallback + 冷却（1m → 6h），与判定器共享 | 熔断，可能换档 | 熔断，仅在档内回退 |
+| **Prompt 缓存** | 抬高降级门槛，缓存热时不动 | 维护自己的缓存 | 也保护缓存，算法不同 |
+| **体积** | 0 依赖，约 409 KB | 0 依赖，2.5 MB | 需要本地 DB 与模型，2.5 MB 起外加下载 |
 
-> **我们直说：** 为**简单、可审计、轻量**而生——一个 prompt 定夺、一个守卫护住缓存、复杂活直接**编排**。另外两家也都很强，只是旋钮更多；旋钮越多，越难一眼看懂。想少点旋钮、账单更清楚，从这里开始。
+三者都是真实选择，区别在于你的消息和模型之间隔了多少机制。
 
 ---
 
@@ -463,6 +357,43 @@ Money · this session
 ### 会不会过早从 Smart 降级？
 
 降级需要**连续 2 轮决定性 fast 判定**（`economics.downgradeMemory`，默认 2）+ cache-aware 空闲门——一轮例行任务降不下来；无信号 hold（置信度 < `minConfidence`）或任何 smart 判定都会重置连击。想更粘/更省调 `economics.reworkPenalty`（默认 3，θ≈0.33）：调高到 5 更省，调低到 2 更粘。升级在决定性 smart 判定时永远立即。
+
+### 怎么配置 Jev？
+
+三步：
+
+1. **拿一个 Jev API Key。** Jev 处于早期访问，在 [TypeSafe 控制台](https://console.typesafe.ai/settings/keys) 申请。Key 的放法与其它 Provider 凭据一致：放进 `~/.pi/agent/auth.json`，或在 shell 里 export `TYPESAFE_API_KEY`。
+2. **在 `~/.pi/agent/models.json` 里注册 Provider**——这是插件识别 Jev 的依据：
+   ```jsonc
+   { "providers": { "typesafe": {
+       "baseUrl": "https://api.typesafe.ai",
+       "api": "typesafe-decisions",     // 本插件识别的决策端点标记
+       "apiKey": "$TYPESAFE_API_KEY",
+       "models": [ { "id": "jev-latest", "name": "Jev", "input": ["text"],
+                     "contextWindow": 64000,
+                     "cost": { "input": 0.042, "output": 0 } } ] } } }
+   ```
+3. **在向导里选 Jev。** 重启 pi，然后 `/router config` → `🧭 Judge` → `🧮 Jev — decision model (Beta)` → `typesafe/jev-latest`。向导只在本地校验（不发网络请求），并把 `judgeTimeout` 抬到 15 秒——默认 5 秒会把大多数决策调用掐断。
+
+### 能让 pi 直接帮我配吗？
+
+可以。pi-shift-router 把 Jev 需要的所有信息都内化了，你把任务交给 pi，它会自己改 `models.json`、检查 Key 并重启。直接发给 pi：
+
+> 帮我在 pi 里接入 TypeSafe Jev，让 pi-shift-router 用它当判定器。我已经把 `TYPESAFE_API_KEY` 导出了。改完 `~/.pi/agent/models.json` 后重启一次，然后打开 `/router config` → `🧭 Judge`，确认 `🧮 Jev — decision model (Beta)` 能选；任何问题都告诉我。
+
+或者英文：
+
+> Add a TypeSafe Jev model to my pi config so pi-shift-router can use it as the judge. I already have `TYPESAFE_API_KEY` exported. After you edit `~/.pi/agent/models.json`, restart the agent and open `/router config` → `🧭 Judge` to confirm `🧮 Jev — decision model (Beta)` is selectable. Tell me what went wrong if anything.
+
+### Judge 菜单里看不到 Jev，怎么排查？
+
+向导只列出支持决策协议的 Provider。按顺序检查三件事：
+
+- `~/.pi/agent/models.json` 里的 provider 条目带 `api: "typesafe-decisions"`（不是 `openai-completions` 或别的）。这是路由器认的标记。
+- `models` 数组里至少有一个 Jev 模型 id（`jev-latest`、`jev-1.13.0`、`jev-preview`）。
+- `TYPESAFE_API_KEY` 能取到——`echo "$TYPESAFE_API_KEY"` 不应为空。
+
+三件事都对，重启后再开 `/router config`，Jev 那行就会出现并标注 Beta。
 
 ### 这和 OpenRouter 的 Auto Router 有什么区别？
 

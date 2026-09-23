@@ -10,6 +10,28 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-09-23 — Version bumps must go through `npm version` (lockfile drift)
+
+**Decision.** Release bumps run `npm version <patch|minor|major>
+--no-git-tag-version` — which updates `package.json` *and* `package-lock.json` —
+rather than editing `package.json` by hand.
+
+**Why.** Preparing v1.7.0 revealed `package-lock.json` pinned at **1.3.1**: four
+releases (1.4.x, 1.5.x, 1.6.0) bumped `package.json` without it, so the two
+disagreed for months. Nothing broke — the lockfile's own `version` field does not
+affect resolution — which is exactly why it went unnoticed, but it makes the
+lockfile useless as a "what shipped" record and would surface as a confusing
+one-off jump in a future release diff.
+
+**Rejected.** Treating the lockfile version as cosmetic (it is free to keep
+correct), and fixing it silently per release instead of at the source.
+
+**Check before every release.** `git diff package-lock.json` must show only the
+version fields; a jump of more than one version means a previous bump was
+incomplete.
+
+---
+
 ## 2026-09-23 — Jev demoted to a Beta, opt-in third mode
 
 **Decision.** The Judge menu order is now: `🦾 Reuse the Fast tier chain (default)`
@@ -201,7 +223,18 @@ The old document was a snapshot of specific model IDs (`glm-5.2`, `kimi-k2.7-cod
 
 **Process rule that would have caught the duplicate.** The previous turn's README rewrite used multiple python scripts to splice sections in; the second splice left a duplicate of the hero example block in the zh file because I matched-and-replaced forward and didn't diff-check before committing. New habit: every doc rewrite ends with `diff <(git show HEAD:file) file` and a grep for known canonical strings to count duplicates.
 
-**Kept (deliberately not changed).** SPEC §8.6 Jev contract (audited live, no drift). MEMORY and ROADMAP versions (still v1.6.0 until release). CHANGELOG (release-time only).
+**Kept (deliberately not changed).** SPEC §8.6 Jev contract (audited live, no
+drift). MEMORY and ROADMAP version labels (they name the version a feature
+*shipped* in, so they are historical, not drift — the release PR updates the
+README `latest:` field, which is the one metadata line that must track npm).
+CHANGELOG is written at release time only.
+
+**Post-release cleanup (v1.7.0, same session).** The SPEC orthogonality pass then
+found a stale claim with the same shape as the drift this log records: SPEC §4.6
+still asserted the *pre-ladder* judge-failure behaviour ("the user is not
+interrupted") after the ladder shipped, and §9 was titled "Future Direction"
+while holding three delivered features. Both fixed before the release commit —
+docs reviewed at release time, not only written.
 
 ---
 

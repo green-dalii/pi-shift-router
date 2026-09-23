@@ -10,8 +10,20 @@
 
 import { readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { ShiftRouterConfig, RouterState, Tier, ModelRef, EconomicMode } from "./types.js";
-import { TIERS, ECONOMIC_MODE_PRESETS, LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT } from "./types.js";
+import type {
+  ShiftRouterConfig,
+  RouterState,
+  Tier,
+  ModelRef,
+  EconomicMode,
+  StoredModel,
+} from "./types.js";
+import {
+  TIERS,
+  ECONOMIC_MODE_PRESETS,
+  LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT,
+  type JudgeMode,
+} from "./types.js";
 import {
   isValidTier,
   tierEmoji,
@@ -28,6 +40,8 @@ import {
 } from "./router.js";
 import { resetOrchestration } from "./orchestrate.js";
 import { computeStats, judgeModelDisplay } from "./stats.js";
+import { resolveJudgeEndpoints } from "./config.js";
+import { DECISION_API_TYPE, DECISION_MIN_JUDGE_TIMEOUT_MS } from "./judge.js";
 import { StatusPanel, assembleStatusData, type StatusPanelInput } from "./tui/status-panel.js";
 import {
   listAvailableModels,
@@ -50,7 +64,7 @@ import {
 
 // ─── `/route-config` wizard ──────────────────────────────────────
 
-type MenuChoice = "fast" | "smart" | "ux" | "cache" | "done" | "cancel";
+type MenuChoice = "fast" | "smart" | "ux" | "cache" | "judge" | "done" | "cancel";
 
 /**
  * Status label for the economics mode. A set preset wins; otherwise the
@@ -62,6 +76,116 @@ function economicModeLabel(config: ShiftRouterConfig): string {
   if (mode) return mode;
   const R = config.routing.economics?.reworkPenalty;
   return R === undefined || R === 3 ? "default" : "custom";
+}
+
+/**
+ * A decision call measured 1.4–6.6 s against the live API, so the LLM-judge
+ * default (5000 ms) would abort most of them and quietly hold every turn. Raises
+ * the timeout to the measured floor, and reports the change so it is never a
+ * silent config write. Returns `raised: false` when the user already set a
+ * value at or above the floor (their choice stands).
+ */
+export function ensureDecisionJudgeTimeout(config: ShiftRouterConfig): {
+  from: number;
+  to: number;
+  raised: boolean;
+} {
+  const from = config.routing.judgeTimeout;
+  if (from >= DECISION_MIN_JUDGE_TIMEOUT_MS) return { from, to: from, raised: false };
+  config.routing.judgeTimeout = DECISION_MIN_JUDGE_TIMEOUT_MS;
+  return { from, to: DECISION_MIN_JUDGE_TIMEOUT_MS, raised: true };
+}
+
+/**
+ * Models pi can actually *run a turn* with. Decision-protocol endpoints
+ * (`typesafe-decisions`) are judge-only: pi has no streaming implementation for
+ * them, so choosing one as a Fast/Smart tier model would fail at stream time on
+ * every turn. Keeping them out of the tier pickers turns a broken session into
+ * "not offered".
+ */
+export function chatCapableModels(models: StoredModel[]): StoredModel[] {
+  return models.filter((m) => m.api !== DECISION_API_TYPE);
+}
+
+/**
+ * Indicator vocabulary — one idiom per semantics (see SPEC §7.6):
+ *   ● / ○  exclusive picker: exactly one row is the current choice (radio).
+ *   ☑ / ☐  independent toggle: each row is on/off on its own (checkbox).
+ * `●` on a toggle row would read as "the one selected", which is wrong for rows
+ * that can all be on at once — and a screen of five filled circles loses the
+ * "which is current?" signal. pi's own UI uses ● as a status indicator and its
+ * official extension example uses ☑/☐ for item state, so we follow both.
+ */
+export function toggleRow(label: string, on: boolean): string {
+  return `${on ? "☑" : "☐"} ${label}`;
+}
+
+/** Title suffix naming the toggle glyphs (a bare box is easy to misread). */
+export const TOGGLE_LEGEND = "(☑ on · ☐ off)";
+
+/**
+ * Sub-menu rows for the Judge mode picker (SPEC §8.6). Pure + exported so the
+ * labels (and therefore the width-sensitive emoji/spacing) stay under test.
+ * Markers follow the project convention: ● current / ○ other.
+ */
+export function judgeModeOptions(current: JudgeMode, decisionCount: number): string[] {
+  const mark = (on: boolean) => (on ? "● " : "○ ");
+  return [
+    `${mark(current === "fast-chain")}🦾 Reuse the Fast tier chain (default)`,
+    `${mark(current === "custom")}🔬 Dedicated Judge LLM chain`,
+    `${mark(current === "decision")}🧮 Jev — decision model (Beta) — ${
+      decisionCount === 0 ? "none available yet" : `${decisionCount} available`
+    }`,
+    "✅ Back",
+  ];
+}
+
+/**
+ * Mode for each `judgeModeOptions` row, in order. Keeps the menu's presentation
+ * decoupled from positional index arithmetic in the handler.
+ *
+ * Order is deliberate: the legacy default (reuse the Fast chain) leads, the
+ * dedicated LLM chain follows, and Jev sits last as an explicitly **Beta**
+ * option. Jev is in public beta with limited independent validation, so it is an
+ * opt-in extra — not a first-class judge that a new user should land on by
+ * default (SPEC §8.6).
+ */
+export const JUDGE_MODE_ORDER: JudgeMode[] = ["fast-chain", "custom", "decision"];
+
+/**
+ * Actionable screen shown when no decision-capable endpoint is authenticated
+ * (SPEC §8.6). A dismissible list, not a toast: the user needs the concrete
+ * "api" value and the place to put it while they edit models.json.
+ */
+export function decisionSetupGuide(): string[] {
+  return [
+    "Why: no authenticated endpoint speaks the decisions protocol",
+    "1. Add a Jev provider in ~/.pi/agent/models.json:",
+    `     "api": "${DECISION_API_TYPE}"  (baseUrl https://api.typesafe.ai)`,
+    "2. Or route it through an authenticated gateway (OpenRouter / Cloudflare AI Gateway)",
+    "Then: /router config → 🧭 Judge → 🧮 Jev (Beta)",
+    ".  Saved as-is; if it stops answering, routing falls back and tells you",
+    "Meanwhile: the router keeps judging with your LLM judge — no stall",
+    "Beta: less battle-tested than an LLM judge — the router falls back either way",
+    "Prefer to stay on an LLM? Pick 🦾 Reuse the Fast chain or 🔬 Dedicated",
+    "✅ Back",
+  ];
+}
+
+/** One-line Judge-mode summary for the wizard menu (SPEC §8.6). Exported for tests. */
+export function judgeSummary(config: ShiftRouterConfig, decisionCount?: number): string {
+  const judge = config.routing.judge;
+  const mode: JudgeMode = judge?.mode ?? "fast-chain";
+  if (mode === "fast-chain") return "reuse Fast tier chain (LLM)";
+  if (mode === "decision" && decisionCount === 0) {
+    // Chosen but unusable: say what is *actually* judging, not what was wished for.
+    return "Jev unavailable — LLM judge active";
+  }
+  const models = judge?.models ?? [];
+  if (models.length === 0) return `${mode} — no models (holds)`;
+  const head = `${models[0]!.provider}/${models[0]!.model}`;
+  const more = models.length > 1 ? ` +${models.length - 1}` : "";
+  return mode === "decision" ? `Jev (Beta): ${head}${more}` : `dedicated: ${head}${more}`;
 }
 
 /** Same-family θ divisor for status display (mirrors router.sameFamilyThetaFactor). */
@@ -117,6 +241,7 @@ function formatConfigSource(): string {
  */
 export function matchMenuChoice(label: string): MenuChoice {
   if (label.includes("Cache-aware")) return "cache";
+  if (label.includes("Judge")) return "judge";
   if (label.includes("Fast")) return "fast";
   if (label.includes("Smart")) return "smart";
   if (label.includes("UX")) return "ux";
@@ -166,7 +291,7 @@ async function routeConfigWizard(
     return false;
   }
 
-  type MenuChoice = "fast" | "smart" | "ux" | "cache" | "done" | "cancel";
+  type MenuChoice = "fast" | "smart" | "ux" | "cache" | "judge" | "done" | "cancel";
   async function saveDestination(): Promise<"user" | "project" | null> {
     const choice = await ctx.ui.select("Save configuration to…", [
       "📁 Project — <cwd>/.pi/pi-shift-router.json (shareable with team)",
@@ -181,6 +306,7 @@ async function routeConfigWizard(
     const choice = await ctx.ui.select("pi-shift-router — Configuration", [
       `🦾 Fast — ${config.tiers.fast.models.length} model(s)  (engineer: execution, daily coding)`,
       `🧠 Smart — ${config.tiers.smart.models.length} model(s)  (CTO: direction, review, hard problems)`,
+      `🧭 Judge — ${judgeSummary(config, allModels.filter((m) => m.api === DECISION_API_TYPE).length)}`,
       "🎨 UX settings",
       "🔒 Cache-aware routing",
       "💾 Save & exit",
@@ -206,7 +332,7 @@ async function routeConfigWizard(
         (_tui, theme, _keybindings, done) => {
           return createChainEditor({
             items: cfg.models,
-            allModels,
+            allModels: chatCapableModels(allModels),
             tier,
             tierLabel: cfg.label,
             theme,
@@ -225,7 +351,7 @@ async function routeConfigWizard(
       ? `${cfg.models[0].provider}/${cfg.models[0].model}`
       : null;
 
-    const availModels = allModels.filter((m) => m.cost?.input != null);
+    const availModels = chatCapableModels(allModels).filter((m) => m.cost?.input != null);
 
     // Group models by provider
     const byProvider = new Map<string, typeof availModels>();
@@ -337,14 +463,17 @@ async function routeConfigWizard(
   async function editUX(): Promise<void> {
     const ux = config.ux;
     const lines = [
-      `${ux.quietMode ? "☑" : "☐"} Quiet mode — no inline toast notifications`,
-      `${ux.statusBar ? "☑" : "☐"} Status bar — show current tier/model in footer`,
-      `${ux.inlineToast ? "☑" : "☐"} Inline toast — notify on tier change`,
-      `${ux.routerLogVerbose ? "☑" : "☐"} Verbose log — write decisions to ~/.pi/agent/logs/shift-router.log (debug)`,
+      toggleRow("Quiet mode — no inline toast notifications", ux.quietMode),
+      toggleRow("Status bar — show current tier/model in footer", ux.statusBar),
+      toggleRow("Inline toast — notify on tier change", ux.inlineToast),
+      toggleRow(
+        "Verbose log — write decisions to ~/.pi/agent/logs/shift-router.log (debug)",
+        ux.routerLogVerbose,
+      ),
       "✅ Done",
     ];
 
-    const pick = await ctx.ui.select("🎨 UX Settings", lines);
+    const pick = await ctx.ui.select(`🎨 UX Settings ${TOGGLE_LEGEND}`, lines);
     if (!pick) return;
     // Positional match — labels are display text, not identifiers.
     const idx = lines.indexOf(pick);
@@ -361,15 +490,123 @@ async function routeConfigWizard(
       idleBoundaryMs: 5 * 60_000,
     };
     const lines = [
-      `${cache.enabled ? "☑" : "☐"} Cache-aware routing — avoid paying full price for repeated context: when Fast and Smart use the same provider, the router keeps the warm prompt cache by switching models less often (you can toggle this on/off here)`,
+      toggleRow(
+        "Cache-aware routing — avoid paying full price for repeated context: when Fast and Smart use the same provider, the router keeps the warm prompt cache by switching models less often (you can toggle this on/off here)",
+        cache.enabled,
+      ),
       "✅ Done",
     ];
 
-    const pick = await ctx.ui.select("🔒 Cache-aware Routing", lines);
+    const pick = await ctx.ui.select(`🔒 Cache-aware Routing ${TOGGLE_LEGEND}`, lines);
     if (!pick) return;
     if (lines.indexOf(pick) === 0) {
       config.routing.cacheAware = { ...cache, enabled: !cache.enabled };
     }
+  }
+
+  /** Shared: open the chain editor (or a flat picker in non-TUI modes). */
+  async function openChainEditor(
+    items: ModelRef[],
+    models: StoredModel[],
+    label: string,
+  ): Promise<ModelRef[] | null> {
+    if (ctx.mode !== "tui") {
+      const labels = models.map((m) => `${m.provider}/${m.id}`);
+      const pick = await ctx.ui.select(`Select ${label} model`, [...labels, "✅ Back"]);
+      const idx = pick ? labels.indexOf(pick) : -1;
+      if (idx < 0) return null;
+      return [{ provider: models[idx]!.provider, model: models[idx]!.id, priority: 1 }];
+    }
+    const unavailableKeys = new Set(
+      items.filter((m) => !isModelAvailable(modelSource, m.provider, m.model)).map((m) => `${m.provider}/${m.model}`),
+    );
+    const { createChainEditor } = await import("./tui/fallback-chain-editor.js");
+    return await ctx.ui.custom<ModelRef[] | null>((_tui, theme, _keybindings, done) =>
+      createChainEditor({
+        items,
+        allModels: models,
+        tier: "fast", // unused by the editor (display only via tierLabel)
+        tierLabel: label,
+        theme,
+        unavailableKeys,
+        onDone: (next) => done(next),
+        onCancel: () => done(null),
+      }),
+    );
+  }
+
+  /**
+   * Judge mode editor (SPEC §8.6). Three modes: reuse the Fast chain (default),
+   * a dedicated Judge LLM chain, or a decision-protocol model (Jev class).
+   * Decision mode needs at least one decision-capable endpoint; the picker is
+   * filtered to those, and the choice is validated locally (auth + baseUrl).
+   * No save-time network probe: the runtime ladder covers unreachable
+   * endpoints instead of blocking the config UI on a round trip.
+   */
+  async function editJudge(): Promise<void> {
+    const judge = config.routing.judge ?? { mode: "fast-chain" as JudgeMode };
+    const current: JudgeMode = judge.mode ?? "fast-chain";
+    const decisionModels = allModels.filter((m) => m.api === DECISION_API_TYPE);
+    const opts = judgeModeOptions(current, decisionModels.length);
+    const picked = await ctx.ui.select("🧭 Judge — the model that picks your model", opts);
+    const idx = picked ? opts.indexOf(picked) : -1;
+    const mode = idx >= 0 && idx < JUDGE_MODE_ORDER.length ? JUDGE_MODE_ORDER[idx] : null;
+
+    if (mode === "fast-chain") {
+      config.routing.judge = { ...judge, mode: "fast-chain" };
+      ctx.ui.notify("pi-shift-router: 🧭 Judge = 🦾 reuse the Fast tier chain", "info");
+      return;
+    }
+    if (mode === "custom") {
+      const items = await openChainEditor(judge.models ?? [], allModels, "Dedicated Judge");
+      if (!items || items.length === 0) return;
+      config.routing.judge = { mode: "custom", models: items };
+      ctx.ui.notify(
+        `pi-shift-router: 🧭 Judge = 🔬 dedicated LLM chain saved (${items.length} model(s))` +
+          (judge.mode === "decision" ? " — replaces Jev" : ""),
+        "info",
+      );
+      return;
+    }
+    if (mode !== "decision") return;
+
+    if (decisionModels.length === 0) {
+      // Toast notifications vanish before the user can act on them; the setup
+      // steps live on a dismissible screen instead (and nothing is written).
+      await ctx.ui.select("🧮 Decision model — setup needed", decisionSetupGuide());
+      ctx.ui.notify("pi-shift-router: 🧭 Judge unchanged — no decision endpoint configured", "warning");
+      return;
+    }
+    const items = await openChainEditor(judge.models ?? [], decisionModels, "Decision judge");
+    if (!items || items.length === 0) return;
+
+    // Local static validation only — no network call. A save-time probe would
+    // prove the endpoint works *this second* (Jev is in beta: capacity, revoked
+    // keys and regional flakiness all move), while costing a blocking round trip
+    // on the config UI. The runtime ladder below covers the real cases and says
+    // so out loud, so the wizard just checks what it can check offline.
+    const candidate = {
+      ...config,
+      routing: { ...config.routing, judge: { mode: "decision" as JudgeMode, models: items } },
+    };
+    const endpoints = await resolveJudgeEndpoints(candidate, store, auth, process.env, registry);
+    if (endpoints.length === 0 || endpoints[0]!.apiType !== DECISION_API_TYPE) {
+      ctx.ui.notify(
+        "pi-shift-router: could not resolve the selected decision model (missing auth or baseUrl). 🧭 Judge mode unchanged.",
+        "error",
+      );
+      return;
+    }
+    config.routing.judge = { mode: "decision", models: items };
+    const timeout = ensureDecisionJudgeTimeout(config);
+    ctx.ui.notify(
+      `pi-shift-router: 🧭 Judge = 🧮 Jev (Beta) ${endpoints[0]!.provider}/${endpoints[0]!.modelId}` +
+        (timeout.raised
+          ? ` — judgeTimeout ${timeout.from} → ${timeout.to} ms (decision calls measured 1.4–6.6 s)`
+          : "") +
+        " · falls back to your LLM judge if it becomes unreachable",
+      "info",
+    );
   }
 
   // Main loop
@@ -384,6 +621,8 @@ async function routeConfigWizard(
       await editUX();
     } else if (choice === "cache") {
       await editCacheAware();
+    } else if (choice === "judge") {
+      await editJudge();
     }
   }
 

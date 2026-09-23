@@ -13,9 +13,16 @@ export type Tier = "fast" | "smart";
 export const TIERS: readonly Tier[] = ["fast", "smart"] as const;
 
 /** Judge result (tier classification) */
+/**
+ * How the Judge chain is sourced (SPEC §8.6).
+ * `fast-chain` = reuse the Fast tier (default); `custom` = dedicated Judge
+ * chain; `decision` = typed-answer decision models (Jev / System One class).
+ */
+export type JudgeMode = "fast-chain" | "custom" | "decision";
+
 export interface JudgeResult {
   tier: Tier;
-  source: "llm" | "fallback";
+  source: "llm" | "fallback" | "decision";
   /**
    * LLM's confidence in the tier classification, in [0, 1].
    * Used by the confidence-weighted sliding window: entries below
@@ -30,6 +37,14 @@ export interface JudgeResult {
    * — a debugging aid, never used by the routing algorithm itself.
    */
   reason?: string;
+  /**
+   * The model version that actually answered (v1.7.0+), when the endpoint
+   * reports one. Jev always returns the resolved id even when asked through an
+   * alias, so this is what makes `jev-latest` safe: a version move is visible in
+   * the verbose log instead of silently shifting the probability distribution
+   * the routing threshold was tuned against. Never used by the algorithm.
+   */
+  resolvedModel?: string;
   /**
    * Judge's explicit orchestration signal (v1.1.0+). true = task is large
    * enough / decomposable enough that the Smart tier should orchestrate
@@ -97,6 +112,13 @@ export interface RoutingConfig {
   mode: "auto" | "manual" | "off";
   /** LLM Judge timeout in ms */
   judgeTimeout: number;
+  /**
+   * Judge chain source (v1.7.0, additive). Absent ⇒ "fast-chain".
+   * - "fast-chain": reuse the Fast tier chain (pre-v1.7.0 behaviour).
+   * - "custom":     `judge.models` — a dedicated Judge LLM chain.
+   * - "decision":   `judge.models` — decision-protocol endpoints (Jev class).
+   */
+  judge?: { mode: JudgeMode; models?: ModelRef[] };
   /**
    * Decision memory. Entries whose confidence is below `minConfidence` are
    * treated as no-signal holds (never switch, break a fast streak).
@@ -293,6 +315,7 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
   routing: {
     mode: "auto",
     judgeTimeout: 5000,
+    judge: { mode: "fast-chain" as JudgeMode },
     window: { size: 5, minConfidence: 0.5 },
     economics: { reworkPenalty: 3, downgradeMemory: 2 },
     cacheAware: {

@@ -294,17 +294,19 @@ export function isModelUnavailable(
  *   1. fast tier's models in priority order (each with valid auth)
  *   2. cheapest model with valid auth (global fallback)
  */
-export async function resolveFastEndpoints(
-  config: ShiftRouterConfig,
-  storeOverride?: ModelsStore,
-  authOverride?: AuthStore,
-  env: Record<string, string | undefined> = process.env,
+/**
+ * Resolve ONE `provider/model` into an endpoint: registry first (pi owns the
+ * catalog and credentials), store + auth.json as the fallback (SPEC §5.4).
+ */
+async function resolveEndpoint(
+  provider: string,
+  modelId: string,
+  store: ModelsStore,
+  auth: AuthStore,
+  env: Record<string, string | undefined>,
   registry?: ModelRegistryLike,
-): Promise<ProviderEndpoint[]> {
-  const store = storeOverride ?? (await loadModelsStore());
-  const auth = authOverride ?? (await loadAuthStore());
-
-  async function resolve(provider: string, modelId: string): Promise<ProviderEndpoint | null> {
+): Promise<ProviderEndpoint | null> {
+  {
     // Registry first: pi owns the catalog and the credential resolution, so a
     // model authenticated via env vars / models.json command / runtime login is
     // a valid Judge endpoint even when it is absent from models-store.json.
@@ -338,6 +340,19 @@ export async function resolveFastEndpoints(
       modelId,
     };
   }
+}
+
+export async function resolveFastEndpoints(
+  config: ShiftRouterConfig,
+  storeOverride?: ModelsStore,
+  authOverride?: AuthStore,
+  env: Record<string, string | undefined> = process.env,
+  registry?: ModelRegistryLike,
+): Promise<ProviderEndpoint[]> {
+  const store = storeOverride ?? (await loadModelsStore());
+  const auth = authOverride ?? (await loadAuthStore());
+  const resolve = (provider: string, modelId: string) =>
+    resolveEndpoint(provider, modelId, store, auth, env, registry);
 
   const endpoints: ProviderEndpoint[] = [];
 
@@ -414,6 +429,52 @@ export async function saveConfig(
     console.warn(`[ShiftRouter] Failed to save config: ${err}`);
     return false;
   }
+}
+
+/**
+ * Judge chain resolution (SPEC §8.6). `fast-chain` mode delegates to
+ * `resolveFastEndpoints` (byte-identical legacy behaviour, including the
+ * cheapest-authenticated fallback). `custom` / `decision` modes resolve ONLY
+ * `routing.judge.models` in priority order — no cheap-model fallback: an
+ * unresolvable dedicated chain holds position rather than judging on a model
+ * the user did not choose.
+ */
+export async function resolveJudgeEndpoints(
+  config: ShiftRouterConfig,
+  storeOverride?: ModelsStore,
+  authOverride?: AuthStore,
+  env: Record<string, string | undefined> = process.env,
+  registry?: ModelRegistryLike,
+): Promise<ProviderEndpoint[]> {
+  const mode = config.routing.judge?.mode ?? "fast-chain";
+  if (mode === "fast-chain") return resolveFastEndpoints(config, storeOverride, authOverride, env, registry);
+
+  const store = storeOverride ?? (await loadModelsStore());
+  const auth = authOverride ?? (await loadAuthStore());
+  const endpoints: ProviderEndpoint[] = [];
+  const models = [...(config.routing.judge?.models ?? [])].sort((a, b) => a.priority - b.priority);
+  for (const ref of models) {
+    const ep = await resolveEndpoint(ref.provider, ref.model, store, auth, env, registry);
+    if (ep) endpoints.push(ep);
+  }
+
+  // Unusable judge configuration → the LLM judge (the user's own Fast chain)
+  // rather than holding every turn forever. Always logged, never silent.
+  if (endpoints.length === 0) {
+    const fallback = await resolveFastEndpoints(config, storeOverride, authOverride, env, registry);
+    appendRouterLog(
+      `[ShiftRouter] Judge (${mode}) unusable — falling back to the LLM judge ` +
+        `(${fallback.map((e) => `${e.provider}/${e.modelId}`).join(", ") || "none available"})`,
+    );
+    return fallback;
+  }
+
+  if (config?.ux?.routerLogVerbose) {
+    appendRouterLog(
+      `[ShiftRouter] Judge (${mode}) endpoints: ${endpoints.map((e) => `${e.provider}/${e.modelId}`).join(", ")}`,
+    );
+  }
+  return endpoints;
 }
 
 // ─── Config validation (SPEC §5.4) ────────────────────────────────

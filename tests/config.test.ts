@@ -17,6 +17,7 @@ import {
   flattenModels,
   mergeCustomProviders,
   resolveFastEndpoints,
+  resolveJudgeEndpoints,
   loadModelsStore,
   loadConfig,
   saveConfig,
@@ -123,6 +124,117 @@ describe("mergeCustomProviders", () => {
   it("empty custom providers leaves the built-in catalog intact", () => {
     const builtin: ModelsStore = { deepseek: { models: [] } };
     expect(mergeCustomProviders(builtin, {})).toEqual(builtin);
+  });
+});
+
+// ─── resolveJudgeEndpoints — judge modes (SPEC §8.6) ────────────────
+
+describe("resolveJudgeEndpoints — judge modes", () => {
+  const store: any = {
+    p: { models: [{ id: "judge-a", baseUrl: "https://a/v1", api: "openai-completions", cost: { input: 1 } }] },
+    q: { models: [{ id: "dec", baseUrl: "https://api.typesafe.ai", api: "typesafe-decisions", cost: { input: 0.042 } }] },
+  };
+  const auth: any = { p: { type: "api_key", key: "sk-p" }, q: { type: "api_key", key: "sk-q" } };
+  const base: any = { tiers: { fast: { models: [] }, smart: { models: [] } }, routing: {}, ux: {} };
+
+  it("fast-chain mode delegates to the Fast tier chain (legacy behaviour)", async () => {
+    const cfg: any = {
+      ...base,
+      tiers: { fast: { models: [{ provider: "p", model: "judge-a", priority: 1 }] }, smart: { models: [] } },
+      routing: { judge: { mode: "fast-chain" } },
+    };
+    const eps = await resolveJudgeEndpoints(cfg, store, auth, {}, undefined);
+    expect(eps.map((e) => e.modelId)).toEqual(["judge-a"]);
+  });
+
+  it("custom mode resolves the dedicated chain (no cheapest-model substitution)", async () => {
+    const cfg: any = {
+      ...base,
+      tiers: { fast: { models: [{ provider: "p", model: "judge-a", priority: 1 }] }, smart: { models: [] } },
+      routing: { judge: { mode: "custom", models: [{ provider: "q", model: "dec", priority: 1 }] } },
+    };
+    const eps = await resolveJudgeEndpoints(cfg, store, auth, {}, undefined);
+    expect(eps.map((e) => `${e.provider}/${e.modelId}`)).toEqual(["q/dec"]);
+  });
+
+  // CONTRACT CHANGE (v1.7.0, documented in the PR): a dedicated/decision chain
+  // that resolves to nothing used to HOLD. It now degrades to the LLM judge
+  // (the user's own Fast chain — the pre-v1.7.0 default), because a judge config
+  // that rotted must not stall routing. Still never a substitute model: the
+  // fallback is a chain the user configured, and the degradation is always logged.
+  it("custom mode with an unresolvable chain falls back to the LLM judge (not a random model)", async () => {
+    const cfg: any = {
+      ...base,
+      tiers: { fast: { models: [{ provider: "p", model: "judge-a", priority: 1 }] }, smart: { models: [] } },
+      routing: { judge: { mode: "custom", models: [{ provider: "ghost", model: "none", priority: 1 }] } },
+    };
+    expect((await resolveJudgeEndpoints(cfg, store, auth, {}, undefined)).map((e) => e.modelId)).toEqual(["judge-a"]);
+  });
+
+  it("decision mode with an unresolvable Jev endpoint falls back to the LLM judge", async () => {
+    const cfg: any = {
+      ...base,
+      tiers: { fast: { models: [{ provider: "p", model: "judge-a", priority: 1 }] }, smart: { models: [] } },
+      routing: { judge: { mode: "decision", models: [{ provider: "typesafe", model: "retired", priority: 1 }] } },
+    };
+    const eps = await resolveJudgeEndpoints(cfg, store, auth, {}, undefined);
+    expect(eps.map((e) => `${e.provider}/${e.modelId}`)).toEqual(["p/judge-a"]);
+    expect(eps.some((e) => e.apiType === "typesafe-decisions")).toBe(false);
+  });
+
+  it("fallback keeps the Fast chain priority order", async () => {
+    const cfg: any = {
+      ...base,
+      tiers: {
+        fast: { models: [{ provider: "p", model: "judge-a", priority: 2 }, { provider: "r", model: "second", priority: 1 }] },
+        smart: { models: [] },
+      },
+      routing: { judge: { mode: "decision", models: [{ provider: "ghost", model: "none", priority: 1 }] } },
+    };
+    const two: any = { ...store, r: { models: [{ id: "second", baseUrl: "https://r/v1", api: "openai-completions" }] } };
+    const eps = await resolveJudgeEndpoints(cfg, two, { ...auth, r: { type: "api_key", key: "sk-r" } }, {}, undefined);
+    expect(eps.map((e) => e.modelId)).toEqual(["second", "judge-a"]);
+  });
+
+  it("decision mode keeps the decisions apiType on the resolved endpoint", async () => {
+    const cfg: any = {
+      ...base,
+      routing: { judge: { mode: "decision", models: [{ provider: "q", model: "dec", priority: 1 }] } },
+    };
+    const eps = await resolveJudgeEndpoints(cfg, store, auth, {}, undefined);
+    expect(eps[0]).toMatchObject({ provider: "q", modelId: "dec", apiType: "typesafe-decisions", apiKey: "sk-q" });
+  });
+
+  it("orders a dedicated chain by priority", async () => {
+    const two: any = {
+      ...store,
+      r: { models: [{ id: "second", baseUrl: "https://r/v1", api: "openai-completions" }] },
+    };
+    const cfg: any = {
+      ...base,
+      routing: {
+        judge: {
+          mode: "custom",
+          models: [
+            { provider: "r", model: "second", priority: 2 },
+            { provider: "p", model: "judge-a", priority: 1 },
+          ],
+        },
+      },
+    };
+    const eps = await resolveJudgeEndpoints(cfg, two, { ...auth, r: { type: "api_key", key: "sk-r" } }, {}, undefined);
+    expect(eps.map((e) => e.modelId)).toEqual(["judge-a", "second"]);
+  });
+
+  it("appends the LLM judge as the last rung for decision mode too (call-time fallback)", async () => {
+    const cfg: any = {
+      ...base,
+      tiers: { fast: { models: [{ provider: "p", model: "judge-a", priority: 1 }] }, smart: { models: [] } },
+      routing: { judge: { mode: "decision", models: [{ provider: "q", model: "dec", priority: 1 }] } },
+    };
+    const eps = await resolveJudgeEndpoints(cfg, store, auth, {}, undefined);
+    expect(eps.map((e) => `${e.provider}/${e.modelId}`)).toEqual(["q/dec"]);
+    expect(eps[0]!.apiType).toBe("typesafe-decisions");
   });
 });
 
@@ -690,3 +802,5 @@ describe("config source tracking", () => {
     expect(cfg.ux.routerLogVerbose).toBe(true);
   });
 });
+
+

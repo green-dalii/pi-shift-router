@@ -11,7 +11,8 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   createRouterState,
-  processRoute,
+  planNoJudge,
+	processRoute,
   syncSessionModel,
   type RouterState,
 } from "../src/router.js";
@@ -364,3 +365,5 @@ describe("syncSessionModel (model_select sync)", () => {
 function currentModelIdIs(state: RouterState, id: string): boolean {
   return state.currentModelId === id;
 }
+
+

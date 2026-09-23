@@ -10,7 +10,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
 import type { Tier, ShiftRouterConfig, RouterState, ProviderEndpoint } from "./types.js";
 import { appendRouterLog } from "./log.js";
-import { loadConfig, resolveFastEndpoints } from "./config.js";
+import { loadConfig, resolveJudgeEndpoints } from "./config.js";
 import { findBestModelForTier, formatTierDisplay } from "./tier.js";
 import { formatStatusBarLabel } from "./status-bar.js";
 import { classify } from "./judge.js";
@@ -141,7 +141,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     if (initialized) return;
     config = await loadConfig(ctx.cwd);
     state = createRouterState();
-    fastEndpoints = await resolveFastEndpoints(config, undefined, undefined, process.env, ctx.modelRegistry as any);
+    fastEndpoints = await resolveJudgeEndpoints(config, undefined, undefined, process.env, ctx.modelRegistry as any);
     initialized = true;
     // Startup banner: makes stale dist/ builds detectable at a glance.
     // pi loads dist/index.js from this working copy at process start —
@@ -241,8 +241,6 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       ctx.ui.setWorkingVisible(true);
     } catch { /* ignore */ }
 
-    // Animate a "judging…" badge in the status bar so the user sees the
-    // router working during the Judge API call (static text reads as hung).
     if (config.ux.statusBar) startLoading(ctx.ui, "🧭 judging");
 
     let judgeResult;
@@ -947,7 +945,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       }
       // No ctx in this command-reload callback — reuse the registry captured at
       // session_start (statusBarRegistry), falling back to the store path.
-      fastEndpoints = await resolveFastEndpoints(config, undefined, undefined, process.env, statusBarRegistry as any);
+      fastEndpoints = await resolveJudgeEndpoints(config, undefined, undefined, process.env, statusBarRegistry as any);
       state.window = [];
       state.modelCooldowns.clear();
       state.tierUsage.fast = { calls: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0 };

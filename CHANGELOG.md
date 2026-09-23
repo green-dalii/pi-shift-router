@@ -9,6 +9,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.7.0] — A judge that answers with a number
+
+### Added
+
+- **Pluggable Judge modes (v1.7.0).** `/router config` → `🧭 Judge` now offers
+  three modes instead of one implicit one, stored at `routing.judge.mode`:
+  `fast-chain` (the legacy behaviour and still the default — reuse the Fast
+  tier chain), `custom` (a dedicated Judge LLM chain you edit like a tier,
+  `routing.judge.models`), and `decision` (a *decision model* — TypeSafe Jev /
+  System One class — configured the same way). All three are additive: no
+  existing config changes meaning, and the default path is byte-identical.
+- **Jev, a judge that answers with a calibrated probability instead of prose
+  (Beta, opt-in).** The decision-model adapter speaks TypeSafe's `/v1/systemone`
+  protocol natively: one `choice` question for the tier, one `noul` question for
+  orchestration, both in a single request. The response's
+  `probabilities[tier]` is what θ eats, so there is no JSON-parsing step and no
+  malformed-reply failure class; a decision verdict is also billed on input only
+  (~$0.0001/call measured). Jev is labelled **Beta**, listed *third* in the menu,
+  and never enabled by default — a September 2026 independent study found
+  decision models trailing the best LLM on 14 of 15 annotation tasks, and
+  provider capacity is still ramping (measured 1.4–6.6 s/verdict, median ~5 s;
+  payload-size-independent, so it is supply-side, not integration). New
+  `DECISION_API_TYPE = "typesafe-decisions"` marker, `buildDecisionRequestBody()`,
+  `parseDecisionResponse()`, `resolvedModelOf()`, `chatCapableModels()`, and
+  `resolveJudgeEndpoints()` in `src/config.ts`. Decision endpoints are filtered
+  out of the Fast/Smart pickers, since pi cannot stream that protocol as a chat
+  model.
+- **Judge availability ladder — never stall, never guess (v1.7.0).** Judge
+  resolution is now a single ordered list built per call: the configured judge
+  chain, then the LLM judge, then *no routing at all*. It covers both a rotted
+  config (no authenticated endpoint, retired model, removed key) and call-time
+  failures (429, 5xx, timeout) in the same turn, for **every** mode — a 429 on
+  rung 1 falls through to the LLM judge immediately instead of holding. Rung 3
+  behaves "as if the plugin were not installed": no model switch, orchestration
+  cleared, the session-start model restored (unless `/route-force` is active),
+  and one notice per session. Deterministic and unit-tested
+  (`planNoJudge()` in `src/router.ts`).
+- **Pin-free observability for `jev-latest`.** A decision response reports the
+  resolved model id (`jev-latest` → `jev-1.13.0` measurable), so the router
+  records it and logs a "version moved" line when it changes. A pinned build
+  fails the worst way (vendor retires it → the judge holds forever), so the alias
+  is the default and its movements are made visible instead; pinning stays
+  available for byte-identical reproducibility.
+
+### Changed
+
+- **Backward compatibility for pre-v1.7.0 configs is now explicit
+  (`normalizeJudgeMode()`).** A config with no `routing.judge` merges the default
+  `fast-chain` and behaves exactly as before. A config with `judge.models` but no
+  `mode` — which the old deep-merge would have **silently discarded** — now
+  migrates to `custom`, with a log line. An unknown mode falls back to
+  `fast-chain` and logs. The wizard applies the same normalization, so what the
+  menu displays cannot disagree with what routing does.
+- **Three new FAQ entries on Jev setup** — where to get the key, how to wire
+  `~/.pi/agent/models.json`, the "let pi configure it for you" prompt, and a
+  three-step troubleshooting checklist for when the Jev row is missing from the
+  Judge menu.
+
+- **Both READMEs rewritten to be readable rather than thorough (v1.7.0).** The Jev
+  section now opens with what the model actually returns — a probability — instead of
+  explaining the protocol; the internal reasoning about model aliases and thresholds
+  moved to SPEC/MEMORY where it belongs. Removed the duplicated beta explanation
+  (three copies), the self-congratulatory checks in the router comparison table, and
+  the slogan-style headings. A CJK-aware link check also fixed two dead anchors per
+  README (the nav, hero and "How it works" links all pointed at a heading that never
+  existed). EN 554 → 489 lines, zh 519 → 413.
+- **The save-time network probe is gone.** Selecting a decision judge used to
+  fire an HTTP probe that blocked the config UI for ~1 s (reported as "the
+  Config screen vanishes for a second on Judge save"). It proved only that the
+  endpoint worked at that instant; local validation (route resolves + API marker
+  present) plus the runtime ladder give the same answer where it is actually
+  true — at call time. Decision mode still floors `judgeTimeout` at 15 s, and the
+  wizard now says so instead of failing silently.
+- **Judge-failure semantics are documented in one place.** SPEC §4.6 previously
+  described the pre-ladder behaviour ("the user is not interrupted"); it now
+  states the two real mechanisms and links to them. SPEC also lost its
+  "Future Direction" section for three already-delivered features, a stale
+  "open design decisions" block, and ~155 lines of duplication overall.
+
+### Fixed
+
+- **A configured LLM Judge is now part of the fallback for every mode**, not only
+  for `fast-chain`. Previously `custom`/`decision` resolution returned the
+  primary endpoints only, so an unresolvable dedicated judge meant *no* judge.
+- **Verbose logs no longer corrupt the TUI frame** in the Judge paths (the
+  diagnostics continue to go to `~/.pi/agent/logs/shift-router.log`, never
+  stdout).
+
 ## [1.6.0] — Pi model-registry alignment
 
 ### Changed

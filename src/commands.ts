@@ -40,7 +40,7 @@ import {
 } from "./router.js";
 import { resetOrchestration } from "./orchestrate.js";
 import { computeStats, judgeModelDisplay } from "./stats.js";
-import { resolveJudgeEndpoints } from "./config.js";
+import { resolveJudgeEndpoints, normalizeJudgeMode } from "./config.js";
 import { DECISION_API_TYPE, DECISION_MIN_JUDGE_TIMEOUT_MS } from "./judge.js";
 import { StatusPanel, assembleStatusData, type StatusPanelInput } from "./tui/status-panel.js";
 import {
@@ -175,7 +175,10 @@ export function decisionSetupGuide(): string[] {
 /** One-line Judge-mode summary for the wizard menu (SPEC §8.6). Exported for tests. */
 export function judgeSummary(config: ShiftRouterConfig, decisionCount?: number): string {
   const judge = config.routing.judge;
-  const mode: JudgeMode = judge?.mode ?? "fast-chain";
+  // Normalized, not raw: a legacy models-without-mode config behaves as `custom`,
+  // so the menu must say "dedicated" — the display must never disagree with what
+  // the resolver will actually do.
+  const mode: JudgeMode = normalizeJudgeMode(judge);
   if (mode === "fast-chain") return "reuse Fast tier chain (LLM)";
   if (mode === "decision" && decisionCount === 0) {
     // Chosen but unusable: say what is *actually* judging, not what was wished for.
@@ -545,7 +548,7 @@ async function routeConfigWizard(
    */
   async function editJudge(): Promise<void> {
     const judge = config.routing.judge ?? { mode: "fast-chain" as JudgeMode };
-    const current: JudgeMode = judge.mode ?? "fast-chain";
+    const current: JudgeMode = normalizeJudgeMode(judge);
     const decisionModels = allModels.filter((m) => m.api === DECISION_API_TYPE);
     const opts = judgeModeOptions(current, decisionModels.length);
     const picked = await ctx.ui.select("🧭 Judge — the model that picks your model", opts);

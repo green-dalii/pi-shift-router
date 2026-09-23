@@ -18,6 +18,7 @@ import {
   mergeCustomProviders,
   resolveFastEndpoints,
   resolveJudgeEndpoints,
+  normalizeJudgeMode,
   loadModelsStore,
   loadConfig,
   saveConfig,
@@ -147,14 +148,19 @@ describe("resolveJudgeEndpoints — judge modes", () => {
     expect(eps.map((e) => e.modelId)).toEqual(["judge-a"]);
   });
 
-  it("custom mode resolves the dedicated chain (no cheapest-model substitution)", async () => {
+  // CONTRACT CHANGE (v1.7.0, documented): a dedicated chain is now the FIRST
+  // rung of an ordered ladder, with the LLM judge (the user's Fast chain) behind
+  // it, so a call-time failure (429/5xx/timeout) on the configured judge falls
+  // through in the same turn instead of holding. Previously the dedicated chain
+  // was the whole list.
+  it("custom mode puts judge.models first and the LLM judge behind it", async () => {
     const cfg: any = {
       ...base,
       tiers: { fast: { models: [{ provider: "p", model: "judge-a", priority: 1 }] }, smart: { models: [] } },
       routing: { judge: { mode: "custom", models: [{ provider: "q", model: "dec", priority: 1 }] } },
     };
     const eps = await resolveJudgeEndpoints(cfg, store, auth, {}, undefined);
-    expect(eps.map((e) => `${e.provider}/${e.modelId}`)).toEqual(["q/dec"]);
+    expect(eps.map((e) => `${e.provider}/${e.modelId}`)).toEqual(["q/dec", "p/judge-a"]);
   });
 
   // CONTRACT CHANGE (v1.7.0, documented in the PR): a dedicated/decision chain
@@ -223,7 +229,7 @@ describe("resolveJudgeEndpoints — judge modes", () => {
       },
     };
     const eps = await resolveJudgeEndpoints(cfg, two, { ...auth, r: { type: "api_key", key: "sk-r" } }, {}, undefined);
-    expect(eps.map((e) => e.modelId)).toEqual(["judge-a", "second"]);
+    expect(eps.map((e) => e.modelId)).toEqual(["judge-a", "second", "dec"]);
   });
 
   it("appends the LLM judge as the last rung for decision mode too (call-time fallback)", async () => {
@@ -233,8 +239,19 @@ describe("resolveJudgeEndpoints — judge modes", () => {
       routing: { judge: { mode: "decision", models: [{ provider: "q", model: "dec", priority: 1 }] } },
     };
     const eps = await resolveJudgeEndpoints(cfg, store, auth, {}, undefined);
-    expect(eps.map((e) => `${e.provider}/${e.modelId}`)).toEqual(["q/dec"]);
+    expect(eps.map((e) => `${e.provider}/${e.modelId}`)).toEqual(["q/dec", "p/judge-a"]);
     expect(eps[0]!.apiType).toBe("typesafe-decisions");
+    expect(eps[1]!.apiType).not.toBe("typesafe-decisions");
+  });
+
+  it("does not duplicate a model that appears in both rungs", async () => {
+    const cfg: any = {
+      ...base,
+      tiers: { fast: { models: [{ provider: "q", model: "dec", priority: 1 }] }, smart: { models: [] } },
+      routing: { judge: { mode: "decision", models: [{ provider: "q", model: "dec", priority: 1 }] } },
+    };
+    const eps = await resolveJudgeEndpoints(cfg, store, auth, {}, undefined);
+    expect(eps.map((e) => `${e.provider}/${e.modelId}`)).toEqual(["q/dec"]);
   });
 });
 
@@ -804,3 +821,26 @@ describe("config source tracking", () => {
 });
 
 
+describe("normalizeJudgeMode — old-config migration (SPEC §8.6)", () => {
+  it("honours the three known modes", () => {
+    expect(normalizeJudgeMode({ mode: "decision" })).toBe("decision");
+    expect(normalizeJudgeMode({ mode: "custom" })).toBe("custom");
+    expect(normalizeJudgeMode({ mode: "fast-chain" })).toBe("fast-chain");
+  });
+
+  it("treats an absent routing.judge as the legacy behaviour (no migration needed)", () => {
+    // Every pre-v1.7.0 config looks like this: judge on the Fast chain.
+    expect(normalizeJudgeMode(undefined)).toBe("fast-chain");
+    expect(normalizeJudgeMode({})).toBe("fast-chain");
+  });
+
+  it("migrates a models-list-without-mode config to custom (the merged default would ignore it)", () => {
+    expect(normalizeJudgeMode({ models: [{ provider: "q", model: "dec" }] })).toBe("custom");
+  });
+
+  it("degrades an unknown mode to fast-chain instead of bricking routing", () => {
+    expect(normalizeJudgeMode({ mode: "fast" })).toBe("fast-chain");
+    expect(normalizeJudgeMode({ mode: "jev" })).toBe("fast-chain");
+    expect(normalizeJudgeMode({ mode: "" })).toBe("fast-chain");
+  });
+});

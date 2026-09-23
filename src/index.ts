@@ -17,6 +17,7 @@ import { classify } from "./judge.js";
 import {
   createRouterState,
   processRoute,
+  planNoJudge,
   applyModelSwitch,
   clearManualOverride,
   setManualOverrideTier,
@@ -97,6 +98,8 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
   // per-turn; stopped on agent_end / judge-complete.
   let loadingTimer: ReturnType<typeof setInterval> | null = null;
   let loadingPhase = 0;
+  /** One user-visible notice per session when no judge endpoint can be resolved. */
+  let judgeUnavailableNotified = false;
   const LOADING_DOTS = ["", ".", "..", "..."];
 
   // In-flight subagent spawn start times, keyed by toolCallId. tool_call
@@ -178,7 +181,12 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     // observe-only (SPEC contract).
     const m: any = (ctx as any).model;
     if (m?.provider && (m.id ?? m.modelId)) {
-      syncSessionModel(state, config, m.provider, m.id ?? m.modelId);
+      const modelId = m.id ?? m.modelId;
+      syncSessionModel(state, config, m.provider, modelId);
+      // The user's own model — the fallback identity for "no judge available".
+      // Captured before any switch so restoring it is exact.
+      state.sessionModel = { provider: m.provider, modelId };
+      judgeUnavailableNotified = false;
     }
     // Defensive: a new session should never inherit orchestration state
     // from a previous one (e.g. after an abort that skipped agent_end).
@@ -241,6 +249,51 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       ctx.ui.setWorkingVisible(true);
     } catch { /* ignore */ }
 
+    /**
+     * Bottom rung of the judge ladder: no verdict can be produced — either no
+     * endpoint resolved, or every rung failed at call time. Stop routing rather
+     * than guess: no model switch, no orchestration, and the user's own model
+     * back if an earlier turn switched it. The turn then runs exactly as it
+     * would with the plugin uninstalled, announced once per session.
+     */
+    const stopRouting = async (reason: string) => {
+      if (verbose) appendRouterLog(`[ShiftRouter] judge exhausted (${reason}) — routing disabled for this turn`);
+      if (!judgeUnavailableNotified) {
+        judgeUnavailableNotified = true;
+        ctx.ui.notify(
+          "pi-shift-router: ⚠ judge unavailable (" +
+            reason +
+            ") — routing is off this turn: no model switch, no orchestration. " +
+            "Check /router config; meanwhile the router stays out of the way.",
+          "warning",
+        );
+      }
+      const plan = planNoJudge(state);
+      if (plan.clearOrchestration) resetOrchestration(state);
+      const own = plan.restoreTo;
+      if (own) {
+        // Restore via the same registry→pi.setModel path the router uses for
+        // switches, so the turn runs exactly on the model the user chose.
+        const found =
+          (ctx.modelRegistry as any)?.find?.(own.provider, own.modelId) ??
+          (ctx.modelRegistry as any)?.getAll?.()?.find?.(
+            (m: any) => m.provider === own.provider && (m.id ?? m.modelId) === own.modelId,
+          );
+        try {
+          if (found) await pi.setModel(found as any);
+          else await (ctx.modelRegistry as any)?.setModel?.(own.provider, own.modelId);
+          syncSessionModel(state, config, own.provider, own.modelId);
+        } catch { /* restoring is best-effort; never break the turn */ }
+      }
+      updateBar(ctx.ui, config, state);
+    };
+
+    if (fastEndpoints.length === 0) {
+      await stopRouting("no judge endpoint configured");
+      return;
+    }
+    judgeUnavailableNotified = false;
+
     if (config.ux.statusBar) startLoading(ctx.ui, "🧭 judging");
 
     let judgeResult;
@@ -262,6 +315,14 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       // Restore the proper status badge immediately, regardless of judge outcome.
       stopLoading();
       updateBar(ctx.ui, config, state);
+    }
+
+    // Every rung of the ladder failed at call time (429/5xx/timeout/cooldown on
+    // the configured chain AND on the LLM judge) → no verdict exists. Same
+    // bottom rung as "nothing configured": stop routing, don't guess.
+    if (judgeResult.source === "fallback") {
+      await stopRouting("every judge endpoint failed");
+      return;
     }
 
     if (verbose) {

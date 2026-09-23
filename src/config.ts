@@ -12,6 +12,7 @@ import { homedir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import {
   type ShiftRouterConfig,
+  type JudgeMode,
   type ModelRegistryLike,
   type ModelsStore,
   type AuthStore,
@@ -439,6 +440,27 @@ export async function saveConfig(
  * unresolvable dedicated chain holds position rather than judging on a model
  * the user did not choose.
  */
+/**
+ * Resolve the effective judge mode from whatever shape the config is in
+ * (SPEC §8.6 migration contract):
+ *
+ * - `fast-chain` / `custom` / `decision` → honoured as-is.
+ * - **models present, no mode** → `custom`. This is the migration case: a config
+ *   written against an earlier shape expressed "use these models to judge" with
+ *   no mode key, and the merged default (`fast-chain`) would silently ignore the
+ *   list. Inferring `custom` is the only reading that does not discard the
+ *   user's intent; the resolver logs the inference.
+ * - absent / unknown → `fast-chain`, i.e. pre-v1.7.0 behaviour. An unknown value
+ *   (typo, hand-edit) must never brick routing: it degrades to what every old
+ *   config already did.
+ */
+export function normalizeJudgeMode(judge?: { mode?: string; models?: { provider: string; model: string }[] }): JudgeMode {
+  const raw = judge?.mode;
+  if (raw === "fast-chain" || raw === "custom" || raw === "decision") return raw;
+  if (raw === undefined && (judge?.models?.length ?? 0) > 0) return "custom";
+  return "fast-chain";
+}
+
 export async function resolveJudgeEndpoints(
   config: ShiftRouterConfig,
   storeOverride?: ModelsStore,
@@ -446,35 +468,57 @@ export async function resolveJudgeEndpoints(
   env: Record<string, string | undefined> = process.env,
   registry?: ModelRegistryLike,
 ): Promise<ProviderEndpoint[]> {
-  const mode = config.routing.judge?.mode ?? "fast-chain";
+  const rawMode = config.routing.judge?.mode;
+  const mode = normalizeJudgeMode(config.routing.judge);
+  if (rawMode !== undefined && rawMode !== mode) {
+    appendRouterLog(`[ShiftRouter] Judge mode "${rawMode}" is not recognised — using ${mode}`);
+  } else if (rawMode === undefined && mode === "custom") {
+    appendRouterLog("[ShiftRouter] Judge: judge.models present without a mode — migrated to custom");
+  }
   if (mode === "fast-chain") return resolveFastEndpoints(config, storeOverride, authOverride, env, registry);
 
   const store = storeOverride ?? (await loadModelsStore());
   const auth = authOverride ?? (await loadAuthStore());
-  const endpoints: ProviderEndpoint[] = [];
+  const primary: ProviderEndpoint[] = [];
   const models = [...(config.routing.judge?.models ?? [])].sort((a, b) => a.priority - b.priority);
   for (const ref of models) {
     const ep = await resolveEndpoint(ref.provider, ref.model, store, auth, env, registry);
-    if (ep) endpoints.push(ep);
+    if (ep) primary.push(ep);
   }
 
-  // Unusable judge configuration → the LLM judge (the user's own Fast chain)
-  // rather than holding every turn forever. Always logged, never silent.
-  if (endpoints.length === 0) {
-    const fallback = await resolveFastEndpoints(config, storeOverride, authOverride, env, registry);
-    appendRouterLog(
-      `[ShiftRouter] Judge (${mode}) unusable — falling back to the LLM judge ` +
-        `(${fallback.map((e) => `${e.provider}/${e.modelId}`).join(", ") || "none available"})`,
-    );
-    return fallback;
+  // The judge ladder (SPEC §8.6), expressed as one ordered list so a single
+  // `classify()` walk covers BOTH failure kinds in the same turn:
+  //   1. the chain the user configured for judging (decision model, or a
+  //      dedicated LLM chain);
+  //   2. the LLM judge — their own Fast chain, i.e. the pre-v1.7.0 default.
+  // Rung 1 can fail two ways: it may not resolve at all (retired model, removed
+  // key, gone provider), or its endpoints may fail *at call time* (429, 5xx,
+  // timeout, cooldown). Concatenating means the walk continues into rung 2 for
+  // both, instead of holding the turn on a transient error. If rung 2 is also
+  // exhausted there is no verdict at all, and the caller stops routing rather
+  // than guessing (one notice per session).
+  const fallback = await resolveFastEndpoints(config, storeOverride, authOverride, env, registry);
+  const seen = new Set<string>();
+  const ladder: ProviderEndpoint[] = [];
+  for (const ep of [...primary, ...fallback]) {
+    const key = `${ep.provider}/${ep.modelId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ladder.push(ep);
   }
 
-  if (config?.ux?.routerLogVerbose) {
+  if (primary.length === 0 && fallback.length > 0) {
     appendRouterLog(
-      `[ShiftRouter] Judge (${mode}) endpoints: ${endpoints.map((e) => `${e.provider}/${e.modelId}`).join(", ")}`,
+      `[ShiftRouter] Judge (${mode}) unusable — using the LLM judge ` +
+        `(${fallback.map((e) => `${e.provider}/${e.modelId}`).join(", ")})`,
+    );
+  } else if (config?.ux?.routerLogVerbose) {
+    appendRouterLog(
+      `[ShiftRouter] Judge (${mode}) ladder: ` +
+        ladder.map((e) => `${e.provider}/${e.modelId}`).join(" → "),
     );
   }
-  return endpoints;
+  return ladder;
 }
 
 // ─── Config validation (SPEC §5.4) ────────────────────────────────

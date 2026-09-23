@@ -459,6 +459,14 @@ export interface RouterState {
   currentTier: Tier;
   currentModelId: string | null;
   currentProvider: string | null;
+  /**
+   * The model the user was running when the session started (captured once, in
+   * `session_start`, before any switch). This is what "as if the plugin were not
+   * installed" means: when no judge endpoint can be resolved at all, the router
+   * stops routing and puts this model back rather than leaving the user on a
+   * tier a previous turn picked.
+   */
+  sessionModel?: { provider: string; modelId: string };
   window: WindowEntry[];
   manualOverride: {
     active: boolean;

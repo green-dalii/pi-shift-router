@@ -199,6 +199,29 @@ export function analyzeDowngrade(
  *    whenever the active model differs (or none is set) — the router owns
  *    model selection; user /model or session default is corrected here.
  */
+/**
+ * What the router does when **no** judge endpoint can be resolved at all — the
+ * bottom rung of the judge ladder (SPEC §8.6): decision endpoints → LLM judge
+ * chain → nothing. "Nothing" must look like the plugin is not installed: stop
+ * routing, drop any orchestration state, and put the user's own session model
+ * back if an earlier turn switched it. Pure so the policy is testable without
+ * the pi lifecycle.
+ */
+export function planNoJudge(state: RouterState): {
+  restoreTo: { provider: string; modelId: string } | null;
+  clearOrchestration: boolean;
+} {
+  const own = state.sessionModel;
+  const switchedAway =
+    !!own && (state.currentProvider !== own.provider || state.currentModelId !== own.modelId);
+  return {
+    // A manual override (/route-force) is an explicit instruction: the bottom
+    // rung must not undo it just because the judge is unavailable.
+    restoreTo: switchedAway && !state.manualOverride.active ? own! : null,
+    clearOrchestration: state.orchestration.active,
+  };
+}
+
 export function processRoute(
   judgeResult: JudgeResult,
   state: RouterState,

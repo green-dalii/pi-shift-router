@@ -292,6 +292,10 @@ interface ShiftRouterConfig {
   routing: {
     mode: "auto" | "manual" | "off";
     judgeTimeout: number;                                  // ms, default 5000
+    judge?: {                                              // v1.7.0, additive
+      mode: "fast-chain" | "custom" | "decision";          // default "fast-chain"
+      models?: ModelRef[];                                 // used by custom + decision
+    };
     window: { size: number; minConfidence: number; threshold?: number };
                                                             // size 5, minConfidence 0.5;
                                                             // threshold LEGACY (0.6 = dead)
@@ -365,6 +369,10 @@ The cheapest-fallback pool includes **all providers** that have a valid API key 
 
 **Cache invalidation**: `loadModelsStore()` caches the merged store in module-local state. The cache is invalidated in two places:
 
+- **Decision endpoints are judge-only.** `chatCapableModels()` removes
+  `typesafe-decisions` entries from the Fast/Smart pickers: pi has no streaming
+  implementation for that api value, so a decision model chosen as a tier would
+  fail at stream time on every turn.
 - **At the entry of `/router config`** — the wizard always re-reads `models-store.json` and `models.json` from disk so the picker shows the current catalog, not a startup snapshot (avoids the stale-list bug: providers may have been added or removed since pi started).
 - **In `invalidateConfigCache()`** — when the user saves config via `/router config` or `saveConfig()`, the merged-store cache is also cleared so the next read reflects current disk state.
 
@@ -480,6 +488,27 @@ For advanced users debugging routing decisions:
 - Output destination: console (visible when running pi in a terminal).
 
 ### 7.6 TUI Model Picker (Wizard)
+
+**Indicator vocabulary — one idiom per semantics, never mixed on a row.**
+
+| Row kind | Glyphs | Reads as |
+|----------|--------|----------|
+| Exclusive picker (provider, Judge mode) | `●` current / `○` other | "exactly one of these is chosen" (radio) |
+| Independent toggle (UX settings, cache-aware) | `☑` on / `☐` off | "this row is on/off by itself" (checkbox) |
+| Action row (Done, Back, Save) | none | — |
+
+Unifying everything on `●`/`○` was considered and **rejected**: the toggle menus
+allow all-on, all-off and every combination, so a filled circle would read as
+"the selected one" (radio semantics) and five filled circles wipe out the
+"which is current?" signal. The evidence points the same way: pi's UI documents
+`●` as a status *indicator* and its official extension example marks item state
+with `☑`/`☐`.
+
+What *was* the real inconsistency is the `✔`-suffix style (a second glyph pair
+for the same "current item" meaning as `●`) — that is gone. Toggle menus name
+their glyphs in the title (``(☑ on · ☐ off)``) because a bare box is easy to
+misread. Rows are produced by `toggleRow()` / `judgeModeOptions()` so a new menu
+cannot invent a third style, and tests assert the two idioms stay separate.
 
 `/router config`'s model selection step uses **pi's own model registry** (SPEC §5.4), so the list is the same set `/model` offers — not a locally re-derived catalog. UX:
 
@@ -620,6 +649,178 @@ On failover, show a toast notification (unless `quietMode`):
   across tiers), surface a warning toast.
 - Manual override (`/route-force`) bypasses cooldown (user explicitly asked).
 - A 2xx success for a model in cooldown clears it immediately (recovery).
+
+### 8.6 Judge Modes and Protocols (v1.7.0)
+
+The Judge is a high-frequency, latency- and cost-sensitive classifier whose
+output is **thresholded** (`pSmart >= θ`, §2.3). The LLM judge stays the
+default; two more modes were added without changing it.
+
+`routing.judge.mode` selects where the Judge chain comes from:
+
+| Mode | Chain source | Notes |
+|------|--------------|-------|
+| `fast-chain` (default) | `tiers.fast.models` | Byte-identical to pre-v1.7.0 behaviour. Absent `routing.judge` ⇒ this mode. Cheapest-authenticated-model fallback applies (§4.3 step 2). |
+| `custom` | `routing.judge.models` | A dedicated Judge LLM chain (same chain-editor UX as Fast/Smart). No cheapest-model fallback: an unresolvable chain **holds position**. |
+| `decision` | `routing.judge.models` (decision-capable endpoints) | Typed-answer models (Jev / System One class). No cheapest-model fallback; failures **hold**. |
+
+**Decision protocol (`apiType: "typesafe-decisions"`).** `POST {baseUrl}/v1/systemone`,
+Bearer auth, one round trip for all questions:
+
+```jsonc
+{
+  "model": "<model id>",
+  "state": "<recent messages, assembled like the LLM judge prompt>",
+  "questions": {
+    "tier":        { "type": "choice", "instructions": "<rubric>",
+                     "criteria": { "fast": "…", "smart": "…" } },
+    "orchestrate": { "type": "noul", "instructions": "…",
+                     "criteria": { "true": "…", "false": "…" } }
+  }
+}
+```
+
+Response mapping (tolerant — accept an `answers` envelope or a bare top-level
+map):
+
+- `tier = questions.tier.choice` (must be one of the declared options, else hold)
+- `confidence = questions.tier.probabilities[tier] ?? questions.tier.confidence`
+  — a **calibrated probability**, not an elicited LLM confidence. `reason` is
+  absent by design (decision models do not generate prose; the dashboard omits it).
+- `orchestrate = questions.orchestrate.noul >= 0.5` (Noul returns 0–1, no confidence field)
+
+Failover/cooldown machinery is protocol-agnostic and unchanged (§8.5): a
+failover signature cools the endpoint; anything else holds.
+
+**Mode semantics.** `JudgeResult.source` records `"llm"` for `fast-chain`/`custom`
+and `"decision"` for decision endpoints (telemetry/logs; the routing algorithm
+treats both as measured signal). **θ is deliberately untouched by this feature**:
+switching to calibrated probabilities changes the confidence distribution, so
+thresholds (§2.3) must be re-derived from measured data in the follow-up
+routing-asymmetry work — see MEMORY.md.
+
+**Mode precedence: the LLM judge is the default path, Jev is opt-in Beta
+(v1.7.0).** The wizard orders the modes so the legacy behaviour leads and the
+unproven option comes last:
+
+| Order | Row | Status |
+|-------|-----|--------|
+| 1 | `🦾 Reuse the Fast tier chain (default)` | the pre-v1.7.0 behaviour (default config value) |
+| 2 | `🔬 Dedicated Judge LLM chain` | opt-in, same machinery as the default |
+| 3 | `🧮 Jev — decision model (Beta)` | **public beta**: limited independent validation, provider capacity still ramping |
+
+`JUDGE_MODE_ORDER` maps rows to modes, so presentation and dispatch stay
+independent. Jev is deliberately **not** a first-class judge: it is a decision
+model in public beta, its `confidence` is a rescaling of the top probability
+rather than a calibration claim, and a September 2026 evaluation found decision
+models trailing the per-task best LLM on 14 of 15 annotation tasks. Making it the
+default or the first row would push an unproven model class onto users who never
+asked for it; the honest presentation is "third, labelled Beta, with a fallback
+that always works". The default config value remains `fast-chain`, so no upgrade
+silently re-judges anyone with a different model class.
+
+**Unusable judge config degrades, it does not stall.** When a `custom` or
+`decision` chain resolves to zero endpoints — the model was retired, the key was
+removed, the provider disappeared — `resolveJudgeEndpoints()` falls back to the
+LLM judge (the Fast chain, i.e. the pre-v1.7.0 default) and **always logs the
+degradation**. Rationale: this is not the "cheapest authenticated model"
+substitution we rejected — it is a chain the user configured, and a rotted judge
+config must not hold every turn forever. The boundary stays sharp elsewhere:
+per-call failures (timeout, 5xx, malformed answer) still **hold**, because those
+are transient rather than config rot, and a verdict is still never fabricated.
+The wizard says which judge is actually in effect (`Jev unavailable — LLM judge
+active`), and the setup screen states that routing continues meanwhile.
+
+**Model id policy: alias by default, and make moves visible.** The Judge is
+configured with `jev-latest`, not a pinned build. Rationale: a pin fails the worst
+way (the day the vendor retires that build the Judge stops working and the router
+holds forever until a human edits config), whereas the alias cannot be retired.
+The alias's own hazard — a version change shifting the probability distribution
+behind θ — is answered with observability instead of immobility: Jev reports the
+resolved id in every response, so `resolvedModelOf()` records it on
+`JudgeResult.resolvedModel` and the verbose log emits a "version moved" line when it
+differs from the requested id. Pin only for byte-identical reproducibility, and
+accept the retirement failure mode that comes with it.
+
+**Judge availability ladder — never stall, never guess (v1.7.0+).** Resolution
+degrades in order, and the wizard does **no network I/O** at save time:
+
+| Rung | Condition | Behaviour |
+|------|-----------|-----------|
+| 1 | the chain the user configured for judging resolves | judge with it — a decision model in `decision` mode, a dedicated LLM chain in `custom`, the Fast chain in `fast-chain` |
+| 2 | that chain **resolves to nothing** (retired model, removed key, gone provider) **or fails at call time** (429 / 5xx / timeout / cooldown) | continue into the **LLM judge** — the user's own Fast chain, i.e. the pre-v1.7.0 default. The degradation is logged when rung 1 is unusable |
+| 3 | rung 2 is exhausted too (nothing resolves, or every endpoint failed this turn) | **stop routing**: no model switch, no orchestration (an active one is cleared), and the user's own `sessionModel` restored if an earlier turn switched it — *unless* a manual override is active, which is an explicit instruction the bottom rung must not undo. One user-visible notice per session |
+
+**Both rungs are one ordered list.** `resolveJudgeEndpoints()` returns
+`[configured chain…, LLM judge…]` (deduped), so a single `classify()` walk covers
+resolvability *and* call-time failure in the same turn — a 429 on the decision
+rung falls through to the LLM judge immediately rather than holding the turn. The
+walk's existing cooldown skipping and failover-signature cooling apply unchanged.
+`fast-chain` mode returns just the Fast chain (no duplicate rung). A verdict is
+never fabricated, and a malformed answer still holds rather than becoming a tier.
+
+**Backward compatibility / migration.** Pre-v1.7.0 configs carry no
+`routing.judge`; the merged default is `fast-chain`, so they keep byte-identical
+behaviour with no migration step. `normalizeJudgeMode()` defines the contract for
+the other shapes: the three known modes are honoured; a **models list with no
+mode** becomes `custom` (a merged default would otherwise silently ignore the
+list, so the resolver logs the inference); an **absent or unknown** mode becomes
+`fast-chain` — the safe legacy reading, never a bricked router. The wizard uses
+the same normalization, so the menu cannot display a mode the resolver would not
+honour.
+
+Rung 3 is implemented as the pure `planNoJudge()` so the policy is testable
+without the pi lifecycle.
+
+**Why the save-time probe was removed.** A probe proves the endpoint answers
+*this second* — and Jev is in beta, where capacity, revoked keys and regional
+flakiness all move — while costing a blocking round trip on the config UI (it
+showed up to the user as the Config screen vanishing for ~1 s: the chain editor
+had already closed, so there was nothing to render while a network call blocked
+the handler). With rungs 1–3 covering unreachable endpoints *and a notice*, the
+probe's only unique value — immediate feedback on a misconfiguration — is served
+better by local static validation (endpoint resolves: auth + baseUrl + the
+decision api marker) plus rung 2/3 at runtime. Feedback is not lost; it moves
+from save-time to first-turn, where it is actually true.
+
+**Wizard gate (no network at save time).** The two chain modes reuse the tier
+chain editor. For `decision`, candidates are filtered to decision-capable
+endpoints from pi's registry (SPEC §5.4); when none exists the wizard shows a
+**dismissible setup screen** (why it is unavailable, the exact `"api"` value to
+add, where it goes) and returns **without writing** — a toast is too transient
+for instructions the user must act on, and a permanently disabled row would hide
+the fix. A selection is then validated **locally** (the endpoint resolves: auth,
+baseUrl, and the decision api marker) and persisted; correctness against the live
+service is the runtime ladder's job, with a notice when it degrades.
+
+**Operational floors (measured).** Live calls to `api.typesafe.ai` (2026-09-18,
+3–8 calls per variant, 458–2265 input tokens) returned in **1.4–6.6 s**, median
+~5 s, with `output_tokens` reported (50) but unbilled. This is **provider-side
+capacity during Jev's public beta**, not a property of decision models and not
+payload or integration overhead (a 5× smaller payload was no faster). Treat it as
+temporary and re-measure rather than designing around it. Consequences:
+
+- The wizard raises `routing.judgeTimeout` to `DECISION_MIN_JUDGE_TIMEOUT_MS`
+  (15000) when decision mode is selected and the current value is lower, and
+  reports the change in its notification. With the LLM-judge default (5000) most
+  decision calls would be aborted and the router would hold every turn.
+- There is no save-time network probe (see the availability ladder above): the
+  wizard validates locally, and unreachable endpoints are handled at runtime.
+- Measured cost per call: ~$0.000095 (2265 input @ $0.042/M, output unbilled) vs
+  ~$0.00033 for the fast-tier LLM judge on the same rubric — cheaper, but ~3.5x
+  slower in this environment. Latency is the open question (ROADMAP: decision-mode
+  latency follow-up).
+
+**Judge UX contract.** The Judge is the compass `🧭` project-wide (status bar
+`🧭 judging…`, stats, status panel, wizard row) — never the scales `⚖️`. Inside
+the Judge menu the three modes carry the glyph of what they reuse or are:
+`🦾` reuse the Fast chain (the Fast tier's own glyph), `🔬` dedicated Judge LLM
+(`routing.judge.models`), `🧮` decision model (computes an answer, generates no
+text). The current mode is marked `●`, the others `○` (project convention), and
+every glyph is followed by exactly one space: advance width differs per glyph and
+font, so a missing separator reads as a layout bug (same class as the `🛡`→`🔒`
+fix of v1.5.1). These labels are pure functions (`judgeModeOptions`,
+`decisionSetupGuide`) so the copy stays under test.
 
 ## 9. Future Direction (Optional Enhancements)
 

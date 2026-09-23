@@ -13,8 +13,8 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 - latest: v1.6.0
 - last-updated: 2026-09
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
-- search-intents: "auto-route pi agent turns", "LLM as classifier", "two-tier model routing", "model failover on 429", "model failover on 402 insufficient balance", "codex usage limit failover", "cost vs quality model selection", "pi-coding-agent extension", "model cooldown exponential backoff", "JSON-mode classifier", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "auto switch models in pi agent", "task-level orchestration pi", "Smart CTO delegates to Fast subagents", "pi agent subagent orchestration", "per-worker cost attribution", "orchestration cost tracking pi", "TUI status dashboard pi", "pi model registry alignment", "router config matches /model", "ModelRegistry available snapshot"
-- features: two-tier routing, LLM judge, JSON-mode classifier, sliding-window downgrade gate, multi-model fallback chains, TUI config wizard, exponential-backoff runtime failover (429/402/5xx + Codex usage-limit exhaustion), shared cooldown map between routing and Judge, cache-aware routing (same-provider cache protection), cross-provider native, zero-config defaults, token throughput telemetry, TUI status dashboard (context-window + cache-hit gauges, chains with inline cooldowns, last decision, money), per-worker cost attribution (bounded orchestration ledger, `orchestration $X (N workers)`), EV economics routing with gear presets (eco/default/sport), task-level orchestration (on by default: Smart CTO delegates to Fast subagents; requires pi-subagents), pi model-registry aligned catalog (wizard + Judge + telemetry share `/model`-equivalent list)
+- search-intents: "why route between models", "provider model tiers pricing spread", "LLM routing cost savings", "OpenRouter auto router alternative", "Jev how it works", "TypeSafe Jev decision model", "Jev calibrated probability router", "decision model HTTP API", "auto-route pi agent turns", "pluggable judge model", "Jev judge pi", "decision model router judge", "LLM as classifier", "two-tier model routing", "model failover on 429", "model failover on 402 insufficient balance", "codex usage limit failover", "cost vs quality model selection", "pi-coding-agent extension", "model cooldown exponential backoff", "JSON-mode classifier", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "auto switch models in pi agent", "task-level orchestration pi", "Smart CTO delegates to Fast subagents", "pi agent subagent orchestration", "per-worker cost attribution", "orchestration cost tracking pi", "TUI status dashboard pi", "pi model registry alignment", "router config matches /model", "ModelRegistry available snapshot"
+- features: two-tier routing, task-level orchestration (Smart CTO delegates to Fast engineers), pluggable judge (reuse Fast chain / dedicated Judge LLM / decision model such as Jev — explained in the How-Jev-fits-in section), LLM judge, JSON-mode classifier, sliding-window downgrade gate, multi-model fallback chains, TUI config wizard, exponential-backoff runtime failover (429/402/5xx + Codex usage-limit exhaustion), shared cooldown map between routing and Judge, cache-aware routing (same-provider cache protection), cross-provider native, zero-config defaults, token throughput telemetry, TUI status dashboard (context-window + cache-hit gauges, chains with inline cooldowns, last decision, money), per-worker cost attribution (bounded orchestration ledger, `orchestration $X (N workers)`), EV economics routing with gear presets (eco/default/sport), task-level orchestration (on by default: Smart CTO delegates to Fast subagents; requires pi-subagents), pi model-registry aligned catalog (wizard + Judge + telemetry share `/model`-equivalent list)
 - direct-competitor: "@tenchi4u/pi-bifrost (7-stage heuristic + subscription quota) · pi-smart-router (12-stage local pipeline + HyDRA + Virtual Cost v2)"
 - author: green-dalii (https://github.com/green-dalii)
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.md
@@ -24,7 +24,7 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 
 # pi-shift-router
 
-> It's a CTO for the work that matters, an engineer for the workload.
+> **Stop paying flagship prices for routine turns — and stop handing your hardest turns to a cheap model.**
 
 [![npm](https://img.shields.io/npm/v/pi-shift-router.svg)](https://www.npmjs.com/package/pi-shift-router)
 [![Downloads](https://img.shields.io/npm/dm/pi-shift-router.svg)](https://www.npmjs.com/package/pi-shift-router)
@@ -38,31 +38,77 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 
 [English] | [简体中文](README.zh-CN.md)
 
-[🌐 Project site](https://shiftrouter.greenerai.top) | [⚙️ How it works](#how-it-works) | [🚀 Quick start](#quick-start) | [⚖️ vs. peer routers](#vs-peer-routers) | [❓ FAQ](#faq) | [🔧 Configuration](docs/CONFIG.md) | [🩺 Troubleshooting](docs/TROUBLESHOOTING.md)
+[🌐 Project site](https://shiftrouter.greenerai.top) | [⚙️ How it works](#how-it-works) | [🚀 Why now](#why-now) | [🧭 Jev: a judge that answers with a number](#jev-a-judge-that-answers-with-a-number-optional-backend-v170) | [⚖️ vs. the alternatives](#vs-the-alternatives) | [❓ FAQ](#faq) | [🔧 Configuration](docs/CONFIG.md) | [🩺 Troubleshooting](docs/TROUBLESHOOTING.md)
 
-Routine turns shouldn't cost flagship money. The turns that matter shouldn't be left to a cheap model.
+You already pay for two tiers of intelligence. You just can't use them per turn.
 
-pi-shift-router is a task-level router for [pi-coding-agent](https://github.com/earendil-works/pi): before every turn, a small LLM judge classifies your message into one of the two tiers you configure. The tier it picks then drives the entire turn — thinking, tool calls, code edits — at that tier's level. The judge only classifies; it never does the work.
+Every message you send makes the same silent bet: **is this task hard enough to deserve the expensive model?** Bet high and you burn money on `rename a variable`. Bet low and the model you picked writes a shallow fix for an architecture problem. So most people pick one model, set it forever, and quietly accept both losses.
 
-For complex tasks, the router graduates from *turn-level* routing to *task-level* orchestration: the Smart tier runs as a CTO that plans, delegates implementation to Fast subagents, reviews each result, and iterates — the judge's `smart` verdict routes to the right *execution shape*, not just a model. Orchestration is **on by default** (`auto` mode): simple tasks always stay on the plain router; only complex tasks orchestrate. Run `/router orchestrate off` to disable it entirely.
+pi-shift-router removes that bet. Before each turn, a tiny judge reads your message and picks a tier — then that tier drives the whole turn: thinking, tool calls, edits. You configure two chains; the router spends the expensive one only where it changes the outcome.
+
+It runs as a [pi-coding-agent](https://github.com/earendil-works/pi) extension — no separate server, no per-call setup; `pi install`, restart, it just works.
+
+```text
+🦾 [deepseek-v4.1-flash] → fix the failing test
+🧭 judging…
+🧠 [claude-fable-5]              ← "design the auth flow" → upgraded instantly
+⚠️ deepseek-v4.1-flash 429 → switching to glm-5.3-flash — retry in 1m
+🦾 [glm-5.3-flash]                    ← same-tier failover
+```
+
+And when the task is genuinely large, routing alone is not enough — the Smart tier stops being a single model and becomes a **CTO**: it plans the work, delegates implementation to Fast engineer subagents, reviews each result, and iterates. We call that **task-level orchestration**, and it is on by default for complex work.
 
 > **Prerequisite for orchestration:** advanced orchestration (Smart CTO delegating to Fast subagents) requires the [`pi-subagents`](https://www.npmjs.com/package/pi-subagents) extension (`pi install npm:pi-subagents`). Without it, the router keeps working exactly as before — base two-tier routing only; complex tasks run on the Smart tier directly, no delegation.
 
-```text
-🦾 [deepseek-v4-flash] → fix the failing test
-🧭 judging…
-🧠 [claude-opus-5]              ← "design the auth flow" → upgraded instantly
-⚠️ deepseek-v4-flash 429 → switching to glm-5.2 — retry in 1m
-🦾 [glm-5.2]                    ← same-tier failover
-```
-
 - **Upgrades are instant**; downgrades need 2 consecutive "fast" turns — no mid-session bouncing.
 - Per-tier fallback chains plus exponential-backoff cooldown on 429/5xx — turns keep flowing.
-- One config file — a no-op until you pick models; then routing just works (and complex tasks orchestrate automatically). The only runtime dependency is the host-provided `@earendil-works/pi-tui`.
+- One config file — a no-op until you pick models; then routing just works. The only runtime dependency is the host-provided `@earendil-works/pi-tui`.
 
 ```bash
 pi install npm:pi-shift-router   # then: /router config → /router status
 ```
+
+---
+
+## Why now
+
+Three things changed in the last year, and together they make per-turn routing the obvious default instead of a clever hack.
+
+**1. Providers tiered their own families — the spread is enormous.**
+
+| Family | Cheapest tier | Strongest tier | Spread |
+|---|---|---|---|
+| OpenAI | GPT-5.6 **Luna** $0.20/M | GPT-5.6 Sol $5 → GPT-6 Astra $10 | **50×** |
+| Anthropic | Haiku 4.5 $1 | Opus $5 → Fable 5 $10 | **10×** |
+| Google | Gemini Flash-Lite $0.10 | Flash $0.75 → 3.1 Pro $2 | **20×** |
+| GLM | **5.3-Flash** $0.15 | GLM-5.3 $1.40 | **9×** |
+| MiMo | $0.14 | $1.31 | **9×** |
+| DeepSeek | V4.1 **Flash** $0.30 | V4 Pro $1.32 | **4×** |
+
+Prices are input $/M from pi's own bundled catalog (41 providers, **1443** priced models) — open `/model` and check them yourself. The cheap tier is often *enough*: Z.ai ships GLM-5.3-Flash at a ninth of GLM-5.3's price, and one independent comparison found MiMo-V2.6-Flash **beating** the Pro tier on a benchmark while costing a third as much. "Bigger is better" is not a strategy; matching is.
+
+**2. Aggregators pooled hundreds of models — which makes the choice too big to make by hand.**
+
+OpenRouter alone lists **380** priced models, spanning **1579×** from Mistral Nemo ($0.019) to GPT-5.5 Pro ($30). Add Cloudflare AI Gateway (51), Vercel (236), `opencode` (70), Ollama's cloud models, and flat-rate pools like OpenCode Go's **28 models for $10/month** — where the marginal cost of switching is zero, so *not* routing is pure waste.
+
+**3. The judge itself became a model class.**
+
+Classifying a turn used to mean calling a frontier LLM and parsing JSON out of its prose. In September 2026 TypeSafe shipped **Jev**, the first *System One* model: you send a state and typed questions, it returns typed answers with calibrated probabilities, and it never generates a sentence. LiteLLM benchmarked the same idea inside its Auto Router and measured the `jev` classifier at **5.43× faster and 96% cheaper than a Haiku-class LLM classifier**.
+
+The last mile was always "something has to pick, on every single turn." That something is now cheap. Read [why a decision model is a better judge](#jev-a-judge-that-answers-with-a-number-optional-backend-v170) — and what we *don't* claim for it.
+
+---
+
+## vs. the alternatives
+
+| | What it does well | What it doesn't |
+|---|---|---|
+| **OpenRouter Auto Router** | Zero-config, market-driven model choice, `cost_tier` knob. Great for a raw API. | It optimizes for *quality*, not your bill — OpenRouter's own docs say routing to an expensive model "is working as designed". You don't set the tiers, see the verdict, or control the failure mode. |
+| **Cloudflare AI Gateway Dynamic Routing** | Versioned routing flows with quotas and fallbacks, at the gateway. | You author the graph per gateway, and it sees *requests*, not *tasks* — no notion of "this turn is architecture work". |
+| **A single strong model** | Never picks wrong. | You pay flagship rates for `fix the typo`, forever. |
+| **Doing it by hand** | Free. | Until the first time you forget to switch back — which is the whole problem. |
+
+**Where we differ in one line:** we route on *task shape*, inside your agent, with your chains — and every verdict is visible (`/router status`), with a two-tier split you define, in a place that also survives rate limits and 402s.
 
 ---
 
@@ -111,6 +157,8 @@ The price difference cancels: **the rule doesn't care how expensive your models 
 
 The judge output format is strict so small models parse it reliably: OpenAI-compatible endpoints get `response_format: json_object` (non-JSON is rejected at the API), Anthropic gets a `{` prefill to force JSON output. The status bar shows `🧭 judging…` while it runs. If the judge fails, the router holds its current tier — it never guesses.
 
+**Judge modes (v1.7.0).** `/router config` → 🧭 Judge has three modes: reuse the Fast tier chain (default — no extra config), a **dedicated Judge LLM chain** you edit like a tier, or a **decision model** (TypeSafe Jev / System One class). For how the Jev backend works end-to-end — request shape, response shape, threshold semantics, what the router does with the answer — see [Jev: a judge that answers with a number (Beta)](#jev-a-judge-that-answers-with-a-number-beta-backend-v170) below.
+
 ### When a provider goes down
 
 429 / 402 / 5xx / quota / token-plan exhausted / Codex `usage limit` / account balance empty? pi retries first (3× provider, 3× agent); if it still fails, the router takes over:
@@ -121,6 +169,145 @@ The judge output format is strict so small models parse it reliably: OpenAI-comp
 4. Later turns skip cooled models; a 2xx response clears the cooldown; a session restart resets everything.
 
 The judge shares the same cooldown map (it walks the full fast-tier chain before giving up). Manual override (`/route-force`) always bypasses cooldowns; auth/config errors (400/401) never trigger failover.
+
+---
+
+## Jev: a judge that answers with a number (Beta backend, v1.7.0+)
+
+The Judge has one job: produce `p(smart)`. An LLM writes a sentence and hopes the router
+can parse it. Jev — [TypeSafe's decision model](https://docs.typesafe.ai/introduction/quickstart) —
+returns the probability itself.
+
+> **Beta — opt-in, never the default.** Jev is in public beta: powerful and cheap, but
+> less independently validated than an LLM judge (a September 2026 study found decision
+> models trailing the best LLM on 14 of 15 annotation tasks) and its provider capacity is
+> still ramping. So it is the **third** row in `🧭 Judge`, labelled Beta, and the default
+> stays *reuse the Fast tier chain*. The router falls back either way: Jev → your LLM
+> judge → routing off.
+
+### Two kinds of model
+
+| | LLM judge (default) | Jev (decision model) |
+|---|---|---|
+| Output | prose → parse as JSON | `choice` + probability per option |
+| Failure mode | malformed JSON, refusal | a missing field |
+| Billed | input **+ output** | input only |
+| Explains | a `reason` it wrote | nothing — it writes no text |
+| Signal | self-reported `confidence` | calibrated probability |
+
+Jev has three primitives (Choice, Score, Noul). A router needs two: **Choice** for the
+tier (`fast` / `smart`), **Noul** for orchestration (calibrated yes/no, read at `≥ 0.5`).
+Both ride in one request.
+
+### Why it is a better judge, not just a cheaper one
+
+- **The router thresholds a number.** `pSmart ≥ θ` is arithmetic. Jev's answer needs no
+  parsing step — and deleting a step deletes a failure class: no JSON mode, no malformed
+  reply, no "judge failed → hold" because a model added a comma.
+- **Every turn pays the bill.** The Judge runs before every message. With no output
+  tokens, a verdict costs ~$0.0001.
+- **Calibration is the input EV wants.** A wrong verdict costs twice — wrong tier, wrong
+  spend — and `router.ts` prices it from a probability, not from a model's self-assessment.
+
+The clever part: a classifier whose output *is* its consumer's input — a probability, in
+the shape the router already reads.
+
+### The same shape LiteLLM benchmarked
+
+In September 2026 LiteLLM added a `jev` classifier to its Auto Router: **one `questions.tier` Choice whose `criteria` describe the configured tiers**, and the chosen tier then runs the completion — measured at **5.43× faster and 96% cheaper than a Haiku-class classifier**. That is this router's design too, built for a coding agent instead of a gateway: the judge picks a tier, that tier's chain drives the whole turn, and nothing else in the path changes.
+
+### Jev is opt-in Beta; your LLM judge is the default and the fallback
+
+`/router config` → `🧭 Judge` lists `🦾 Reuse the Fast tier chain (default)` first, then `🔬 Dedicated Judge LLM chain`, and Jev last (`🧮 Jev — decision model (Beta)`) — the legacy behaviour leads and the unproven option is opt-in. If Jev cannot be used — no authenticated endpoint, a retired model, a key you removed — **routing keeps working on the LLM judge** instead of stalling, the log records the degradation, and the menu tells you what is actually judging (`Jev unavailable — LLM judge active`).
+
+The boundary stays sharp where it matters: a *configuration* that rotted degrades smoothly, but a *transient* failure (timeout, 5xx, malformed answer) still **holds** rather than silently swapping judges mid-flight. And the default stays `fast-chain`, so upgrading never re-judges you with a different model class unless you ask.
+
+### Where we disagree with the hype
+
+Decision models are a week old (in industry time) and the evidence is mixed: independent work in September 2026 found a decision model trailing the per-task best LLM on **14 of 15** annotation tasks. So we ship it as an explicitly **Beta, opt-in** row — labelled as such in the menu and placed after both LLM judges — while the LLM judge stays the default path. θ is left alone until it can be re-derived from measured data (v1.8.0).
+
+### Request and answer
+
+```jsonc
+// POST /v1/systemone — both questions, one round trip
+{
+  "model": "jev-latest",
+  "state": "<recent messages, assembled like the LLM Judge prompt>",
+  "questions": {
+    "tier":        { "type": "choice",  "instructions": "<judge.md rubric>",
+                     "criteria": { "fast": "…", "smart": "…" } },
+    "orchestrate": { "type": "noul",    "instructions": "…",
+                     "criteria": { "true": "…", "false": "…" } }
+  }
+}
+```
+
+```jsonc
+// real response, measured
+{ "model": "jev-1.13.0",
+  "answers": {
+    "tier":        { "type": "choice", "choice": "fast",
+                     "probabilities": { "fast": 0.99, "smart": 0.01 },
+                     "confidence": 0.97 },
+    "orchestrate": { "type": "noul", "noul": 0.13 } },
+  "usage": { "input_tokens": 2265, "output_tokens": 50 } }  // output reported, not billed
+```
+
+| Field | What it decides |
+|---|---|
+| `tier.choice` | `fast` or `smart` — anything else ⇒ **hold** |
+| `tier.probabilities[tier]` | the number θ eats (`0.99`) |
+| `orchestrate.noul` | `≥ 0.5` ⇒ a smart verdict may delegate |
+| `usage.input_tokens` | the only billed side |
+
+> `confidence` is not a second opinion: it is `(N·p_max − 1)/(N − 1)` — the top probability
+> rescaled (`0.99` → `0.97` above). So the router reads `probabilities[tier]`, and logs the
+> **resolved** version, because a version move can shift the distribution behind θ.
+
+### Use `jev-latest`, and watch the version
+
+pi ships no Jev provider — add one to `~/.pi/agent/models.json`:
+
+```jsonc
+{ "providers": { "typesafe": {
+    "baseUrl": "https://api.typesafe.ai",
+    "api": "typesafe-decisions",     // the marker this router looks for
+    "apiKey": "$TYPESAFE_API_KEY",   // or a literal key
+    "models": [ { "id": "jev-latest", "name": "Jev", "input": ["text"],
+                  "contextWindow": 64000, "cost": { "input": 0.042, "output": 0 } } ] } } }
+```
+
+`jev-latest` is the default on purpose. A pinned build fails the worst way: the day the
+vendor retires it, the Judge stops working. The alias never retires, and its moves are
+visible — the response always reports the resolved id, and the router logs it when it
+changes. Pin `jev-1.13.0` only if you need byte-identical reproducibility.
+
+Then `/router config` → `🧭 Judge` → `🧮 Jev — decision model (Beta)` → `typesafe/jev-latest`.
+The wizard validates the choice locally (no network call at save time) and raises
+`judgeTimeout` to 15 s (telling you when it does — the 5 s default would abort most
+decision calls). If Jev stops answering, the router steps down the ladder instead of
+stalling: **Jev → your LLM judge → routing off**, with the model you started the session
+on restored and one notice. Keys come from the
+[TypeSafe console](https://console.typesafe.ai/settings/keys); Jev is in early access.
+Jev is judge-only here: it is filtered out of the Fast/Smart pickers, because pi cannot
+stream that protocol as a chat model.
+
+### Today's latency is beta capacity
+
+Measured: **1.4–6.6 s** per verdict (median ~5 s), and a 5× smaller payload is no faster —
+the wait is provider-side compute during Jev's public beta, not something an integration
+can optimize away. Same rubric on a fast LLM judge: ~1.4 s.
+
+So use decision mode where determinism and cost beat seconds — batch work, background
+tasks, high-volume routing — and keep the LLM judge for interactive turns until beta
+capacity improves — nothing here changes when it does, the protocol is the same. Either way, a failure
+**holds**: a verdict is never fabricated, and never delegated to a model you did not pick.
+
+### What we don't do
+
+θ and `minConfidence` stay on the LLM scale; re-deriving them for calibrated probabilities
+is v1.8.0 work (SPEC §2.3). No `reason` in the dashboard — a decision model writes nothing.
+The audit log keeps the full response.
 
 ---
 
@@ -269,7 +456,7 @@ A themed dashboard opens (q / Esc closes): your live tier and model, context-win
 
 ```
 Money · this session
-  saved   $2.742 of $3.210  (85%)  vs all-smart: opencode-go/deepseek-v4-flash
+  saved   $2.742 of $3.210  (85%)  vs all-smart: opencode-go/deepseek-v4.1-flash
   spent   $0.465  fast ▓░░░░░░░░░ 10% · smart ▓▓▓▓▓▓▓▓░░ 90%
   orchestration  $0.0689  (5 workers)
 ```
@@ -281,9 +468,7 @@ delegation cost is never hidden inside the main-agent figures.
 
 The baseline asks: *what would this session have cost if every turn ran on your configured Smart-tier model (priority 1) — i.e. no router?* The difference is your savings. If pricing is missing (fully-local session with no `models-store.json` pricing), it shows `baseline: unavailable` instead of a made-up number.
 
----
-
-## vs. peer routers
+### Other pi routers
 
 |  | 🦾 **pi-shift-router** (this) | [@tenchi4u/pi-bifrost](https://pi.dev/packages/@tenchi4u/pi-bifrost?name=router&type=extension) | [pi-smart-router](https://pi.dev/packages/pi-smart-router?name=router&type=extension) |
 |---|---|---|---|
@@ -312,6 +497,18 @@ Yes. Each tier is an ordered list of `{provider, model, priority}` — combine f
 ### Will it downgrade Smart too early?
 
 Downgrades need **two consecutive decisive fast decisions** (`economics.downgradeMemory`, default 2) plus the cache-aware idle gate — a single routine turn never drops you, and a hold (confidence < `minConfidence`) or any smart decision resets the streak. Tune `economics.reworkPenalty` (default 3, θ ≈ 0.33): raise it to 5 for cheaper routing, lower it to 2 to stay on Smart longer. Upgrades are always immediate on a decisive smart decision.
+
+### How is this different from OpenRouter's Auto Router?
+
+Auto Router picks from the *whole market* and optimizes for quality — its own docs note that an expensive pick "is working as designed". This router picks between **two chains you defined**, inside your agent, on the *task shape* of the turn. You set the tiers, you see every verdict in `/router status`, and the failure modes (429/402 failover, cooldown) are yours to configure. They compose: point a tier at an OpenRouter model if you like.
+
+### What if the judge picks the wrong tier?
+
+Upgrades are instant, downgrades need two consecutive `fast` verdicts, and a low-confidence verdict is ignored entirely (`window.minConfidence`) rather than acted on. If the judge itself fails, the router holds its current tier instead of guessing — and if your judge *configuration* became unusable (retired model, removed key), it falls back to the LLM judge and says so. `/router status` shows the recent verdict window, so you can see whether the threshold matches your work.
+
+### Do I need multiple providers?
+
+No. Two chains from one provider already pay off — every family spans 4–50× in price, and cache-aware routing keeps same-provider switches from paying full price for a repeated prompt. Multiple providers add failover: when one returns 429 or `Insufficient Balance`, the next in the chain takes the turn.
 
 ### Can I disable it without uninstalling?
 
@@ -351,6 +548,6 @@ The Smart tier plans and reviews; the Fast tier implements — workers run `fres
 
 - **[pi-coding-agent](https://github.com/earendil-works/pi)** by earendil-works — the host agent.
 - **[pi-tui](https://www.npmjs.com/package/@earendil-works/pi-tui)** — TUI primitives used by the config wizard.
-- **Peer routers compared above** — [@tenchi4u/pi-bifrost](https://github.com/the-matt-moo/pi-bifrost) and [pi-smart-router](https://github.com/beettlle/pi-smart-router), same problem, different trade-offs; see [vs. peer routers](#vs-peer-routers).
+- **Peer routers compared above** — [@tenchi4u/pi-bifrost](https://github.com/the-matt-moo/pi-bifrost) and [pi-smart-router](https://github.com/beettlle/pi-smart-router), same problem, different trade-offs; see [vs. the alternatives](#vs-the-alternatives).
 
 **Author & License** — pi-shift-router by [green-dalii](https://github.com/green-dalii), licensed under [MIT](LICENSE) © 2026.

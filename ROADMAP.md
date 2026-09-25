@@ -38,12 +38,12 @@ Release history and planned work for **pi-shift-router**.
 
 ## Planned
 
-**Priority order:** **Judge modes (v1.7.0)** → effort control (SPEC §9.5) → routing asymmetry (§2.3) → config-layer switch (§5) → Phase 3 breadth. Effort control is the only one that can ship **without** touching θ: it is additive, opt-in, and its trigger is read off the verdict the Judge already returns. The Judge-modes feature is orthogonal to the other two and is the enabler for the threshold re-derivation later (see sub-plan below); the routing-asymmetry revision must **not** be folded into it (θ stays untouched until real confidence data exists).
+**Priority order:** **Judge modes (v1.7.0)** → effort control **static pins** (SPEC §9.5) → routing asymmetry (§2.3) → config-layer switch (§5) → Phase 3 breadth. Effort control ships without touching θ: it is additive and opt-in. Its **dynamic** half was shelved by G3 (see the sub-plan) — the static half is what the evidence actually pays for. The Judge-modes feature is orthogonal to the other two and is the enabler for the threshold re-derivation later (see sub-plan below); the routing-asymmetry revision must **not** be folded into it (θ stays untouched until real confidence data exists).
 
 | Feature | Version | Notes |
 |---------|---------|-------|
 | **Judge modes: fast-chain / dedicated LLM / decision model (Jev)** | **v1.7.0 — implemented, awaiting e2e** | SPEC §8. Additive: the LLM judge is retained. `routing.judge.mode` with `fast-chain` (default, current behaviour), `custom` (dedicated Judge chain, reuses the chain editor), `decision` (typed-answer models — Jev/System One class). See the sub-plan below. |
-| **Effort control (thinking level)** — boundary-band only, opt-in, off by default | proposed v1.8.0 | SPEC §9.5. Three relative directions (`default` / one notch `up` / one notch `down`), fast = up only, smart = down only, static pins for the "nearly free" and "dominated" levels. Zero θ/cache change. Evidence: MEMORY 2026-09-23. Tracking: [#43](https://github.com/green-dalii/pi-shift-router/issues/43). Sub-plan below. |
+| **Effort control (thinking level)** — static pins only; dynamic step shelved by G3 | proposed v1.8.0 | SPEC §9.5. Pin any supported level per tier (`off`…`max`), opt-in, off by default. Zero θ/cache change. Evidence: MEMORY 2026-09-23 and 2026-09-25 (G3). Tracking: [#43](https://github.com/green-dalii/pi-shift-router/issues/43). Sub-plan below. |
 | Routing asymmetry (§2.3) — directional θ, fast-band removal, hold semantics, cache gate | v1.8.0 | The upgrade-eager / downgrade-sticky fix: today any decisive `smart` verdict upgrades (θ always < minConfidence) while downgrades need conf > 0.78 **and** 2 consecutive verdicts **and** a 5-minute cache gate. Re-derive thresholds from measured confidence data once Judge modes ship. |
 | Config-layer switch (§5) — pick the layer the wizard edits, patch writes | v1.9.0 | Layer picker + provenance badges + override warning; write only changed keys so the other layer is never polluted (today `saveConfig` writes the whole merged snapshot). |
 | Examples directory | ongoing | Sample configs (frontend / ML / cross-provider cost-saving) for documentation. |
@@ -82,14 +82,17 @@ One `models` list; `mode` only selects the source. Absent `judge` ⇒ `fast-chai
 
 ### Effort control — implementation sub-plan (SPEC §9.5, proposed v1.8.0)
 
-**Goal.** Buy the boundary cases the tier decision cannot settle, without touching
-tier routing, θ, or the cache-aware gate. Contract lives in SPEC §9.5; the measured
-basis (Artificial Analysis Intelligence-Index-vs-cost chart, five findings) lives in
-MEMORY 2026-09-23 — neither is repeated here.
+**Goal.** Give the user a per-tier effort **pin** that extends a tier's useful reach
+(and lets the dominated levels be avoided), without touching tier routing, θ, or the
+cache-aware gate. Contract lives in SPEC §9.5; the measured basis (Artificial Analysis
+chart plus the G3 verdict histogram) lives in MEMORY — neither is repeated here.
+
+**Outcome so far:** G1 settled, **G3 ran and killed the dynamic half**, G2 still open and
+now only relevant to the shelved design. Phase 1 is unaffected by all three.
 
 **Gates — measurement before any implementation.**
 
-- [ ] **G1 — cache safety. Settled.** Changing the level without changing the model does
+- [x] **G1 — cache safety. Settled.** Changing the level without changing the model does
       not invalidate the prompt cache (thinking is a request-level parameter, not part of
       the cached prefix). Code path agrees; recorded as settled so nobody re-litigates it.
 - [ ] **G2 — cost curve.** Cost per task for the same model at each level, from the
@@ -97,12 +100,18 @@ MEMORY 2026-09-23 — neither is repeated here.
       counter-intuitive half — does *lowering* it raise task cost (more turns, more
       rework)? Needed for the crossover guard's enforcement and for ever letting `low`
       exist. Uses per-model price data we already have plus observed output tokens.
-- [ ] **G3 — marginal-band calibration.** Zero new code: histogram the `pSmart` values we
-      already log, then pick `band` so the sharpness contract (default ≥ 85%) holds on
-      real sessions. If no band both fits the data and separates difficulty, the dynamic
-      half does not ship — only the static pins do.
+- [x] **G3 — marginal-band calibration. Ran 2026-09-25; the dynamic half does not ship
+      as specified.** Zero new code: histogrammed the `pSmart` values in the router log
+      (123 verdicts). `pSmart` is bimodal — 68% of verdicts sit in 0.8–0.9 and almost
+      nothing lands near θ (1 verdict at 0.3, 2 at 0.4). At θ = 0.33 a band of 0.15 moves
+      4.9% of turns and 0.25 moves 14.6% (the sharpness contract caps the band at 0.25);
+      **`↓` never fires at all**, because a smart verdict is always confident. The rate is
+      also gear-dependent — 3.3% under `eco`, **24.4% under `sport`** for the same band.
+      Numbers and caveats: SPEC §9.5. Consequence: Phase 2 below is shelved, Phase 1
+      proceeds, and a future dynamic trigger must come from the Judge as a first-class
+      field (the decision model can carry the question in the same request).
 
-**Phase 1 — static only (no Judge change).**
+**Phase 1 — static only (no Judge change). The planned half.**
 - [ ] `routing.effort` schema + `normalizeEffort()` (absent ⇒ disabled; unknown direction ⇒
       `off` + log, mirroring `normalizeJudgeMode`); redeclare the 7-value level union in
       `types.ts` (pi does not re-export `ThinkingLevel`; `pi-ai` is not an allowed runtime
@@ -118,7 +127,12 @@ MEMORY 2026-09-23 — neither is repeated here.
       line. Tests: static pin applied, unsupported pin ⇒ no change + log, byte-identical
       when disabled.
 
-**Phase 2 — boundary step (Judge-driven).**
+**Phase 2 — boundary step (Judge-driven). SHELVED by G3 — not planned, kept for the
+record.** It is revived only when the Judge reports the margin itself and that signal is
+shown to predict required effort; a band on a self-reported confidence is not that signal.
+The steps below describe the shelved design so it is not re-derived.
+
+
 - [ ] Band evaluation in `before_agent_start`: marginal fast ⇒ up, marginal smart ⇒ down,
       hold/non-marginal ⇒ baseline. One notch, never more; directions per tier as the
       SPEC table says; fast never steps down.
@@ -129,7 +143,7 @@ MEMORY 2026-09-23 — neither is repeated here.
       without `reasoning` (no-op + one log), user `/thinking max` respected, failover keeps
       the intent, abort/restore path.
 
-**Phase 3 — economics (only after G2).**
+**Phase 3 — economics (only after G2; moot while the dynamic half is shelved).**
 - [ ] Decide whether the crossover guard becomes enforced-by-default, and whether the
       savings figure gains an effort dimension. θ and `minConfidence` are not touched by
       this feature at any phase.
@@ -140,10 +154,11 @@ MEMORY 2026-09-23 — neither is repeated here.
       current behaviour is preserved. Orchestration is where the token spend is largest, so
       this is the best ratio of savings to risk in the whole feature.
 
-**Acceptance for the feature as a whole.** With `effort.enabled: false` (the default) the
-suite is unchanged and a byte-identical config produces byte-identical behaviour; with it
-enabled, effort moves only inside the band, never more than one notch, never across tiers,
-and the session effort distribution is reported.
+**Acceptance for the planned half.** With `effort.enabled: false` (the default) the suite
+is unchanged and a byte-identical config produces byte-identical behaviour; with it
+enabled, the pin is applied after every model switch (the `setModel` funnel), respects the
+model's supported ladder, falls back to no-intervention with one log line when the level
+is unsupported, and never crosses tiers.
 
 ### Task-level orchestration — implementation sub-plan (SPEC §9.3)
 

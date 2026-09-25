@@ -10,6 +10,50 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-09-25 — G3 killed the dynamic effort half; static pins remain
+
+**Decision.** Effort control ships as **static per-tier pins only**. The dynamic
+boundary-step half (SPEC §9.5) is **shelved**: not planned, kept as design of record so it
+is not re-derived.
+
+**Why.** G3 was designed to be able to kill it, and it did. Histogramming the 123 verdicts
+already in the router log: `pSmart` is strongly **bimodal** — 68% of verdicts sit in
+0.8–0.9, and the neighbourhood of θ = 0.33 contains 1 verdict at 0.3 and 2 at 0.4. At
+θ = 0.33 a band of 0.15 moves 4.9% of turns; 0.25 moves 14.6% and is the widest band that
+still satisfies the ≥ 85% default contract. Two consequences do the killing:
+
+1. **The `↓` direction never fires.** A smart verdict is always confident (pSmart ≥ 0.78
+   in the sample), so the "expensive model on a task that didn't need it" case — the
+   second of the two motivations for the feature — is simply not detectable from a
+   self-reported confidence.
+2. **The rate is gear-dependent.** The same band fires 3.3% of turns under `eco`
+   (θ = 0.50) and **24.4% under `sport`** (θ = 0.20). A trigger whose frequency swings 7×
+   with a setting the user changes for cost reasons is not a trigger we want to ship.
+
+That leaves a feature that would cost the schema, the `setModel` funnel, baseline/sticky-
+level handling, a wizard row, telemetry and tests in order to act on ~5% of turns in one
+direction. The chart's actual value is a configuration fact (pin `high` on the fast tier
+to extend its reach; know that `max` is dominated), which is Phase 1 and needs none of it.
+
+**Caveats, recorded so the numbers are not over-read.** 123 verdicts, all from the
+author's own sessions during verbose-log periods; the *bimodality* is the robust part, the
+rates are order of magnitude. The sample also predates any effort feature, so it measures
+the LLM judge's confidence shape, not a hypothetical decision-model one.
+
+**What would revive the dynamic half.** A **first-class margin field from the Judge** — not
+a band on self-reported confidence. A decision model can carry that question in the same
+request for free, which is the cheapest route to testing it. It still needs its own gate:
+show that the signal predicts required effort at all before building anything on it.
+
+**Rejected.** *Widening the band to make the feature fire more* (0.30 breaks the sharpness
+contract and is still 99% one-directional); *quantile-based triggering* (the least-
+confident decile is confidence ≈ 0.78, i.e. semantically far from the boundary — it would
+step effort down on verdicts the Judge is fairly sure are smart); *shipping the dynamic
+half because it is already specified* (specification is not evidence).
+
+**Records.** Contract: SPEC §9.5. Plan: ROADMAP sub-plan (Phase 2 marked shelved).
+Tracking: [#43](https://github.com/green-dalii/pi-shift-router/issues/43).
+
 ## 2026-09-23 — Effort control revived: boundary-only, opt-in, asymmetric
 
 **Context.** Tier routing exists because the capability/price gap between Fast and Smart

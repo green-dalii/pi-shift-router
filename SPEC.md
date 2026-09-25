@@ -1146,7 +1146,42 @@ with their rationale, not kept here. The effort-control idea that was withdrawn 
 v0.8.x is **not** on that list: it is revived and specified in §9.5, with the reason
 the earlier objection no longer applies.
 
-### 9.5 Effort control (proposed, v1.8.0)
+### 9.5 Effort control — static pins planned, dynamic step shelved (G3)
+
+**G3 outcome (2026-09-25, 123 verdicts from the router log).** `pSmart` is strongly
+bimodal — 21 verdicts at 0.1 and 84 (68%) in 0.8–0.9, with almost nothing near θ: the
+neighbourhood of θ = 0.33 holds 1 verdict at 0.3 and 2 at 0.4. Consequences, at θ = 0.33:
+
+| band | turns that move | of which `↑` / `↓` | default share |
+|---|---|---|---|
+| 0.10 | 1.6% | 2 / 0 | 98.4% |
+| 0.15 | 4.9% | 6 / 0 | 95.1% |
+| 0.25 | 14.6% | 18 / 0 | 85.4% |
+| 0.30 | 27.6% | 32 / 2 | 72.4% (breaks the ≥ 85% contract) |
+
+So the sharpness contract holds for `band ≤ 0.25`, which means the dynamic path fires on
+a small minority of turns — and **`↓` (the smart-down direction, i.e. the "expensive model
+on a task that didn't need it" case) never fires at all** under the LLM judge, because a
+smart verdict is always confident (pSmart ≥ 0.78 in this sample). The rate is also gear-
+dependent: at `band = 0.15` it is 3.3% under `eco` (θ = 0.50) and **24.4% under `sport`
+(θ = 0.20)** — the same user-visible band, six times the intervention rate.
+
+**Decision: Phase 1 (static pins) is the planned half; the dynamic step is shelved.** The
+chart's value is a *configuration* fact — pin `high` on the fast tier to extend its
+reach, know that `max` is dominated — and it needs no trigger, no judge change, and no
+per-turn machinery. The dynamic half would cost the schema, the `setModel` funnel, the
+baseline/sticky-level handling, a wizard row, telemetry and tests to act on ~5% of turns
+in one direction only. It is revived only if the Judge reports the margin *itself* (a
+first-class field rather than a band on a self-reported confidence — nearly free on a
+decision model, since one request can carry the question), and only after that signal is
+shown to predict required effort at all. Stale verdicts in the sample above are the
+author's own verbose-log periods; the bimodality is the robust part, the rates are
+order-of-magnitude.
+
+**Status: designed, not implemented.** Opt-in and off by default — absent config means
+the router never calls `setThinkingLevel`, so upgrades stay byte-identical. Everything
+from *Static pinning* onward is the design of record for the **static** half plus the
+shelved dynamic half, retained so the reasoning is not re-litigated.
 
 **Status: designed, not implemented.** Opt-in and off by default — absent config means
 the router never calls `setThinkingLevel`, so upgrades stay byte-identical.

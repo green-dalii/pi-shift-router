@@ -314,6 +314,14 @@ interface ShiftRouterConfig {
     economics: { reworkPenalty: number; downgradeMemory: number; mode?: "eco" | "default" | "sport" };
                                                             // R default 3 (θ = 1/R); mode
                                                             // preset authoritative when set
+    effort?: {                                              // proposed v1.8.0 — semantics in §9.5
+      enabled: boolean;                                     // default false ⇒ router never sets a level
+      band: number;                                         // marginal band on |pSmart − θ|
+      static?: { fast?: ThinkingLevel; smart?: ThinkingLevel };
+                                                            // pin any supported level, unaffected by the band
+      dynamic?: { fast?: "up" | "off"; smart?: "down" | "off" };
+                                                            // direction permission; one notch, never more
+    };
   };
   ux: {
     quietMode: boolean;
@@ -1133,5 +1141,92 @@ the prompt. Interrupts mid-orchestration: cancel/reset semantics via
   capacity comes online; if seconds persist, position decision mode as
   batch/background-only.
 
-Withdrawn ideas (multilingual Judge-prompt translations, per-tier thinking level)
-are recorded in MEMORY.md with their rationale, not kept here.
+Withdrawn ideas (multilingual Judge-prompt translations) are recorded in MEMORY.md
+with their rationale, not kept here. The effort-control idea that was withdrawn in
+v0.8.x is **not** on that list: it is revived and specified in §9.5, with the reason
+the earlier objection no longer applies.
+
+### 9.5 Effort control (proposed, v1.8.0)
+
+**Status: designed, not implemented.** Opt-in and off by default — absent config means
+the router never calls `setThinkingLevel`, so upgrades stay byte-identical.
+
+**What it is for.** Tier routing carries most of the value: the price and capability gap
+between the tiers *is* the feature. Effort exists for the one region where tier routing
+is least decisive — a verdict that lands just inside a tier's boundary, where the
+alternatives are a tier switch (loses the prompt cache, 4–50× price) or leaving a
+marginal task on a tier that may be wrong either way. Effort changes *how much the
+already-chosen model thinks*, never which model, so it is cache-safe by construction and
+cannot overlap with tier routing. The measured evidence behind the shape of this section
+(Artificial Analysis, Intelligence Index vs cost per task) is one MEMORY entry:
+2026-09-23 *Effort control revived*.
+
+**Three directions, relative rather than absolute.**
+
+| Direction | Meaning |
+|---|---|
+| `default` | Do not intervene; restore the session baseline |
+| `high` | One supported notch **up** from the current level |
+| `low` | One supported notch **down** from the current level |
+
+These are not pi level names. The ladder is the model's own supported list, derived the
+way pi derives it: no `reasoning` ⇒ `["off"]`; a `thinkingLevelMap` entry of `null`
+removes a level; `xhigh`/`max` require an explicit map entry. One notch is therefore
+capability-correct on every model, needs no knowledge of the model's configured default,
+and can never ask for a level pi would silently clamp. `ThinkingLevel` is pi's 7-value
+union (`off|minimal|low|medium|high|xhigh|max`), redeclared in `types.ts` — the package
+root does not re-export it, and `pi-ai` is not an allowed runtime dependency.
+
+**Trigger: the boundary band only.** Effort moves if and only if the verdict is marginal
+— `|pSmart − θ| < band` — and then only in the direction of the margin: a fast verdict
+inside the band steps **up**, a smart verdict inside the band steps **down**. Outside the
+band, and on any hold (`confidence < minConfidence`), the router does not intervene. The
+sharp distribution is therefore structural rather than requested: effort can only be
+spent where the router is genuinely undecided.
+
+**One direction per tier, one notch, never more.**
+
+| Tier | Allowed dynamic direction | Why |
+|---|---|---|
+| fast | `up` only | Cheap insurance for a fast-tier task that is harder than typical. `low` is **forbidden**: a weak model with less thinking produces rework, and rework costs more than the thinking it saved (measured: a model's low-effort setting can be dearer than its max). |
+| smart | `down` only | The "expensive model on a task that did not need it" case. `up` is deliberately *not* dynamic: when a model's `high` is nearly free, that is a configuration fact (`static` pin), not a per-turn judgment. |
+
+**The dynamic ladder is bounded to `[low … high]`.** One notch up from a model whose
+ladder supports `xhigh`/`max` would otherwise land on them, so the bound is explicit: if
+the next notch lies outside `[low, high]`, the router does not move. The excluded range is
+not merely cautious — `xhigh`/`max` are the flat-and-dominated end of the measured curve,
+and `off`/`minimal` is where a weak model starts producing rework. Anything outside the
+bound is a **configuration** decision, not a per-turn one.
+
+**Static pinning.** `static.fast` / `static.smart` accept any supported level — including
+`off`, `minimal`, `xhigh` and `max` — and apply regardless of the band. This is where
+"this model's `high` is nearly free" and "this model's `max` is dominated" belong.
+
+**Invariants.**
+
+1. Effort never changes the tier, and a wrong tier is never repaired with effort.
+2. No intervention on a non-marginal verdict, or on a hold.
+3. At most one notch per turn, and never outside `[low, high]`.
+4. Only levels from the model's supported ladder are requested (filter before stepping).
+5. Effort never enters the θ/EV math or the cache-aware gate.
+6. **Cost-crossover guard**: if the adjusted turn is predicted to cost at least as much
+   as the neighbouring tier's baseline, the adjustment is abandoned and the tier decision
+   stands. Enforcing this needs per-level output-token estimates (ROADMAP Gate 2).
+
+**Session state and ordering.** A baseline level is captured at `session_start`; the
+router restores it on `default` turns (pi's level is otherwise sticky), and updates it
+whenever a level change originates outside the router (the `thinking_level_select`
+event). `setModel()` re-derives the level from pi's own defaults, so **every** model
+switch — tier switch, failover, session restore — must funnel through one
+`applyModelAndEffort()` that re-applies the intended level afterwards.
+
+**Telemetry.** Per turn: the applied level and its reason
+(`baseline|marginal-up|marginal-down|no-capability`). Per task and per session: the
+effort distribution, with the sharpness contract **default ≥ 85%, up ≤ 10%, down ≤ 5%**
+(after ≥ 20 turns) reported, never auto-corrected. Cost accounting keeps its present
+shape: effort is a quality knob, and no effort dimension enters the savings figure until
+the cost curve is measured.
+
+**Out of scope.** No effort × tier matrix; no dynamic `xhigh`/`max`; no heuristic trigger
+(message length, token counts and tool counts are forbidden inputs, exactly as the Judge
+forbids keyword rules); no change to θ, `minConfidence`, or cache-aware behaviour.

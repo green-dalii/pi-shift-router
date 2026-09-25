@@ -38,11 +38,12 @@ Release history and planned work for **pi-shift-router**.
 
 ## Planned
 
-**Priority order:** **Judge modes (v1.7.0)** → routing asymmetry (§2.3) → config-layer switch (§5) → Phase 3 breadth. The Judge-modes feature is orthogonal to the other two and is the enabler for the threshold re-derivation later (see sub-plan below); the routing-asymmetry revision must **not** be folded into it (θ stays untouched until real confidence data exists).
+**Priority order:** **Judge modes (v1.7.0)** → effort control (SPEC §9.5) → routing asymmetry (§2.3) → config-layer switch (§5) → Phase 3 breadth. Effort control is the only one that can ship **without** touching θ: it is additive, opt-in, and its trigger is read off the verdict the Judge already returns. The Judge-modes feature is orthogonal to the other two and is the enabler for the threshold re-derivation later (see sub-plan below); the routing-asymmetry revision must **not** be folded into it (θ stays untouched until real confidence data exists).
 
 | Feature | Version | Notes |
 |---------|---------|-------|
 | **Judge modes: fast-chain / dedicated LLM / decision model (Jev)** | **v1.7.0 — implemented, awaiting e2e** | SPEC §8. Additive: the LLM judge is retained. `routing.judge.mode` with `fast-chain` (default, current behaviour), `custom` (dedicated Judge chain, reuses the chain editor), `decision` (typed-answer models — Jev/System One class). See the sub-plan below. |
+| **Effort control (thinking level)** — boundary-band only, opt-in, off by default | proposed v1.8.0 | SPEC §9.5. Three relative directions (`default` / one notch `up` / one notch `down`), fast = up only, smart = down only, static pins for the "nearly free" and "dominated" levels. Zero θ/cache change. Evidence: MEMORY 2026-09-23. Tracking: [#43](https://github.com/green-dalii/pi-shift-router/issues/43). Sub-plan below. |
 | Routing asymmetry (§2.3) — directional θ, fast-band removal, hold semantics, cache gate | v1.8.0 | The upgrade-eager / downgrade-sticky fix: today any decisive `smart` verdict upgrades (θ always < minConfidence) while downgrades need conf > 0.78 **and** 2 consecutive verdicts **and** a 5-minute cache gate. Re-derive thresholds from measured confidence data once Judge modes ship. |
 | Config-layer switch (§5) — pick the layer the wizard edits, patch writes | v1.9.0 | Layer picker + provenance badges + override warning; write only changed keys so the other layer is never polluted (today `saveConfig` writes the whole merged snapshot). |
 | Examples directory | ongoing | Sample configs (frontend / ML / cross-provider cost-saving) for documentation. |
@@ -78,6 +79,71 @@ One `models` list; `mode` only selects the source. Absent `judge` ⇒ `fast-chai
 - [x] **Phase E — docs.** SPEC §8 (protocol), §5.2 (schema), §2.3 (confidence semantics note: native probabilities when mode=decision), §6 (wizard); docs/CONFIG ×2 + MODELS ×2; README ×2 + command table; CHANGELOG; MEMORY.md entry.
 
 **Risks / open items.** Response envelope must be confirmed against a live key (parse tolerantly meanwhile); gateway routes (OpenRouter / Vercel / Cloudflare) may differ — treat `baseUrl` as configurable; Jev's Chinese quality on our prompts is unmeasured → the retained LLM judge is the fallback; early access via TypeSafe console, so the probe must fail gracefully with an actionable message.
+
+### Effort control — implementation sub-plan (SPEC §9.5, proposed v1.8.0)
+
+**Goal.** Buy the boundary cases the tier decision cannot settle, without touching
+tier routing, θ, or the cache-aware gate. Contract lives in SPEC §9.5; the measured
+basis (Artificial Analysis Intelligence-Index-vs-cost chart, five findings) lives in
+MEMORY 2026-09-23 — neither is repeated here.
+
+**Gates — measurement before any implementation.**
+
+- [ ] **G1 — cache safety. Settled.** Changing the level without changing the model does
+      not invalidate the prompt cache (thinking is a request-level parameter, not part of
+      the cached prefix). Code path agrees; recorded as settled so nobody re-litigates it.
+- [ ] **G2 — cost curve.** Cost per task for the same model at each level, from the
+      optional-level set we can measure: does raising effort buy enough, and — the
+      counter-intuitive half — does *lowering* it raise task cost (more turns, more
+      rework)? Needed for the crossover guard's enforcement and for ever letting `low`
+      exist. Uses per-model price data we already have plus observed output tokens.
+- [ ] **G3 — marginal-band calibration.** Zero new code: histogram the `pSmart` values we
+      already log, then pick `band` so the sharpness contract (default ≥ 85%) holds on
+      real sessions. If no band both fits the data and separates difficulty, the dynamic
+      half does not ship — only the static pins do.
+
+**Phase 1 — static only (no Judge change).**
+- [ ] `routing.effort` schema + `normalizeEffort()` (absent ⇒ disabled; unknown direction ⇒
+      `off` + log, mirroring `normalizeJudgeMode`); redeclare the 7-value level union in
+      `types.ts` (pi does not re-export `ThinkingLevel`; `pi-ai` is not an allowed runtime
+      dependency).
+- [ ] Capability-aware ladder derivation (replicate pi's rule from `reasoning` +
+      `thinkingLevelMap`) — unit-tested against the same inputs pi uses.
+- [ ] `applyModelAndEffort()` funnel: the four `setModel` call sites (`router.ts:355`,
+      `index.ts:283/474/746`) re-apply the intended level after every switch, because
+      `setModel()` re-derives it from pi's defaults.
+- [ ] Baseline capture/restore + `thinking_level_select` listener (user-initiated changes
+      update the baseline instead of being overwritten next turn).
+- [ ] Wizard row + status-bar indicator (one glyph; SPEC §7.6 idiom) + `/router status`
+      line. Tests: static pin applied, unsupported pin ⇒ no change + log, byte-identical
+      when disabled.
+
+**Phase 2 — boundary step (Judge-driven).**
+- [ ] Band evaluation in `before_agent_start`: marginal fast ⇒ up, marginal smart ⇒ down,
+      hold/non-marginal ⇒ baseline. One notch, never more; directions per tier as the
+      SPEC table says; fast never steps down.
+- [ ] Cost-crossover guard wired to G2's per-level estimates; abandoned adjustments logged.
+- [ ] Effort distribution telemetry (per task + per session) with the sharpness contract,
+      report-only.
+- [ ] Tests: band edges (exactly θ, just inside/outside), ladder ends (no-op), model
+      without `reasoning` (no-op + one log), user `/thinking max` respected, failover keeps
+      the intent, abort/restore path.
+
+**Phase 3 — economics (only after G2).**
+- [ ] Decide whether the crossover guard becomes enforced-by-default, and whether the
+      savings figure gains an effort dimension. θ and `minConfidence` are not touched by
+      this feature at any phase.
+
+**Independent slice (can land first, no new config surface required).**
+- [ ] Replace the hardcoded worker effort (`defaultThinkingSuffix()` returning `"high"`,
+      `src/orchestrate.ts:103`) with a per-phase value, keeping `high` as the default so
+      current behaviour is preserved. Orchestration is where the token spend is largest, so
+      this is the best ratio of savings to risk in the whole feature.
+
+**Acceptance for the feature as a whole.** With `effort.enabled: false` (the default) the
+suite is unchanged and a byte-identical config produces byte-identical behaviour; with it
+enabled, effort moves only inside the band, never more than one notch, never across tiers,
+and the session effort distribution is reported.
 
 ### Task-level orchestration — implementation sub-plan (SPEC §9.3)
 
@@ -115,7 +181,15 @@ One `models` list; `mode` only selects the source. Absent `judge` ⇒ `fast-chai
 
 **Design decisions recorded in SPEC §9.3 (Open design decisions):** entry trigger (auto vs confirm), worker mapping, review loop style, escalation threshold, default auto (settled), §9.2 interplay. **Hard/soft control split + backward-compatibility contract** (§9.3): plugin owns caps/budget/abort, Smart owns plan/review/accept; orchestration default auto (one-command opt-out), simple tasks never orchestrate, missing pi-subagents degrades to today's smart run.
 
-> **Withdrawn from earlier drafts.** Per-tier thinking level was proposed but is largely redundant — tier classification already encodes prompt complexity, so a static per-tier thinking rule rarely saves more than it complicates. Adaptive (per-prompt) thinking adds machinery without a clear win because the smart tier is already gated on real complexity. Dropped from v0.8.x.
+> **Revived (was withdrawn in v0.8.x).** The old objection was that tier
+> classification already encodes prompt complexity, so a *static* per-tier thinking rule
+> (and adaptive thinking in general) rarely saved more than it complicated —
+> true then, and still true for the shape proposed back then. The design in
+> SPEC §9.5 is a different thing: a static per-tier **pin** plus a per-turn step that
+> fires **only inside the Judge's marginal band**, i.e. precisely where tier
+> classification does *not* resolve complexity, in the tier that the band points at,
+> capped at one notch. Neither the old static shape nor the "smart tier is already
+> gated" objection covers that region. Default off, so nothing changes unless asked.
 >
 > **Multilingual Judge prompt/input work** was dropped on ROI grounds — LLMs are multilingual; generating zh / ja / es / fr versions of `judge.md` solves a problem that doesn't exist.
 

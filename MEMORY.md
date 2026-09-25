@@ -10,6 +10,96 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-09-23 — Effort control revived: boundary-only, opt-in, asymmetric
+
+**Context.** Tier routing exists because the capability/price gap between Fast and Smart
+is large; that gap *is* the feature. But there is one region it cannot settle: a verdict
+that lands just inside a tier's boundary, where the alternatives are a tier switch (loses
+the prompt cache, 4–50× price) or leaving a marginal task on a tier that may be wrong
+either way. Effort — how much the *already-chosen* model thinks — addresses exactly that
+region, and only that region.
+
+**Decision.** Ship effort as **three relative directions, opt-in, off by default**:
+`default` (do not intervene; restore the session baseline), `high` (one supported notch
+up), `low` (one supported notch down). Trigger is the **marginal band only**
+(`|pSmart − θ| < band`) and the step is **one notch, never more**. Direction permission is
+per tier: **fast = up only** (a weak model with less thinking produces rework),
+**smart = down only** (the "expensive model on a task that didn't need it" case; "nearly
+free `high`" is a *static pin*, not a per-turn decision). Static pins can hold any
+supported level. Contract: SPEC §9.5. Plan/gates: ROADMAP. Tracking: [#43](https://github.com/green-dalii/pi-shift-router/issues/43).
+
+**Evidence — Artificial Analysis, Intelligence Index vs. cost per task** (19 points, the
+same model at every effort level; chart: `https://artificialanalysis.ai/?models=glm-5-3%2Cglm-5-3-low%2Cclaude-opus-5-5%2Cclaude-opus-5-5-xhigh%2Cclaude-opus-5-5-high%2Cclaude-opus-5-5-medium%2Cgpt-6-sol%2Cgpt-6-sol-xhigh%2Cgpt-6-sol-high%2Cgpt-6-sol-medium%2Cgpt-6-sol-low%2Cgpt-6-luna%2Cgpt-6-luna-xhigh%2Cgpt-6-luna-high%2Cgpt-6-luna-medium%2Cgpt-6-luna-low%2Cgemini-3-8-flash-low%2Cgemini-3-8-flash-medium%2Cgemini-3-8-flash-high`
+— the original filtered URL, including the long `releases=` list, is in the tracking
+issue). Readings are approximate; the *shape* is what drives the design:
+
+| Model / level | cost/task | index |
+|---|---|---|
+| Luna low → medium | $0.006 → $0.01 | 21 → **32.5** (a cliff) |
+| Luna medium → high | $0.01 → $0.017 | 32.5 → 34.5 |
+| Luna high → xhigh → max | $0.017 → $0.045 | 34.5 → 35.5 → 38.5 |
+| Sol low → medium → high | $0.25 → $0.30 | 34 → 40 → 42.5 |
+| Sol high → xhigh | $0.30 → $0.60 | 42.5 → **47.5** (2× the price) |
+| Sol xhigh → max | $0.60 → $0.80 | 47.5 → **47.5 (nothing)** |
+| Opus 5.5 medium → high → xhigh → max | $0.30 → $5 | 50 → 52.5 → 54 → 57 (+455% price for +3) |
+| GLM-5.3 **low** vs max | **$3.2** vs $1.5 | **36** vs 45.5 |
+| Gemini 3.8 Flash medium → high | $0.35 → $1.3 | 40 → 42 |
+
+1. **Value is concentrated in the middle.** `low → medium` is a cliff; `medium → high` is
+   nearly free; `high → xhigh → max` is flat and expensive. Effort is a small adjustment,
+   not a third dial.
+2. **The top of the ladder contains dominated points.** Sol `max` scores what `xhigh`
+   scores for 33% more; Opus `max` costs 455% more for +3. Every point in the chart's
+   "most attractive quadrant" is a mid/high-effort strong model. Hence: never lets the
+   dynamic path touch `xhigh`/`max`.
+3. **Effort upward on the cheap tier is worth more than effort downward on the expensive
+   tier.** Luna `max` (38.5 @ $0.045) reaches 96% of Sol `medium` (40 @ $0.30) at 15% of
+   the price; Luna `high` (34.5 @ $0.017) beats Sol `low` (34 @ $0.25) outright. This is
+   why **fast = up** is the primary direction.
+4. **…but only when the gap is large.** Nothing under $0.30 reaches Opus `medium` (50), so
+   for a Fast/Smart pair with a wide gap the **smart = down** direction is real. The two
+   directions therefore have independent value and are independently toggled.
+5. **Lowering effort can raise total cost.** GLM-5.3's `low` is *dearer and worse* than its
+   `max`. In an agentic setting, less thinking means more turns and more rework, and the
+   chart measures cost per **task**, not per request. This is the empirical form of the
+   "effort backfires" risk: it is why fast never steps down, why `low` must be guarded by
+   measured cost, and why the sharpness contract is report-only rather than self-correcting.
+
+**Code facts verified against pi 0.87.1** (they shape the contract, so they belong here
+rather than in a chat log): the extension API exposes `getThinkingLevel()` and
+`setThinkingLevel(level)` alongside `setModel()` (`core/extensions/types.d.ts`);
+`setThinkingLevel` writes session state and appends a session entry only when the level
+actually changes (`agent-session.js:1751`); `setModel()` re-derives the level from pi's
+own defaults (`_getThinkingLevelForModelSwitch`, `agent-session.js:1800`), so every switch
+must be followed by a re-apply; a level change is sticky until changed again, so `default`
+turns must actively restore the baseline; `xhigh`/`max` are only supported when the model
+catalog declares them (`pi-ai/dist/models.js:554`); and `ThinkingLevel` is **not**
+re-exported from pi's package root, so the 7-value union is redeclared locally (importing
+`pi-ai` at runtime is not allowed — `RUNTIME_HOST_ALLOWLIST` in `scripts/pack-check.mjs`).
+
+**Rejected.**
+
+- *Absolute level names in the dynamic path* (e.g. "high" meaning pi's `high`). We cannot
+  know a model's configured default, so an absolute target can silently be a downgrade.
+  Relative one-notch stepping is capability-correct everywhere and respects a user's own
+  `/thinking` setting at the ladder ends.
+- *`low` on the fast tier.* Rework costs more than the thinking it saves (finding 5).
+- *Dynamic `xhigh`/`max`.* Dominated points (finding 2).
+- *An effort × tier matrix.* Combinatorial, untestable, and it erodes the tier decision's
+  auditability — the property the two-bucket design exists to provide.
+- *Heuristic triggers* (message length, token counts, tool counts). Same prohibition as the
+  Judge's "no keyword rules": the trigger must come from the verdict the Judge returns.
+- *Effort inside θ/EV or the cache-aware gate.* Different cost structure (output-side, not
+  input-side); folding it in would silently move the savings figure.
+- *Making effort default-on.* It is a quality preference and it must not change behaviour
+  for existing users — off by default keeps upgrades byte-identical.
+
+**Supersedes** the v0.8.x withdrawal of per-tier thinking level (ROADMAP). That decision
+was right about the shape proposed then — a *static* per-tier rule, plus adaptive thinking
+in general, save less than they complicate because the smart tier is already gated on real
+complexity. Neither objection covers a step that fires only inside the Judge's marginal
+band, in the tier the band points at, capped at one notch.
+
 ## 2026-09-23 — Version bumps must go through `npm version` (lockfile drift)
 
 **Decision.** Release bumps run `npm version <patch|minor|major>

@@ -10,6 +10,60 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-09-26 — pi-tui must be a peer: the lazy import was the real bug
+
+**Decision.** `@earendil-works/pi-tui` is declared **only** as `peerDependencies: {"*"}`
+(plus `devDependencies` for types/build). Runtime `dependencies` is now **empty**, and the
+three TUI imports that used to be lazy are **static**.
+
+**Why (two findings, one of which corrected an earlier wrong conclusion).** pi 1.0.0
+started warning that host-provided packages must not be runtime dependencies, and I first
+concluded our `dependencies` entry was obsolete — "all extensions load through jiti with a
+host alias, so our copy is never used". A **jiti 2.7 probe** (the version pi bundles)
+showed that conclusion was **half wrong**:
+
+| shape | result |
+|---|---|
+| static `import` in a jiti-processed module | aliased → host copy ✓ |
+| `await import("./x.js")` where `x.js` imports a host bundle | **`ERR_MODULE_NOT_FOUND`** — jiti does **not** rewrite native dynamic imports, so `x.js` is resolved by plain Node, where the host's copy is not installed |
+
+So the `dependencies` entry *was* load-bearing — but only because of a lazy import, and
+that is precisely the harm pi's warning is about: `status-panel.js` was imported
+statically (host copy) while `model-picker.js` and `fallback-chain-editor.js` were imported
+lazily (our installed copy), i.e. **two pi-tui copies in one process**, split across our own
+TUI code. The fix is not to keep shipping a duplicate, and not to silence the warning: it is
+to make the imports **static**, so the whole graph goes through the loader's alias and a
+single copy is used. That also deletes our only runtime dependency.
+
+**What changed.** `src/commands.ts` imports `createChainEditor` / `createModelPicker`
+statically (the two remaining `await import("./tui/…")` sites are gone; `index.ts`'s lazy
+`./config.js` stays — it imports no host bundle). `package.json` loses `dependencies`
+entirely. Both gate scripts were rebuilt around the real model:
+`pack-check.mjs` now **fails** if a host-provided package appears in `dependencies`, if the
+peer range is not `*`, if a host bundle is imported by **subpath** (pi's alias covers the
+bare specifier only), and — the regression guard for this bug — if any dynamic import
+reaches a module that (transitively) imports a host bundle. `check-isolated-load.mjs` now
+loads every dist module **through jiti with the host alias** (mirroring
+`loader.js:468-481`) and asserts that **no host bundle is installed into the extension
+subtree**; the old native-import pass was enforcing the duplicate.
+
+**Rejected.** *Keeping the dependency and living with the warning* (it is a real hazard,
+not cosmetic); *reverting to `await import()` and shipping pi-tui* (the duplicate is the
+disease); *silencing by moving to peer without touching the imports* (would have broken the
+wizard for npm-installed users — the very failure the old comment documented); *vendoring
+the handful of pi-tui primitives we use* (duplicate component identity by construction).
+
+**Verified.** The guard was tested by injecting a lazy import back into `dist/commands.js`
+— it fails with the explanatory message, and passes when restored. pi's own check was
+replayed against our manifest: no host-provided package in `dependencies` (−> no warning).
+Also confirmed: `~/.pi/agent/npm/node_modules/@earendil-works/` is **empty**, and
+`require.resolve("@earendil-works/pi-tui")` from an installed extension fails — the host
+does not install it there, so nothing may rely on native resolution.
+
+**Unrelated, same warning batch.** `pi-shazam` (third-party, author `gjczone`) declares
+`typebox` in `dependencies`; `typebox` is on pi's host-provided list, so its warning stays
+until the upstream package moves it to peers. Not ours to fix here.
+
 ## 2026-09-25 — Phase 1 effort: the funnel is the risk, and one semantic is open
 
 **Context.** With the dynamic half shelved by G3 (previous entry), Phase 1 — static

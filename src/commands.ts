@@ -43,6 +43,8 @@ import { computeStats, judgeModelDisplay } from "./stats.js";
 import { resolveJudgeEndpoints, normalizeJudgeMode } from "./config.js";
 import { DECISION_API_TYPE, DECISION_MIN_JUDGE_TIMEOUT_MS } from "./judge.js";
 import { StatusPanel, assembleStatusData, type StatusPanelInput } from "./tui/status-panel.js";
+import { createChainEditor } from "./tui/fallback-chain-editor.js";
+import { createModelPicker } from "./tui/model-picker.js";
 import {
   listAvailableModels,
   isModelAvailable,
@@ -330,7 +332,6 @@ async function routeConfigWizard(
           .filter((m) => !isModelAvailable(modelSource, m.provider, m.model))
           .map((m) => `${m.provider}/${m.model}`),
       );
-      const { createChainEditor } = await import("./tui/fallback-chain-editor.js");
       const updated = await ctx.ui.custom<ModelRef[] | null>(
         (_tui, theme, _keybindings, done) => {
           return createChainEditor({
@@ -425,7 +426,6 @@ async function routeConfigWizard(
   ): Promise<{ provider: string; model: string; priority: number } | null> {
     // TUI mode: use the new picker with input + filter + sliding list
     if (ctx.mode === "tui") {
-      const { createModelPicker } = await import("./tui/model-picker.js");
       return await ctx.ui.custom<{ provider: string; model: string; priority: number } | null>(
         (_tui, theme, _keybindings, done) => {
           return createModelPicker({
@@ -523,7 +523,6 @@ async function routeConfigWizard(
     const unavailableKeys = new Set(
       items.filter((m) => !isModelAvailable(modelSource, m.provider, m.model)).map((m) => `${m.provider}/${m.model}`),
     );
-    const { createChainEditor } = await import("./tui/fallback-chain-editor.js");
     return await ctx.ui.custom<ModelRef[] | null>((_tui, theme, _keybindings, done) =>
       createChainEditor({
         items,

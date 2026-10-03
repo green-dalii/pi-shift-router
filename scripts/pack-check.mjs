@@ -29,7 +29,6 @@ const pass = (msg) => console.log("✓", msg);
 const pkgPath = join(ROOT, "package.json");
 const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
 
-const HOST_PACKAGES = new Set(["@earendil-works/pi-coding-agent"]);
 // Host-provided extension packages: pi's loader guarantees a single copy from
 // the host and warns when an extension ALSO declares one in `dependencies`
 // (duplicate runtime modules — two pi-tui copies break component identity and
@@ -52,10 +51,7 @@ const HOST_PROVIDED_DEP = new Set([
 const PEER_HOST_BUNDLE = "@earendil-works/pi-tui";
 
 const runtimeDeps = Object.keys(pkg.dependencies || {});
-const devDeps = Object.keys(pkg.devDependencies || {});
 const peerDeps = Object.keys(pkg.peerDependencies || {});
-const runtimeDepsToSet = new Set(runtimeDeps);
-const peerDepsToSet = new Set(peerDeps);
 
 // ---------- 2b. Host-provided packages must NOT be runtime dependencies ----------
 // pi's rule. Declaring one here makes npm install a second copy next to the
@@ -71,7 +67,19 @@ if (hostInDeps.length > 0) {
 } else {
 	pass("no host-provided package in 'dependencies'");
 }
-if (peerDepsToSet.has(PEER_HOST_BUNDLE)) {
+// A declared peer must be something the host actually provides (otherwise npm
+// would look for it and pi would not have it), and the coding agent itself is
+// never a peer — it is the runtime.
+const badPeers = peerDeps.filter((dep) => !HOST_PROVIDED_DEP.has(dep));
+if (badPeers.length > 0) {
+	fail(`'peerDependencies' entries that the host does not provide: ${badPeers.join(", ")}`);
+} else {
+	pass("every declared peer is host-provided");
+}
+if (peerDeps.includes("@earendil-works/pi-coding-agent")) {
+	fail("'@earendil-works/pi-coding-agent' must not be a peerDependency — it is the host runtime");
+}
+if (peerDeps.includes(PEER_HOST_BUNDLE)) {
 	if (pkg.peerDependencies[PEER_HOST_BUNDLE] !== "*") {
 		fail(`'${PEER_HOST_BUNDLE}' peer range must be exactly "*" (pi's host contract)`);
 	} else {

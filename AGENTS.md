@@ -16,7 +16,11 @@ This document is the developer handbook for pi-shift-router. It defines the phil
 
 - **TypeScript only.** No `any` (except when interfacing with undocumented pi-agent APIs). Prefer `interface` over `type`.
 - **No classes** unless state + behavior genuinely requires encapsulation. Default to pure functions and data structures.
-- **No third-party dependencies** beyond `@earendil-works/pi-coding-agent` (peer), `@earendil-works/pi-tui` (devDep for local builds), and `typebox` (peer). The runtime has zero external libraries.
+- **No third-party dependencies.** `@earendil-works/pi-tui` is a **peerDependency (`*`)** —
+  pi's loader aliases it to the host's own copy, so the runtime has zero installed
+  dependencies and we must never ship a second copy (pi 1.0.0 warns; see
+  `scripts/pack-check.mjs`). It stays in `devDependencies` for types and local builds;
+  `@earendil-works/pi-coding-agent` is dev/peer for types; `typebox` is host-provided too.
 - **Side-effect isolation.** Pure functions at the top. IO passed in.
 - **Errors are values, not exceptions.** Log to console and fall back. Never crash the host process.
 

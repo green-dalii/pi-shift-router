@@ -15,7 +15,7 @@
  */
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -30,85 +30,79 @@ const pkgPath = join(ROOT, "package.json");
 const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
 
 const HOST_PACKAGES = new Set(["@earendil-works/pi-coding-agent"]);
-// Host packages that MUST be physically installed into the isolated extension
-// subtree because the compiled .js dist cannot rely on pi's jiti alias/virtualModules
-// rewrite (which is only reliable for TS-source extensions). npm installs these
-// from the registry when declared in `dependencies`; the host still provides the
-// canonical copy.
-const RUNTIME_HOST_ALLOWLIST = new Set(["@earendil-works/pi-tui"]);
+// Host-provided extension packages: pi's loader guarantees a single copy from
+// the host and warns when an extension ALSO declares one in `dependencies`
+// (duplicate runtime modules — two pi-tui copies break component identity and
+// terminal state). The list mirrors `HOST_PROVIDED_EXTENSION_PACKAGES` in
+// pi-coding-agent/dist/core/resource-loader.js (verified against 1.0.0).
+const HOST_PROVIDED_DEP = new Set([
+	"@earendil-works/pi-agent-core",
+	"@earendil-works/pi-ai",
+	"@earendil-works/pi-coding-agent",
+	"@earendil-works/pi-tui",
+	"@mariozechner/pi-agent-core",
+	"@mariozechner/pi-ai",
+	"@mariozechner/pi-coding-agent",
+	"@mariozechner/pi-tui",
+	"@sinclair/typebox",
+	"typebox",
+]);
+// The only host bundle this extension value-imports at runtime (the TUI
+// wizard). Everything else stays type-only.
+const PEER_HOST_BUNDLE = "@earendil-works/pi-tui";
+
 const runtimeDeps = Object.keys(pkg.dependencies || {});
 const devDeps = Object.keys(pkg.devDependencies || {});
 const peerDeps = Object.keys(pkg.peerDependencies || {});
 const runtimeDepsToSet = new Set(runtimeDeps);
 const peerDepsToSet = new Set(peerDeps);
 
-// ---------- 2. Host packages must be devDeps, not deps ----------
-for (const dep of runtimeDeps) {
-	if (HOST_PACKAGES.has(dep)) {
-		fail(
-			`Runtime dependency '${dep}' must NOT be in 'dependencies' — the ` +
-			`user's host (pi-coding-agent itself) already provides it. Move to ` +
-			`'devDependencies' for type-checking only.`
-		);
-	} else if (RUNTIME_HOST_ALLOWLIST.has(dep)) {
-		pass(`runtime dep: ${dep} (allowlisted host bundle — isolated-subtree install for compiled dist)`);
+// ---------- 2b. Host-provided packages must NOT be runtime dependencies ----------
+// pi's rule. Declaring one here makes npm install a second copy next to the
+// host's, which the loader cannot dedupe.
+const hostInDeps = runtimeDeps.filter((dep) => HOST_PROVIDED_DEP.has(dep));
+if (hostInDeps.length > 0) {
+	fail(
+		`Host-provided package(s) in 'dependencies': ${hostInDeps.join(", ")}. ` +
+		`pi 1.0.0 warns on this and for good reason — an installed copy bypasses the ` +
+		`loader and creates duplicate runtime modules. Declare them in ` +
+		`'peerDependencies' with a "*" range instead.`
+	);
+} else {
+	pass("no host-provided package in 'dependencies'");
+}
+if (peerDepsToSet.has(PEER_HOST_BUNDLE)) {
+	if (pkg.peerDependencies[PEER_HOST_BUNDLE] !== "*") {
+		fail(`'${PEER_HOST_BUNDLE}' peer range must be exactly "*" (pi's host contract)`);
 	} else {
-		pass(`runtime dep: ${dep}`);
+		pass(`'${PEER_HOST_BUNDLE}' declared in peerDependencies with "*"`);
 	}
+} else {
+	fail(`'${PEER_HOST_BUNDLE}' must be declared in 'peerDependencies' with a "*" range`);
 }
 
-for (const dep of devDeps) {
-	if (HOST_PACKAGES.has(dep)) {
-		pass(`host package '${dep}' correctly placed in devDependencies`);
-	}
-}
-
-for (const dep of peerDeps) {
-	if (HOST_PACKAGES.has(dep)) {
-		fail(
-			`Host package '${dep}' should NOT be in 'peerDependencies'. The host ` +
-			`is the runtime itself — peer dependencies are NOT auto-installed by ` +
-			`npm in pi's isolated extensions subtree. Use 'devDependencies'.`
-		);
-	}
-}
-
-// ---------- 3b. Allowlisted host bundles must be in BOTH deps + peers ----------
-// pi's package-manager installs the extension subtree with --omit=peer and
-// auto-install-peers=false, so a peerDependencies-only host bundle is never
-// installed there. A compiled dist that value-imports such a bundle (pi-tui)
-// fails at runtime with `Cannot find package`. The allowlisted bundle must be
-// a real `dependencies` entry (npm installs it into the subtree) AND stay in
-// peerDependencies (host contract).
-for (const bundle of RUNTIME_HOST_ALLOWLIST) {
-	if (!runtimeDepsToSet.has(bundle)) {
-		fail(
-			`Allowlisted host bundle '${bundle}' must be in 'dependencies' — pi's ` +
-			`package-manager installs the extension subtree with --omit=peer, so a ` +
-			`peerDependencies-only declaration is not installed there and compiled ` +
-			`dist value-imports of it fail at runtime. Add it to 'dependencies'.`
-		);
-	} else {
-		pass(`allowlisted host bundle '${bundle}' declared in dependencies`);
-	}
-	if (!peerDepsToSet.has(bundle)) {
-		fail(`Allowlisted host bundle '${bundle}' must also stay in 'peerDependencies'.`);
-	} else {
-		pass(`allowlisted host bundle '${bundle}' declared in peerDependencies`);
-	}
-}
-
-// ---------- 3. Source files must NOT value-import host packages ----------
+// ---------- 3. Dist import rules ----------
+//
+// Why these rules exist (verified against pi 1.0.0
+// dist/core/extensions/loader.js:468-481 and reproduced with a jiti 2.7 probe):
+// * pi loads the extension ENTRY through jiti with an `alias` map that points
+//   every host-provided specifier at the host's own copy. Anything reachable by
+//   STATIC import is therefore aliased — that is why `dependencies` is not
+//   needed and must not be used.
+// * A native dynamic `import()` inside extension code is NOT rewritten by jiti.
+//   The lazily loaded module is resolved by plain Node, where the host's copy is
+//   not installed (pi's extension subtree is created with --omit=peer), so the
+//   bare specifier fails with ERR_MODULE_NOT_FOUND. This was a real shape in
+//   this repo (the config wizard lazily imported dist/tui/*), and the old
+//   workaround — shipping pi-tui as a dependency — is exactly what pi now warns
+//   about. The fix is to keep such imports static.
 const DIST = join(ROOT, "dist");
-// Dist value-imports of allowlisted host bundles (pi-tui) are legal ONLY
-// because 3b enforces they are real `dependencies` entries — they resolve
-// from the isolated subtree via native Node resolution. The fail-scan below
-// targets host packages that must NEVER be runtime-imported (pi-coding-agent:
-// it is only ever type-imported; its runtime symbols come from the loader).
 const valueImportPatterns = [
 	/^import\s+\{[^}]+\}\s+from\s+["']@earendil-works\/pi-coding-agent["']/m,
 ];
-const allowlistedValueImportPattern = /^import\s+\{[^}]+\}\s+from\s+["']@earendil-works\/pi-tui["']/m;
+const staticHostImport = /(?:^|\n)\s*import\s[^;]*?from\s+["'](@earendil-works\/pi-tui)["']/;
+const hostSubpathImport = /["']@earendil-works\/pi-tui\/[^"']+["']/;
+const dynamicImportRe = /import\(\s*["']([^"']+)["']\s*\)/g;
 
 function* walk(dir) {
 	for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -119,28 +113,75 @@ function* walk(dir) {
 }
 
 if (existsSync(DIST)) {
+	const jsFiles = [...walk(DIST)].filter((f) => f.endsWith(".js"));
+	const read = (f) => readFileSync(f, "utf8");
 	let runtimeImportsFound = false;
-	for (const file of walk(DIST)) {
-		if (!file.endsWith(".js")) continue;
-		const content = readFileSync(file, "utf8");
+	let hostImporters = 0;
+
+	// Static graph + the set of modules that pull in a host bundle.
+	const staticImports = new Map();
+	for (const file of jsFiles) {
+		const src = read(file);
+		const specifiers = [...src.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
+		staticImports.set(file, specifiers);
+		if (staticHostImport.test(src)) hostImporters += 1;
+		if (hostSubpathImport.test(src)) {
+			fail(
+				`${file.replace(ROOT + "/", "")} imports a SUBPATH of a host bundle. pi's alias map ` +
+				`covers the bare specifier only — use '${PEER_HOST_BUNDLE}'.`
+			);
+		}
 		for (const pat of valueImportPatterns) {
-			if (pat.test(content)) {
+			if (pat.test(src)) {
 				fail(
 					`Runtime value-import of host package in ${file.replace(ROOT + "/", "")}. ` +
-					`Compiled output retains the import; Node would fail to resolve. ` +
-					`Use 'import type' or pass dependencies through factory parameters.`
+					`Compiled output retains the import; use 'import type' or pass dependencies through factory parameters.`
 				);
 				runtimeImportsFound = true;
 			}
 		}
-		if (allowlistedValueImportPattern.test(content)) {
-			// Legal: 3b guarantees the allowlisted bundle is in `dependencies`, so
-			// it IS present in pi's isolated subtree (native resolution works).
-			pass(`allowlisted host bundle value-import in ${file.replace(ROOT + "/", "")} (covered by dependencies)`);
+	}
+
+	// Reachability: does a dynamic import target (transitively) need a host bundle?
+	const reachable = (entry) => {
+		const seen = new Set();
+		const queue = [entry];
+		while (queue.length > 0) {
+			const current = queue.pop();
+			if (seen.has(current)) continue;
+			seen.add(current);
+			for (const spec of staticImports.get(current) ?? []) {
+				if (!spec.startsWith(".")) continue;
+				const next = resolve(dirname(current), spec);
+				if (existsSync(next)) queue.push(next);
+			}
+		}
+		return seen;
+	};
+	let dynamicHostReach = 0;
+	for (const file of jsFiles) {
+		const src = read(file);
+		for (const m of src.matchAll(dynamicImportRe)) {
+			const spec = m[1];
+			if (!spec.startsWith(".")) continue;
+			const target = resolve(dirname(file), spec);
+			if (!existsSync(target)) continue;
+			const needsHost = [...reachable(target)].some((f) => staticHostImport.test(read(f)));
+			if (needsHost) {
+				dynamicHostReach += 1;
+				fail(
+					`${file.replace(ROOT + "/", "")} dynamically imports '${spec}', which ` +
+					`(transitively) imports ${PEER_HOST_BUNDLE}. jiti does not rewrite dynamic ` +
+					`imports, so Node resolves it natively and the host bundle is not installed ` +
+					`in pi's subtree — ERR_MODULE_NOT_FOUND at runtime. Make the import static.`
+				);
+			}
 		}
 	}
-	if (!runtimeImportsFound) {
-		pass("dist/ contains no runtime value-imports of host packages");
+	if (dynamicHostReach === 0) pass("no dynamic import reaches a host-bundle importer");
+	if (!runtimeImportsFound) pass("dist/ contains no runtime value-imports of host packages");
+	if (hostImporters > 0) {
+		pass(`${hostImporters} dist module(s) statically import ${PEER_HOST_BUNDLE} (aliased by the loader)`);
 	}
 } else {
 	console.log("→ dist/ not found (run `npm run build` first)");

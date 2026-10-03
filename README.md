@@ -5,7 +5,7 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 - license: MIT
 - language: TypeScript
 - runtime: Node.js >= 24
-- dependencies: @earendil-works/pi-tui only (host-provided; declared as a dependency for isolated-subtree install)
+- dependencies: none at runtime — @earendil-works/pi-tui is a peerDependency provided by the pi host
 - npm: https://www.npmjs.com/package/pi-shift-router
 - repo: https://github.com/green-dalii/pi-shift-router
 - docs: README.md / README.zh-CN.md / docs/CONFIG.md / docs/MODELS.md / docs/TROUBLESHOOTING.md
@@ -32,7 +32,7 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 [![Pi Agent](https://img.shields.io/badge/pi--agent-extension-purple)](https://pi.dev/packages/pi-shift-router)
 [![Jev](https://img.shields.io/badge/judge-Jev%20(Beta)-blueviolet)](https://docs.typesafe.ai/introduction/quickstart)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-green)](https://nodejs.org)
-[![deps](https://img.shields.io/badge/deps-host--pi--tui--only-blue)](package.json)
+[![deps](https://img.shields.io/badge/deps-0%20runtime-blue)](package.json)
 [![size](https://img.shields.io/badge/install%20size-~409kB-blue)](https://packagephobia.com/package/pi-shift-router)
 [![CI](https://img.shields.io/github/actions/workflow/status/green-dalii/pi-shift-router/ci.yml)](https://github.com/green-dalii/pi-shift-router/actions)
 [![Stars](https://img.shields.io/github/stars/green-dalii/pi-shift-router.svg)](https://github.com/green-dalii/pi-shift-router)

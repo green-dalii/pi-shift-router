@@ -5,7 +5,7 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 - license: MIT
 - language: TypeScript
 - runtime: Node.js >= 24
-- dependencies: 仅 @earendil-works/pi-tui（宿主导入；声明为依赖以便隔离子树安装）
+- dependencies: 运行时无依赖——@earendil-works/pi-tui 是由 pi 宿主提供的 peerDependency
 - npm: https://www.npmjs.com/package/pi-shift-router
 - repo: https://github.com/green-dalii/pi-shift-router
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.zh-CN.md
@@ -32,7 +32,7 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 [![Pi Agent](https://img.shields.io/badge/pi--agent-extension-purple)](https://pi.dev/packages/pi-shift-router)
 [![Jev](https://img.shields.io/badge/judge-Jev%20(Beta)-blueviolet)](https://docs.typesafe.ai/introduction/quickstart)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-green)](https://nodejs.org)
-[![deps](https://img.shields.io/badge/deps-host--pi--tui--only-blue)](package.json)
+[![deps](https://img.shields.io/badge/deps-0%20runtime-blue)](package.json)
 [![size](https://img.shields.io/badge/install%20size-~409kB-blue)](https://packagephobia.com/package/pi-shift-router)
 [![CI](https://img.shields.io/github/actions/workflow/status/green-dalii/pi-shift-router/ci.yml)](https://github.com/green-dalii/pi-shift-router/actions)
 [![Stars](https://img.shields.io/github/stars/green-dalii/pi-shift-router.svg)](https://github.com/green-dalii/pi-shift-router)

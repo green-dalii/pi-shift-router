@@ -111,21 +111,51 @@ now only relevant to the shelved design. Phase 1 is unaffected by all three.
       proceeds, and a future dynamic trigger must come from the Judge as a first-class
       field (the decision model can carry the question in the same request).
 
-**Phase 1 — static only (no Judge change). The planned half.**
-- [ ] `routing.effort` schema + `normalizeEffort()` (absent ⇒ disabled; unknown direction ⇒
-      `off` + log, mirroring `normalizeJudgeMode`); redeclare the 7-value level union in
-      `types.ts` (pi does not re-export `ThinkingLevel`; `pi-ai` is not an allowed runtime
-      dependency).
-- [ ] Capability-aware ladder derivation (replicate pi's rule from `reasoning` +
-      `thinkingLevelMap`) — unit-tested against the same inputs pi uses.
-- [ ] `applyModelAndEffort()` funnel: the four `setModel` call sites (`router.ts:355`,
-      `index.ts:283/474/746`) re-apply the intended level after every switch, because
-      `setModel()` re-derives it from pi's defaults.
-- [ ] Baseline capture/restore + `thinking_level_select` listener (user-initiated changes
-      update the baseline instead of being overwritten next turn).
-- [ ] Wizard row + status-bar indicator (one glyph; SPEC §7.6 idiom) + `/router status`
-      line. Tests: static pin applied, unsupported pin ⇒ no change + log, byte-identical
-      when disabled.
+**Phase 1 — static only (no Judge change). The planned half.** Ordered by dependency;
+the only genuinely risky item is the funnel, and the only open semantic is the manual
+override in `④`.
+
+- [ ] **⓪ Fix SPEC §5.2 first.** The schema of record still lists `band` and `dynamic`,
+      which belong to the shelved design. Phase 1 must not ship dead config, so §5.2 is
+      reduced to `enabled` + `static` before any code lands (the shelved fields stay in
+      §9.5 as design-of-record).
+- [ ] **① Schema + normalization** (`types.ts`, `config.ts`, S). `EffortConfig { enabled:
+      boolean; static?: { fast?: ThinkingLevel; smart?: ThinkingLevel } }`;
+      `DEFAULT_CONFIG.routing.effort = { enabled: false }`; the 7-value union redeclared
+      locally (pi does not re-export `ThinkingLevel`, and `pi-ai` is not an allowed
+      runtime dependency); `normalizeEffort()` mirroring `normalizeJudgeMode()`
+      (`config.ts:457`) — unknown level dropped + logged, `enabled: true` with no pin
+      logged as a no-op.
+- [ ] **② Capability-aware ladder** (new `src/effort.ts`, S). `supportedThinkingLevels(model)`
+      replicating pi's rule (`pi-ai/models.js:554`): no `reasoning` ⇒ `["off"]`; a
+      `thinkingLevelMap` entry of `null` removes a level; `xhigh`/`max` require an explicit
+      entry. `applyPin(pin, model)` uses a supported level or does nothing + logs — never
+      the nearest-guess.
+- [ ] **③ The funnel** (`router.ts:334`, `index.ts`, M — **the risk concentrates here**).
+      One `applyModelAndEffort()` over the four `setModel` sites (`index.ts:283` session
+      restore, `index.ts:471` → `applyModelSwitch` → `router.ts:355`, `index.ts:743`
+      failover), because `setModel()` re-derives the level from pi's own defaults
+      (`agent-session.js:1800`) and a pin that is not re-applied after a switch is lost
+      at random. Applies only after a tier has been selected; `enabled: false` ⇒ zero
+      `setThinkingLevel` calls (asserted with a spy).
+- [ ] **④ Decide the manual-override semantics** (S, **open**). If the user runs
+      `/thinking low` mid-session, does the pin win next turn? Proposed: yes, following the
+      strict-takeover precedent (SPEC §2.4 — the router owns model selection while enabled,
+      `/model` applies to the current turn), with one log line, and `/router off` as the
+      escape hatch. Needs a decision before ③ lands.
+- [ ] **⑤ Wizard + status surface** (`commands.ts`, `status-bar.ts`, `tui/status-panel.ts`,
+      M). Main-menu matching is **keyword**-based (`matchMenuChoice`, `commands.ts:245`),
+      not index-based, so a new `⚙️ Effort — <summary>` row does not cascade. Sub-menu:
+      master toggle (`toggleRow`/`TOGGLE_LEGEND`, `commands.ts:119`) + per-tier level
+      picker listing only levels that tier's models actually support. Status: append to the
+      existing badge (`[🧠 model • high • 23 tok/s]`, no new glyph) **only when a pin is
+      active**; `/router status` gains an Effort line (pins + supported ladder).
+- [ ] **⑥ Tests** (M, alongside ①–⑤): parse/migration/defaults; ladder holes and
+      unsupported pins; funnel coverage for tier switch / failover / session restore;
+      byte-identical when disabled; menu matching + summary strings.
+- [ ] **⑦ Release mechanics** (at release time): SPEC §8 status row, CHANGELOG, README
+      (user-visible config + status display, and it must state that the dynamic half is
+      **not** implemented), minor version bump.
 
 **Phase 2 — boundary step (Judge-driven). SHELVED by G3 — not planned, kept for the
 record.** It is revived only when the Judge reports the margin itself and that signal is

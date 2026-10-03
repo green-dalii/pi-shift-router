@@ -10,6 +10,48 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-09-25 — Phase 1 effort: the funnel is the risk, and one semantic is open
+
+**Context.** With the dynamic half shelved by G3 (previous entry), Phase 1 — static
+per-tier pins — is the whole remaining feature. Planning it against the real code surfaced
+three things worth writing down before any of it is built.
+
+**1. All the risk sits in one place: the model-switch funnel.** pi's `setModel()`
+re-derives the thinking level from its own defaults (`agent-session.js:1800`), so a pin
+that is not re-applied *after* every switch is lost at random — the failure mode would be
+"sometimes the pin applies", the worst kind to debug. There are **four** `setModel` sites
+(`index.ts:283` session restore, `index.ts:471` → `applyModelSwitch` → `router.ts:355`,
+`index.ts:743` failover). They must funnel through one `applyModelAndEffort()`. Everything
+else in Phase 1 (schema, ladder, wizard, status) is mechanical.
+
+**2. One semantic is genuinely undecided, and it needs a decision rather than a
+default.** If the user runs `/thinking low` mid-session while a pin says `high`, who wins?
+Proposed: **the pin**, following the strict-takeover precedent already in the codebase
+(SPEC §2.4 — the router owns model selection while enabled, and a manual `/model` applies
+to the current turn only), with one log line and `/router off` as the escape hatch. The
+alternative — the manual change wins until the next tier switch — is defensible too, but
+it makes the pin silently conditional, which is worse than either behaviour. Recorded as
+an open item in ROADMAP ④; not to be settled by whoever writes the code.
+
+**3. A self-inflicted doc inconsistency, found while planning.** SPEC §5.2 (the schema of
+record) still lists `band` and `dynamic` — fields of the shelved dynamic half. Shipping
+them would put dead config in front of users, and the project's own rule is to not add
+what is not needed. §5.2 is reduced to `enabled` + `static` before code lands (ROADMAP ⓪),
+with the shelved fields kept in §9.5 as design-of-record.
+
+**4. Ordering insight — the dynamic half belongs to the §2.3 work, not before it.** The
+shelved trigger needs a "margin" concept, and the routing-asymmetry work (directional θ,
+fast-band removal, §2.3) is exactly where a margin concept is being re-derived anyway. So
+the revival path is not "add a Judge field, then re-run G3" but "design the margin
+together with §2.3, where the signal will already have to exist". This makes Phase 1
+(first, self-contained, θ-independent) and §2.3 (later, margin-producing) the natural
+order — and it may satisfy G3's revival condition without any new Judge field.
+
+**Suggested build order** (recorded because it is not the obvious one): ⓪ fix the schema
+inconsistency → the **worker per-phase effort** slice (`src/orchestrate.ts:103` hardcodes
+`:high`; best savings-to-risk ratio in the whole feature and independent of everything
+here) → Phase 1 proper. The ordering is about de-risking, not about size.
+
 ## 2026-09-25 — G3 killed the dynamic effort half; static pins remain
 
 **Decision.** Effort control ships as **static per-tier pins only**. The dynamic

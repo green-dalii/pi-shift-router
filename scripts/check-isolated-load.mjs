@@ -33,7 +33,7 @@
  *   node scripts/check-isolated-load.mjs
  */
 
-import { mkdtempSync, rmSync, writeFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";

@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import type { JudgeResult, Tier, ProviderEndpoint } from "./types.js";
 import { detectFailoverError } from "./failover.js";
+import { providerSessionHeaders } from "./provider-attribution.js";
 
 // ─── Judge system prompt ──────────────────────────────────────────
 
@@ -222,6 +223,7 @@ async function classifyLLM(
   endpoint: ProviderEndpoint,
   signal: AbortSignal | undefined,
   verbose: boolean,
+  sessionId: string | undefined,
 ): Promise<JudgeCallOutcome> {
   try {
     const body = buildRequestBody(endpoint, prompt);
@@ -235,6 +237,9 @@ async function classifyLLM(
     const res = await fetch(url, {
       method: "POST",
       headers: {
+        // Attribution for a gateway that routes per session — without it the
+        // call is refused and the judge never answers (issue #48).
+        ...providerSessionHeaders(endpoint, sessionId),
         "Content-Type": "application/json",
         ...(endpoint.apiType.startsWith("anthropic")
           ? { "x-api-key": endpoint.apiKey, "anthropic-version": "2023-06-01" }
@@ -455,6 +460,7 @@ export async function classify(
   verbose = false,
   isCooldown?: (provider: string, model: string) => boolean,
   onFailure?: (provider: string, model: string, code: string) => void,
+  sessionId?: string,
 ): Promise<JudgeResult> {
   const list = endpoints ?? [];
 
@@ -463,7 +469,7 @@ export async function classify(
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
-    const outcome = await classifyLLM(prompt, endpoint, controller.signal, verbose);
+    const outcome = await classifyLLM(prompt, endpoint, controller.signal, verbose, sessionId);
     clearTimeout(timer);
 
     if (outcome.ok) return outcome.result;

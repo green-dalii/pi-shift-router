@@ -27,6 +27,7 @@ import { appendRouterLog } from "./log.js";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import type { OrchestrationAudit, ProviderEndpoint } from "./types.js";
+import { providerSessionHeaders } from "./provider-attribution.js";
 
 // ─── Auditor prompt ────────────────────────────────────────────────
 
@@ -201,6 +202,7 @@ export interface AuditLLMCall {
     endpoints: ProviderEndpoint[],
     timeoutMs: number,
     verbose: boolean,
+    sessionId?: string,
   ): Promise<AuditorVerdict | null>;
 }
 
@@ -212,6 +214,7 @@ export const callAuditLLM: AuditLLMCall = async (
   endpoints,
   timeoutMs,
   verbose,
+  sessionId,
 ) => {
   const endpoint = endpoints[0];
   if (!endpoint) return null;
@@ -231,6 +234,7 @@ export const callAuditLLM: AuditLLMCall = async (
       res = await fetch(url, {
         method: "POST",
         headers: {
+          ...providerSessionHeaders(endpoint, sessionId),
           "Content-Type": "application/json",
           "x-api-key": endpoint.apiKey,
           "anthropic-version": "2023-06-01",
@@ -249,7 +253,11 @@ export const callAuditLLM: AuditLLMCall = async (
     } else {
       res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${endpoint.apiKey}` },
+        headers: {
+          ...providerSessionHeaders(endpoint, sessionId),
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${endpoint.apiKey}`,
+        },
         body: JSON.stringify({
           model: endpoint.modelId,
           max_tokens: 1000,
@@ -309,6 +317,8 @@ export async function auditOrchestration(input: {
   endpoints?: ProviderEndpoint[];
   timeoutMs?: number;
   verbose?: boolean;
+  /** Provider attribution forwarded to `llmCall` (issue #48). */
+  sessionId?: string;
   llmCall?: AuditLLMCall;
   /**
    * Cooldown predicate injected by the caller (v1.4.2, B4). Endpoints it
@@ -349,6 +359,7 @@ export async function auditOrchestration(input: {
       healthyEndpoints,
       input.timeoutMs ?? 5000,
       input.verbose ?? false,
+      input.sessionId,
     );
     if (verdict) {
       audit.llm = { verdict: verdict.verdict, issues: verdict.issues.slice(0, 10) };

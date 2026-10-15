@@ -310,6 +310,9 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         // Mirrors SPEC §8.5: only failover signatures cool down; classify's
         // own policy already excludes network/timeout/unparseable failures.
         (provider, model, code) => markModelFailed(state.modelCooldowns, provider, model, Date.now(), code),
+        // Provider attribution for our own outbound calls (issue #48): the same
+        // session id pi attaches to its requests for this model.
+        ctx.sessionManager.getSessionId(),
       );
     } finally {
       // Restore the proper status badge immediately, regardless of judge outcome.
@@ -595,6 +598,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
           isCool: cooldownPredicate(state.modelCooldowns, Date.now()),
           timeoutMs: auditTimeout,
           verbose: verboseAudit,
+          sessionId: ctx.sessionManager.getSessionId(),
           llmCall: callAuditLLM,
         });
         state.lastAudit = audit;

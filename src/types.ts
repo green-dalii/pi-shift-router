@@ -392,7 +392,11 @@ export interface ModelRegistryLike {
   getProviderAuthStatus?: (provider: string) => RegistryAuthStatusLike | undefined;
   getProviderDisplayName?: (provider: string) => string;
   getApiKeyForProvider?: (provider: string) => Promise<string | undefined>;
-  refresh?: () => Promise<unknown>;
+  refresh?: (options?: {
+    signal?: AbortSignal;
+    allowNetwork?: boolean;
+    providers?: string[];
+  }) => Promise<unknown>;
 }
 
 /** One provider's entry in the merged model store. */

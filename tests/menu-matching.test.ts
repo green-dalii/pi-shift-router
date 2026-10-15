@@ -38,6 +38,10 @@ describe("matchMenuChoice", () => {
     expect(matchMenuChoice("")).toBe("cancel");
   });
 
+  it("maps the catalog-refresh row, whose label carries a live model count", () => {
+    expect(matchMenuChoice("🔄 Model catalog — refresh now (137 available)")).toBe("refresh");
+  });
+
   it("does not confuse Smart with Cache-aware regardless of order", () => {
     expect(matchMenuChoice("🧠 Smart — 0 model(s)")).toBe("smart");
     expect(matchMenuChoice("🔒 Cache-aware routing")).toBe("cache");

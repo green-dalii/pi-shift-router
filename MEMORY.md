@@ -10,6 +10,34 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-10-15 — the wizard must never await pi's registry refresh
+
+**Decision.** `/router config` builds its catalog through `prepareWizardCatalog()`: cache invalidation
++ a disk re-read (awaited, ~1.4 ms) + `refreshRegistryInBackground()` (fire-and-forget, bounded by
+`AbortSignal.timeout(10 s)`, never rejects). The pickers read the snapshot at each point of use via
+`modelList()`, and a `🔄 Model catalog — refresh now` menu row performs an awaited, *visible*
+refresh for the "I just hand-edited models.json" case.
+
+**Why.** pi's `registry.refresh()` is not a disk re-read. In pi 1.2.0 `ModelRuntime.refresh()`
+runs `models.refresh({ allowNetwork: modelNetworkEnabled })` **and then awaits
+`queueAvailabilityRefresh()`**, which does `getAvailable(undefined)` plus a `checkAuth` for every
+provider — a pass that is **not** gated by `allowNetwork: false`. Measured here: 0.19 s
+(deepseek) … 4.31 s (openrouter), executed concurrently, so the wait is the slowest provider.
+Awaiting that before the first UI froze `/router config` for seconds. It entered in v1.6.0
+(`4d1b546`), not in v1.7.1.
+
+**Rejected.** (a) `refresh({ allowNetwork: false })` — the availability pass still runs.
+(b) A short timeout on the awaited refresh — still freezes, just for less time, and gives up the
+result entirely. (c) An `R` key inside the TUI pickers — needs component-level input plumbing and
+re-touches the TUI code that #47 just stabilized; the menu row buys the same escape hatch for a
+fraction of the risk. (d) Awaiting only when a picker opens — the same freeze, relocated.
+
+**Gotchas.** pi already refreshes **per provider** on credential changes (`setRuntimeApiKey` /
+`removeRuntimeApiKey` → `synchronizeCredentialState` → `refreshProviderAvailability`), so the
+wizard never needed a full pass to notice `/login`. `MenuChoice` is declared **twice** in
+`commands.ts` (module level and wizard-local) — adding a menu row means updating both, plus
+`matchMenuChoice`, which is keyword-based (fixture: `tests/menu-matching.test.ts`).
+
 ## 2026-10-14 — our own provider calls must carry pi's session attribution (issue #48)
 
 **Decision.** Direct provider calls (Judge, auditor) attach pi's session headers through a new

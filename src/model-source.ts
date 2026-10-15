@@ -134,10 +134,50 @@ export function providerDisplayNameFor(input: ModelSourceInput, provider: string
  * Ask pi to re-read `models.json` before listing. Best-effort: a refresh
  * failure must never block the wizard (the previous snapshot is still valid).
  */
-export async function refreshRegistry(registry?: ModelRegistryLike): Promise<void> {
+/**
+ * Refresh pi's registry and wait for it — for the cases where the caller
+ * deliberately wants the catalog re-checked (the wizard's manual refresh row).
+ * Everything that merely *reads* the catalog should use
+ * {@link refreshRegistryInBackground} instead: pi's refresh is a network pass,
+ * not a disk re-read.
+ */
+export async function refreshRegistry(
+	registry?: ModelRegistryLike,
+	options?: { signal?: AbortSignal },
+): Promise<void> {
 	try {
-		await registry?.refresh?.();
+		await registry?.refresh?.(options);
 	} catch {
 		// Errors are values: listing from the current snapshot is still correct.
 	}
+}
+
+/** Long enough for a slow provider's availability check, short enough to give up on one. */
+export const CATALOG_REFRESH_TIMEOUT_MS = 10_000;
+
+/**
+ * Start pi's registry refresh without holding the caller on it.
+ *
+ * `registry.refresh()` is not a disk re-read: pi runs a full availability pass —
+ * a model-list fetch plus an auth check for every provider — measured at
+ * 0.19–4.3 s per provider and executed concurrently, so the wait is the slowest
+ * provider. `allowNetwork: false` does *not* skip that pass (it only skips the
+ * catalog fetch). Awaiting it before a TUI opens is therefore a multi-second
+ * freeze; awaiting it in the background is free, because the snapshot it
+ * updates is read lazily by whoever needs it.
+ *
+ * Never rejects: a failed or timed-out refresh leaves the current snapshot
+ * usable, which is the state the caller can already render.
+ */
+export function refreshRegistryInBackground(
+	registry: ModelRegistryLike | undefined,
+	timeoutMs: number,
+): Promise<void> {
+	const refresh = registry?.refresh;
+	if (!refresh) return Promise.resolve();
+	const bounded = { signal: AbortSignal.timeout(timeoutMs) };
+	return Promise.resolve()
+		.then(() => refresh(bounded))
+		.then(() => undefined)
+		.catch(() => undefined);
 }

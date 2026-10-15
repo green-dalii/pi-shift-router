@@ -23,6 +23,8 @@
 
 After hand-editing, re-run `/router config` once to reload, or restart pi.
 
+The wizard re-reads `~/.pi/agent/models.json` and `auth.json` the moment it opens (~1 ms) and repairs the provider catalog **in the background**: pi's availability check is a network pass (0.19–4.3 s per provider, run concurrently), so it never holds the menu. If a model you just added is still missing, pick `🔄 Model catalog — refresh now` in the wizard and wait for the notification, or restart pi.
+
 ## JSON schema
 
 Two layers: the TUI wizard writes the "configurable from TUI" block; the advanced block is hand-edited. Layout:

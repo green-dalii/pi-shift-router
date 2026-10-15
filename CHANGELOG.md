@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.7.1] — Session-aware provider calls, zero runtime dependencies
+
+### Fixed
+
+- **The Judge works with OpenCode Go / Zen.** Our own judge and audit requests
+  went out without the provider session header OpenCode requires, so the gateway
+  answered `400 MissingSessionID` — and because that 400 is not a failover
+  signature, the router never cooled the endpoint down or recovered: every turn
+  ended with `⚠ judge unavailable (every judge endpoint failed)` and routing
+  stayed off for the whole session. This hit the default `fast-chain` mode too
+  (it reuses the Fast tier), i.e. anyone following `docs/MODELS.md`, which
+  recommends OpenCode Go and Zen. Calls now carry the same attribution pi sends
+  (`x-opencode-session` + `x-opencode-client`, only for OpenCode providers or the
+  exact `opencode.ai` host, and only with a real session id). Diagnosed in #48 by
+  @freewu32.
+- **pi 1.0.0 no longer warns about this extension.** `@earendil-works/pi-tui` was
+  declared as a runtime dependency while being a bundle the host already
+  provides — pi flags that as a duplicate-module hazard. It is now a
+  `peerDependency` (`*`) only, and the lazy import that made our own copy
+  load-bearing is static, so the install pulls **no** runtime dependencies.
+
+### Changed
+
+- The packaging gates enforce the host contract rather than one package name:
+  host-provided packages may not appear in `dependencies`, every declared peer
+  must be one the host provides, and no dynamic import may reach a module that
+  imports a host bundle.
+
 ## [1.7.0] — A judge that answers with a number
 
 ### Added

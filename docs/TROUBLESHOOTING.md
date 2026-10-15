@@ -12,6 +12,14 @@ Fixed in v0.8.0 (commit `de6073a`+). Root cause: `JSON.stringify(undefined)` ret
 
 If you still see this on an older install, reinstall: `pi remove pi-shift-router && pi install <path-to-this-repo>` (e.g. `pi install .` from the repo root).
 
+## Judge unavailable on every turn with an OpenCode (Go / Zen) endpoint
+
+Symptom: `⚠ judge unavailable (every judge endpoint failed)` on every turn, and the router never switches — while the same model answers ordinary conversation fine.
+
+Before **v1.7.1** our own judge and audit requests went out without the provider session header OpenCode requires (`400 MissingSessionID`). That status is not a failover signature, so the router neither cooled the endpoint down nor recovered — it re-walked the whole judge chain every turn and kept routing off. Any OpenCode model in the judge chain triggered it, including the default `fast-chain` mode, which reuses the Fast tier.
+
+Fixed: those calls now carry the attribution pi sends for its own requests (`x-opencode-session`). Upgrade to v1.7.1 — `pi update`, or reinstall the package.
+
 ## "No models match" in the wizard
 
 Models come from pi-agent's `models-store.json`. Restart pi-agent after adding a new provider so it re-discovers the list.

@@ -12,6 +12,14 @@ v0.8.0 修复（commit `de6073a`+）。根因：`JSON.stringify(undefined)` 返�
 
 如果你在旧版本仍看到，重新安装：`pi remove pi-shift-router && pi install <path-to-this-repo>`（例如在仓库根目录跑 `pi install .`）。
 
+## 用 OpenCode（Go / Zen）时每轮都提示 judge unavailable
+
+症状：每轮都出现 `⚠ judge unavailable (every judge endpoint failed)`，路由器始终不切模型——但同一个模型在普通对话里完全正常。
+
+**v1.7.1 之前**，路由器自己发出的 judge / audit 请求没有带上 OpenCode 要求的会话头（`400 MissingSessionID`）。该状态码不属于 failover 签名，于是路由器既不冷却该端点也不恢复：每轮重新走完整条 judge 链，并且一直不路由。judge 链里只要有一个 OpenCode 模型就会触发，包括默认的 `fast-chain`（它复用 Fast 链）。
+
+已修复：这些请求现在会带上 pi 自己发送的归属头（`x-opencode-session`）。升级到 v1.7.1 即可——执行 `pi update`，或重装该包。
+
 ## 向导“找不到模型”
 
 模型列表来自 pi-agent 的 `models-store.json`。新增 provider 后重启 pi-agent 让其重新发现。

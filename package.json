@@ -1,6 +1,6 @@
 {
   "name": "pi-shift-router",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Per-turn model routing for Pi: a small judge picks the cheap or the strong tier for each message, with multi-model failover, task-level orchestration, and an optional decision-model judge (Jev) that answers with a calibrated probability instead of prose.",
   "keywords": [
     "pi-package",

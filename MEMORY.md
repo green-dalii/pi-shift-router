@@ -10,6 +10,36 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-10-14 — our own provider calls must carry pi's session attribution (issue #48)
+
+**Decision.** Direct provider calls (Judge, auditor) attach pi's session headers through a new
+`src/provider-attribution.ts` → `providerSessionHeaders(endpoint, sessionId)`, mirroring pi's
+`getSessionHeaders()`: predicate is `provider ∈ {opencode, opencode-go}` **or** a baseUrl whose
+hostname is **exactly** `opencode.ai`; headers are `x-opencode-session` + `x-opencode-client: pi`;
+nothing at all without a real session id. The id is threaded from
+`ctx.sessionManager.getSessionId()` at both call sites — the judge in `before_agent_start`, the
+audit in `agent_end`.
+
+**Why.** OpenCode Go / Zen enforces per-session routing and answers `400 MissingSessionID` to an
+unattributed request (verified against pi 1.2.0's `dist/core/provider-attribution.js`). The shape
+of the failure is what made it invisible: a 400 that is not a failover signature returns
+`code = null` from `judgeFailureCode()`, so nothing is cooled down, the whole ladder is re-walked
+on every turn, and `stopRouting` keeps routing off for the session. `fast-chain` is the default
+mode and reuses the Fast tier, and `docs/MODELS.md` recommends OpenCode Go/Zen — so the
+documented happy path silently disabled routing, with no signal that anything was wrong.
+
+**Rejected.** (a) A synthetic per-process id (`pi-shift-router-<pid>`) as the issue suggested —
+both hooks have `ctx`, so the real id is free and preserves the gateway's cache affinity.
+(b) Folding in the general fix ("any non-failover 4xx ⇒ no cooldown ⇒ the ladder spins forever")
+— that is a §4.6 ladder-semantics question, recorded as a follow-up instead. (c) Contains/suffix
+host matching — pi compares exactly, and `opencode.ai.example.com` must not receive a session id.
+(d) OpenRouter/NVIDIA/Cloudflare attribution headers — telemetry-gated, not required for a
+request to succeed.
+
+**Gotchas.** pi's helper returns `undefined`; ours returns `{}` so call sites stay a plain spread.
+`tests/` is outside `tsconfig.include`, so a wrong argument count in a test is invisible to `tsc`
+and CI's typecheck — only running the tests catches it (noticed while writing this fix).
+
 ## 2026-09-26 — pi-tui must be a peer: the lazy import was the real bug
 
 **Decision.** `@earendil-works/pi-tui` is declared **only** as `peerDependencies: {"*"}`

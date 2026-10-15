@@ -712,6 +712,16 @@ map):
 Failover/cooldown machinery is protocol-agnostic and unchanged (§8.5): a
 failover signature cools the endpoint; anything else holds.
 
+**Provider attribution on our own calls.** The Judge and the auditor reach
+providers directly, outside pi's request path, so they must carry the
+attribution pi attaches for the same model: some gateways route per session
+and refuse an unattributed call (`400 MissingSessionID` on OpenCode Go / Zen,
+issue #48). `providerSessionHeaders()` mirrors pi's `getSessionHeaders()` —
+the predicate is `provider ∈ {opencode, opencode-go}` or a `baseUrl` whose
+hostname is *exactly* `opencode.ai`, sent as `x-opencode-session` +
+`x-opencode-client: pi`, and only when a real session id exists. Mirror pi;
+do not accumulate vendor-specific headers here.
+
 **Mode semantics.** `JudgeResult.source` records `"llm"` for `fast-chain`/`custom`
 and `"decision"` for decision endpoints (telemetry/logs; the routing algorithm
 treats both as measured signal). **θ is deliberately untouched by this feature**:

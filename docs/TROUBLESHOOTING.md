@@ -20,6 +20,12 @@ Before **v1.7.1** our own judge and audit requests went out without the provider
 
 Fixed: those calls now carry the attribution pi sends for its own requests (`x-opencode-session`). Upgrade to v1.7.1 — `pi update`, or reinstall the package.
 
+## `/router config` takes seconds to open (fixed in v1.7.2)
+
+Before **v1.7.2** the config wizard waited for pi's full provider availability check — a model-list fetch plus an auth check per provider, run concurrently, so the wait was the slowest provider (0.19–4.31 s measured; 4.3 s on the machine where this was reported). The model and auth files themselves are read in ~1.4 ms, so nothing was wrong with your configuration.
+
+Upgrade to v1.7.2 (`pi update`, or reinstall this package): the menu now opens in about 4 ms and the provider catalog is repaired in the background. If you hand-edited `models.json` and a new model is missing, use `🔄 Model catalog — refresh now` in the wizard menu — it waits on purpose, with a progress indicator.
+
 ## "No models match" in the wizard
 
 Models come from pi-agent's `models-store.json`. Restart pi-agent after adding a new provider so it re-discovers the list.

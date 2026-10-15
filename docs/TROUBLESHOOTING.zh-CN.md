@@ -20,6 +20,12 @@ v0.8.0 修复（commit `de6073a`+）。根因：`JSON.stringify(undefined)` 返�
 
 已修复：这些请求现在会带上 pi 自己发送的归属头（`x-opencode-session`）。升级到 v1.7.1 即可——执行 `pi update`，或重装该包。
 
+## `/router config` 打开要等好几秒（v1.7.2 已修复）
+
+**v1.7.2 之前**，配置向导会等待 pi 的完整 provider 可用性检查——逐个 provider 抓取模型列表并校验凭据（并发执行，因此耗时取决于最慢的那个：实测 0.19–4.31 秒，报告者的机器上是 4.3 秒）。而配置文件本身只需约 1.4 ms 读取，所以不是你的配置有问题。
+
+升级到 v1.7.2（`pi update`，或重装本包）：菜单现在约 4 ms 就出现，provider 目录改为后台校正。若你手改过 `models.json` 且新模型没出现，用向导菜单里的 `🔄 Model catalog — refresh now`——它会**故意**等待，并显示进度指示。
+
 ## 向导“找不到模型”
 
 模型列表来自 pi-agent 的 `models-store.json`。新增 provider 后重启 pi-agent 让其重新发现。

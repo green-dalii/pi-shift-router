@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.7.2] — Config wizard opens instantly
+
+### Fixed
+
+- **`/router config` no longer stalls for seconds before its menu appears.**
+  The wizard awaited pi's `ModelRegistry.refresh()`, which is not a disk read:
+  pi runs a model-list fetch plus one auth check per provider, concurrently, so
+  the wait was the slowest provider — **4.3 s** on the machine where this was
+  reported (0.19–4.31 s across providers). The model and auth files are still
+  re-read the moment the wizard opens (~1.4 ms, which is what makes `/login`
+  and `/logout` visible); the provider catalog is now repaired in the
+  background, bounded to 10 s. Time to menu drops from **4302 ms to 4.3 ms**.
+- The pickers read the catalog when they open rather than once at startup, so a
+  background result that lands while you are still in the menu is already in
+  effect when a tier editor opens.
+
+### Added
+
+- **`🔄 Model catalog — refresh now`** in the wizard menu, for the case where you
+  just hand-edited `models.json` and want the catalog re-checked immediately.
+  It waits on purpose and shows a progress indicator — the wait became a
+  deliberate action instead of an invisible tax.
+
 ## [1.7.1] — Session-aware provider calls, zero runtime dependencies
 
 ### Fixed

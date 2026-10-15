@@ -17,6 +17,8 @@ import type {
   ModelRef,
   EconomicMode,
   StoredModel,
+  ModelsStore,
+  AuthStore,
 } from "./types.js";
 import {
   TIERS,
@@ -39,6 +41,7 @@ import {
   sameFamilyThetaFactor,
 } from "./router.js";
 import { resetOrchestration } from "./orchestrate.js";
+import { appendRouterLog } from "./log.js";
 import { computeStats, judgeModelDisplay } from "./stats.js";
 import { resolveJudgeEndpoints, normalizeJudgeMode } from "./config.js";
 import { DECISION_API_TYPE, DECISION_MIN_JUDGE_TIMEOUT_MS } from "./judge.js";
@@ -49,6 +52,8 @@ import {
   listAvailableModels,
   isModelAvailable,
   refreshRegistry,
+  refreshRegistryInBackground,
+  CATALOG_REFRESH_TIMEOUT_MS,
   type ModelRegistryLike,
 } from "./model-source.js";
 import {
@@ -66,7 +71,7 @@ import {
 
 // ─── `/route-config` wizard ──────────────────────────────────────
 
-type MenuChoice = "fast" | "smart" | "ux" | "cache" | "judge" | "done" | "cancel";
+type MenuChoice = "fast" | "smart" | "ux" | "cache" | "judge" | "refresh" | "done" | "cancel";
 
 /**
  * Status label for the economics mode. A set preset wins; otherwise the
@@ -245,6 +250,7 @@ function formatConfigSource(): string {
  * strings too.
  */
 export function matchMenuChoice(label: string): MenuChoice {
+  if (label.includes("Model catalog")) return "refresh";
   if (label.includes("Cache-aware")) return "cache";
   if (label.includes("Judge")) return "judge";
   if (label.includes("Fast")) return "fast";
@@ -265,28 +271,90 @@ export function matchSaveScope(label: string): "user" | "project" | null {
   return null;
 }
 
-async function routeConfigWizard(
+/**
+ * Injectable edges of {@link prepareWizardCatalog} — tests pass fakes so the
+ * disk read and the cache invalidation never touch the real agent dir.
+ */
+export interface WizardCatalogOverrides {
+  invalidate?: () => void;
+  readStores?: () => Promise<{ store: ModelsStore; auth: AuthStore }>;
+  refreshTimeoutMs?: number;
+}
+
+export interface WizardCatalog {
+  store: ModelsStore;
+  auth: AuthStore;
+  registry?: ModelRegistryLike;
+  /** Settles when pi's registry refresh finishes, aborts or fails. Never rejects. */
+  refreshing: Promise<void>;
+}
+
+/**
+ * The catalog `/router config` shows, built without waiting on the network.
+ *
+ * Re-reading `models.json` + `auth.json` costs ~1.4 ms and is what makes
+ * `/login` and `/logout` visible to the wizard. pi's `registry.refresh()` is a
+ * different animal: it runs a model-list fetch plus an auth check for every
+ * provider (measured 0.19–4.3 s each, run concurrently, and *not* skipped by
+ * `allowNetwork: false`). Awaiting it before the first UI froze the wizard for
+ * seconds, so it runs in the background now — the pickers read the snapshot
+ * again each time they open, by which point the refresh has usually landed.
+ */
+export async function prepareWizardCatalog(
+  registry: ModelRegistryLike | undefined,
+  overrides: WizardCatalogOverrides = {},
+): Promise<WizardCatalog> {
+  const invalidate =
+    overrides.invalidate ??
+    (() => {
+      invalidateModelsStoreCache();
+      invalidateAuthStoreCache();
+    });
+  const readStores =
+    overrides.readStores ??
+    (async () => ({ store: await loadModelsStore(), auth: await loadAuthStore() }));
+
+  invalidate();
+  const { store, auth } = await readStores();
+  return {
+    store,
+    auth,
+    registry,
+    refreshing: refreshRegistryInBackground(
+      registry,
+      overrides.refreshTimeoutMs ?? CATALOG_REFRESH_TIMEOUT_MS,
+    ),
+  };
+}
+
+export async function routeConfigWizard(
   config: ShiftRouterConfig,
   cwd: string,
   ctx: ExtensionCommandContext,
+  catalogOverrides?: WizardCatalogOverrides,
 ): Promise<boolean> {
-  // Force a fresh read of the merged models store AND credentials: pi's
-  // catalog, the user's models.json, and auth.json may all have changed since
-  // pi started (e.g. /login or /logout while the session is running). The
-  // picker must reflect current disk state and only offer authenticated
-  // providers — otherwise a provider removed by /logout keeps showing stale
-  // ghost models in the list.
-  invalidateModelsStoreCache();
-  invalidateAuthStoreCache();
-  const store = await loadModelsStore();
-  const auth = await loadAuthStore();
-  // Same catalog pi's `/model` shows: ask pi's registry first (it knows about
-  // env-var / models.json-command / runtime credentials and pi's full bundled
-  // catalog), and refresh so a just-edited models.json is reflected.
   const registry = (ctx as any).modelRegistry as ModelRegistryLike | undefined;
-  await refreshRegistry(registry);
-  const modelSource = { registry, store, auth };
-  const allModels = listAvailableModels(modelSource);
+  const catalogStarted = Date.now();
+  const catalog = await prepareWizardCatalog(registry, catalogOverrides);
+  const { store, auth } = catalog;
+  appendRouterLog(
+    `[ShiftRouter] wizard catalog ready in ${Date.now() - catalogStarted} ms ` +
+      `(pi's registry availability refresh continues in the background)`,
+  );
+  // Read the catalog at each point of use rather than once here: pickers open
+  // seconds after the menu, and by then the background refresh usually has a
+  // fresher snapshot (pi's own `/model` reads the snapshot too).
+  const modelSource = () => ({ registry, store, auth });
+  const modelList = (): StoredModel[] => listAvailableModels(modelSource());
+  let allModels = modelList();
+  if (allModels.length === 0) {
+    // The one case where waiting is right: with nothing to show, the
+    // background refresh is the only thing that can produce a catalog, and
+    // exiting with "No models found" would be wrong while it is still running.
+    // Bounded by the refresh timeout, and it never rejects.
+    await catalog.refreshing;
+    allModels = modelList();
+  }
   if (allModels.length === 0 && Object.keys(store).length > 0) {
     ctx.ui.notify("No authenticated providers — run /login for a provider before configuring tiers", "warning");
   }
@@ -296,7 +364,7 @@ async function routeConfigWizard(
     return false;
   }
 
-  type MenuChoice = "fast" | "smart" | "ux" | "cache" | "judge" | "done" | "cancel";
+  type MenuChoice = "fast" | "smart" | "ux" | "cache" | "judge" | "refresh" | "done" | "cancel";
   async function saveDestination(): Promise<"user" | "project" | null> {
     const choice = await ctx.ui.select("Save configuration to…", [
       "📁 Project — <cwd>/.pi/pi-shift-router.json (shareable with team)",
@@ -308,18 +376,57 @@ async function routeConfigWizard(
   }
 
   async function menu(): Promise<MenuChoice> {
+    // The counts reflect the snapshot as of this render — the background
+    // refresh updates it, so reopening the menu shows what landed.
+    const models = modelList();
     const choice = await ctx.ui.select("pi-shift-router — Configuration", [
       `🦾 Fast — ${config.tiers.fast.models.length} model(s)  (engineer: execution, daily coding)`,
       `🧠 Smart — ${config.tiers.smart.models.length} model(s)  (CTO: direction, review, hard problems)`,
-      `🧭 Judge — ${judgeSummary(config, allModels.filter((m) => m.api === DECISION_API_TYPE).length)}`,
+      `🧭 Judge — ${judgeSummary(config, models.filter((m) => m.api === DECISION_API_TYPE).length)}`,
       "🎨 UX settings",
       "🔒 Cache-aware routing",
+      `🔄 Model catalog — refresh now (${models.length} available)`,
       "💾 Save & exit",
       "🚫 Discard & exit",
     ]);
 
     if (!choice) return "cancel";
     return matchMenuChoice(choice);
+  }
+
+  /**
+   * Manual escape hatch: wait for pi's availability pass on purpose — and say
+   * so while waiting. The wizard deliberately does not do this on open.
+   */
+  async function refreshCatalog(): Promise<void> {
+    const started = Date.now();
+    const statusKey = "shift-router-catalog";
+    // A session swap (or reload) mid-refresh makes pi's ctx stale, and its UI
+    // calls then throw. Cleanup must not become the command's error.
+    const clearStatus = () => {
+      try {
+        ctx.ui.setStatus(statusKey, undefined);
+      } catch {
+        /* stale ctx after a session swap — nothing to clean up */
+      }
+    };
+    ctx.ui.setStatus(statusKey, "⏳ refreshing model catalog…");
+    try {
+      await refreshRegistry(registry, {
+        signal: AbortSignal.timeout(CATALOG_REFRESH_TIMEOUT_MS),
+      });
+    } finally {
+      clearStatus();
+    }
+    const count = modelList().length;
+    appendRouterLog(
+      `[ShiftRouter] wizard catalog refreshed in ${Date.now() - started} ms (${count} models)`,
+    );
+    try {
+      ctx.ui.notify(`pi-shift-router: 🔄 ${count} models available`, "info");
+    } catch {
+      /* same stale-ctx case as above */
+    }
   }
 
   async function editTier(tier: Tier): Promise<void> {
@@ -329,14 +436,14 @@ async function routeConfigWizard(
     if (ctx.mode === "tui") {
       const unavailableKeys = new Set(
         cfg.models
-          .filter((m) => !isModelAvailable(modelSource, m.provider, m.model))
+          .filter((m) => !isModelAvailable(modelSource(), m.provider, m.model))
           .map((m) => `${m.provider}/${m.model}`),
       );
       const updated = await ctx.ui.custom<ModelRef[] | null>(
         (_tui, theme, _keybindings, done) => {
           return createChainEditor({
             items: cfg.models,
-            allModels: chatCapableModels(allModels),
+            allModels: chatCapableModels(modelList()),
             tier,
             tierLabel: cfg.label,
             theme,
@@ -355,7 +462,7 @@ async function routeConfigWizard(
       ? `${cfg.models[0].provider}/${cfg.models[0].model}`
       : null;
 
-    const availModels = chatCapableModels(allModels).filter((m) => m.cost?.input != null);
+    const availModels = chatCapableModels(modelList()).filter((m) => m.cost?.input != null);
 
     // Group models by provider
     const byProvider = new Map<string, typeof availModels>();
@@ -521,7 +628,7 @@ async function routeConfigWizard(
       return [{ provider: models[idx]!.provider, model: models[idx]!.id, priority: 1 }];
     }
     const unavailableKeys = new Set(
-      items.filter((m) => !isModelAvailable(modelSource, m.provider, m.model)).map((m) => `${m.provider}/${m.model}`),
+      items.filter((m) => !isModelAvailable(modelSource(), m.provider, m.model)).map((m) => `${m.provider}/${m.model}`),
     );
     return await ctx.ui.custom<ModelRef[] | null>((_tui, theme, _keybindings, done) =>
       createChainEditor({
@@ -548,7 +655,7 @@ async function routeConfigWizard(
   async function editJudge(): Promise<void> {
     const judge = config.routing.judge ?? { mode: "fast-chain" as JudgeMode };
     const current: JudgeMode = normalizeJudgeMode(judge);
-    const decisionModels = allModels.filter((m) => m.api === DECISION_API_TYPE);
+    const decisionModels = modelList().filter((m) => m.api === DECISION_API_TYPE);
     const opts = judgeModeOptions(current, decisionModels.length);
     const picked = await ctx.ui.select("🧭 Judge — the model that picks your model", opts);
     const idx = picked ? opts.indexOf(picked) : -1;
@@ -560,7 +667,7 @@ async function routeConfigWizard(
       return;
     }
     if (mode === "custom") {
-      const items = await openChainEditor(judge.models ?? [], allModels, "Dedicated Judge");
+      const items = await openChainEditor(judge.models ?? [], modelList(), "Dedicated Judge");
       if (!items || items.length === 0) return;
       config.routing.judge = { mode: "custom", models: items };
       ctx.ui.notify(
@@ -625,6 +732,8 @@ async function routeConfigWizard(
       await editCacheAware();
     } else if (choice === "judge") {
       await editJudge();
+    } else if (choice === "refresh") {
+      await refreshCatalog();
     }
   }
 

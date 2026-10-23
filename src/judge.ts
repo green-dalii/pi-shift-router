@@ -294,6 +294,11 @@ async function classifyLLM(
       ...(isDecisionApi(endpoint.apiType) ? { decisionProtocol: endpoint.apiType } : {}),
       ...(answer.confidence !== undefined ? { confidence: answer.confidence } : {}),
       ...(answer.reason !== undefined ? { reason: answer.reason } : {}),
+      // The judge's own orchestration answer (prompt §2, required on smart).
+      // It was parsed since v1.1.0 but never carried into the verdict, so every
+      // path silently fell back to the tier default; the native classifier path
+      // would then disagree with the legacy one on the same answer.
+      ...(answer.orchestrate !== undefined ? { orchestrate: answer.orchestrate } : {}),
       ...(resolved !== undefined ? { resolvedModel: resolved } : {}),
     };
     return { ok: true, result };

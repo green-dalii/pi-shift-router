@@ -46,6 +46,14 @@ export interface JudgeResult {
    */
   resolvedModel?: string;
   /**
+   * Which decision protocol produced a `source: "decision"` verdict
+   * (v1.7.3+): a pi classifier api (`typesafe-system-one`,
+   * `openai-decisions`, `cloudflare-workers-ai-system-one`, …) for the native
+   * path, or the legacy `typesafe-decisions` marker. Telemetry only — the
+   * routing algorithm treats every decision verdict the same way.
+   */
+  decisionProtocol?: string;
+  /**
    * Judge's explicit orchestration signal (v1.1.0+). true = task is large
    * enough / decomposable enough that the Smart tier should orchestrate
    * Fast subagents instead of running the turn directly; false = Smart
@@ -388,6 +396,18 @@ export interface ModelRegistryLike {
   getAvailable?: () => RegistryModelLike[];
   getAll?: () => RegistryModelLike[];
   find?: (provider: string, modelId: string) => RegistryModelLike | undefined;
+  /**
+   * Classifier catalog reads (pi ≥ 1.4.0). Synchronous snapshot — no auth or
+   * network probe, which is what makes it safe to call while the wizard opens.
+   *
+   * The parameters are `any` on purpose: the host's real `ModelRegistry` is
+   * generic over `ModelType`, and a narrower signature here would make it
+   * unassignable to this structural type. This is the pi API boundary, the one
+   * place where `any` is allowed (AGENTS.md).
+   */
+  getModelsOfType?: (type: any, provider?: any) => readonly RegistryModelLike[];
+  /** Runs one classification through the owning provider. Never rejects. */
+  classify?: (model: any, context: any, options?: any) => Promise<RegistryClassifierResultLike>;
   hasConfiguredAuth?: (model: RegistryModelLike) => boolean;
   getProviderAuthStatus?: (provider: string) => RegistryAuthStatusLike | undefined;
   getProviderDisplayName?: (provider: string) => string;
@@ -397,6 +417,18 @@ export interface ModelRegistryLike {
     allowNetwork?: boolean;
     providers?: string[];
   }) => Promise<unknown>;
+}
+
+/**
+ * The subset of pi's `ClassifierResult` the router reads. `stopReason` is
+ * `"stop"` on success; anything else (or a `refusal` answer) means hold.
+ */
+export interface RegistryClassifierResultLike {
+  answers: Record<string, unknown>;
+  stopReason: string;
+  errorMessage?: string;
+  model?: string;
+  api?: string;
 }
 
 /** One provider's entry in the merged model store. */
@@ -443,9 +475,15 @@ export interface AuthStore {
 export interface ProviderEndpoint {
   provider: string;
   baseUrl: string;
-  apiType: string;       // "openai-completions" | "openai-responses" | "anthropic-messages"
+  apiType: string;       // "openai-completions" | "openai-responses" | "anthropic-messages" | "typesafe-decisions" | a pi ClassifierApi
   apiKey: string;
   modelId: string;
+  /**
+   * Set when this ref resolved to a model in pi's classifier catalog. The
+   * judge then runs through `registry.classify()` instead of our own HTTP
+   * client; `apiKey` is empty because pi resolves credentials itself.
+   */
+  classifier?: RegistryModelLike;
 }
 
 /** Configured tier with resolved model info (for config display) */

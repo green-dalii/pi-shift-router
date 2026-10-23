@@ -313,6 +313,9 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         // Provider attribution for our own outbound calls (issue #48): the same
         // session id pi attaches to its requests for this model.
         ctx.sessionManager.getSessionId(),
+        // Native classifier path (issue #54): a judge ref that resolved to a
+        // pi classifier model is judged through the host's own transport.
+        ctx.modelRegistry as any,
       );
     } finally {
       // Restore the proper status badge immediately, regardless of judge outcome.

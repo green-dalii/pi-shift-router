@@ -45,6 +45,7 @@ import { appendRouterLog } from "./log.js";
 import { computeStats, judgeModelDisplay } from "./stats.js";
 import { resolveJudgeEndpoints, normalizeJudgeMode } from "./config.js";
 import { DECISION_API_TYPE, DECISION_MIN_JUDGE_TIMEOUT_MS } from "./judge.js";
+import { listDecisionChoices, classifierTimeoutFloor } from "./decision.js";
 import { StatusPanel, assembleStatusData, type StatusPanelInput } from "./tui/status-panel.js";
 import { createChainEditor } from "./tui/fallback-chain-editor.js";
 import { createModelPicker } from "./tui/model-picker.js";
@@ -86,21 +87,25 @@ function economicModeLabel(config: ShiftRouterConfig): string {
 }
 
 /**
- * A decision call measured 1.4–6.6 s against the live API, so the LLM-judge
- * default (5000 ms) would abort most of them and quietly hold every turn. Raises
- * the timeout to the measured floor, and reports the change so it is never a
- * silent config write. Returns `raised: false` when the user already set a
- * value at or above the floor (their choice stands).
+ * A decision call measured 1.4–6.6 s against the live System One API, so the
+ * LLM-judge default (5000 ms) would abort most of them and quietly hold every
+ * turn. Raises the timeout to the protocol's floor — 15 s for System One, 8 s
+ * for OpenAI Decisions — and reports the change so it is never a silent config
+ * write. Returns `raised: false` when the user already set a value at or above
+ * the floor (their choice stands).
  */
-export function ensureDecisionJudgeTimeout(config: ShiftRouterConfig): {
+export function ensureDecisionJudgeTimeout(
+  config: ShiftRouterConfig,
+  floorMs: number = DECISION_MIN_JUDGE_TIMEOUT_MS,
+): {
   from: number;
   to: number;
   raised: boolean;
 } {
   const from = config.routing.judgeTimeout;
-  if (from >= DECISION_MIN_JUDGE_TIMEOUT_MS) return { from, to: from, raised: false };
-  config.routing.judgeTimeout = DECISION_MIN_JUDGE_TIMEOUT_MS;
-  return { from, to: DECISION_MIN_JUDGE_TIMEOUT_MS, raised: true };
+  if (from >= floorMs) return { from, to: from, raised: false };
+  config.routing.judgeTimeout = floorMs;
+  return { from, to: floorMs, raised: true };
 }
 
 /**
@@ -140,7 +145,7 @@ export function judgeModeOptions(current: JudgeMode, decisionCount: number): str
   return [
     `${mark(current === "fast-chain")}🦾 Reuse the Fast tier chain (default)`,
     `${mark(current === "custom")}🔬 Dedicated Judge LLM chain`,
-    `${mark(current === "decision")}🧮 Jev — decision model (Beta) — ${
+    `${mark(current === "decision")}🧮 Decision model (Beta) — ${
       decisionCount === 0 ? "none available yet" : `${decisionCount} available`
     }`,
     "✅ Back",
@@ -152,10 +157,10 @@ export function judgeModeOptions(current: JudgeMode, decisionCount: number): str
  * decoupled from positional index arithmetic in the handler.
  *
  * Order is deliberate: the legacy default (reuse the Fast chain) leads, the
- * dedicated LLM chain follows, and Jev sits last as an explicitly **Beta**
- * option. Jev is in public beta with limited independent validation, so it is an
- * opt-in extra — not a first-class judge that a new user should land on by
- * default (SPEC §8.6).
+ * dedicated LLM chain follows, and the decision model sits last as an explicitly
+ * **Beta** option. Decision models are still less independently validated than
+ * an LLM judge, so the mode is an opt-in extra — not a first-class judge that a
+ * new user should land on by default (SPEC §8.6).
  */
 export const JUDGE_MODE_ORDER: JudgeMode[] = ["fast-chain", "custom", "decision"];
 
@@ -166,12 +171,14 @@ export const JUDGE_MODE_ORDER: JudgeMode[] = ["fast-chain", "custom", "decision"
  */
 export function decisionSetupGuide(): string[] {
   return [
-    "Why: no authenticated endpoint speaks the decisions protocol",
-    "1. Add a Jev provider in ~/.pi/agent/models.json:",
-    `     "api": "${DECISION_API_TYPE}"  (baseUrl https://api.typesafe.ai)`,
-    "2. Or route it through an authenticated gateway (OpenRouter / Cloudflare AI Gateway)",
-    "Then: /router config → 🧭 Judge → 🧮 Jev (Beta)",
-    ".  Saved as-is; if it stops answering, routing falls back and tells you",
+    "Why: no authenticated decision model is available yet",
+    "1. Authenticate a provider that serves one: /login typesafe (Jev),",
+    "   /login openai (gpt-6-luna), or an OpenRouter key you already have",
+    "2. Then: /router config → 🧭 Judge → 🧮 Decision model (Beta)",
+    "   The list comes from pi's own classifier catalog — no models.json edit",
+    "Older pi? Hand-configured endpoints still work:",
+    `   models.json → "api": "${DECISION_API_TYPE}" (deprecated, logs a notice)`,
+    "Saved as-is; if it stops answering, routing falls back and tells you",
     "Meanwhile: the router keeps judging with your LLM judge — no stall",
     "Beta: less battle-tested than an LLM judge — the router falls back either way",
     "Prefer to stay on an LLM? Pick 🦾 Reuse the Fast chain or 🔬 Dedicated",
@@ -189,13 +196,13 @@ export function judgeSummary(config: ShiftRouterConfig, decisionCount?: number):
   if (mode === "fast-chain") return "reuse Fast tier chain (LLM)";
   if (mode === "decision" && decisionCount === 0) {
     // Chosen but unusable: say what is *actually* judging, not what was wished for.
-    return "Jev unavailable — LLM judge active";
+    return "decision model unavailable — LLM judge active";
   }
   const models = judge?.models ?? [];
   if (models.length === 0) return `${mode} — no models (holds)`;
   const head = `${models[0]!.provider}/${models[0]!.model}`;
   const more = models.length > 1 ? ` +${models.length - 1}` : "";
-  return mode === "decision" ? `Jev (Beta): ${head}${more}` : `dedicated: ${head}${more}`;
+  return mode === "decision" ? `decision model (Beta): ${head}${more}` : `dedicated: ${head}${more}`;
 }
 
 /** Same-family θ divisor for status display (mirrors router.sameFamilyThetaFactor). */
@@ -327,6 +334,10 @@ export async function prepareWizardCatalog(
   };
 }
 
+export function decisionModelsFor(registry: ModelRegistryLike | undefined, models: StoredModel[]): StoredModel[] {
+  return listDecisionChoices(registry, models);
+}
+
 export async function routeConfigWizard(
   config: ShiftRouterConfig,
   cwd: string,
@@ -382,7 +393,7 @@ export async function routeConfigWizard(
     const choice = await ctx.ui.select("pi-shift-router — Configuration", [
       `🦾 Fast — ${config.tiers.fast.models.length} model(s)  (engineer: execution, daily coding)`,
       `🧠 Smart — ${config.tiers.smart.models.length} model(s)  (CTO: direction, review, hard problems)`,
-      `🧭 Judge — ${judgeSummary(config, models.filter((m) => m.api === DECISION_API_TYPE).length)}`,
+      `🧭 Judge — ${judgeSummary(config, decisionModelsFor(registry, models).length)}`,
       "🎨 UX settings",
       "🔒 Cache-aware routing",
       `🔄 Model catalog — refresh now (${models.length} available)`,
@@ -646,16 +657,16 @@ export async function routeConfigWizard(
 
   /**
    * Judge mode editor (SPEC §8.6). Three modes: reuse the Fast chain (default),
-   * a dedicated Judge LLM chain, or a decision-protocol model (Jev class).
-   * Decision mode needs at least one decision-capable endpoint; the picker is
-   * filtered to those, and the choice is validated locally (auth + baseUrl).
-   * No save-time network probe: the runtime ladder covers unreachable
-   * endpoints instead of blocking the config UI on a round trip.
+   * a dedicated Judge LLM chain, or a decision model — which on pi ≥ 1.4.0 means
+   * a model from pi's own classifier catalog (TypeSafe Jev, OpenAI Decisions,
+   * Cloudflare Clef, …), judged through `registry.classify()`. Legacy
+   * `models.json` decision endpoints are still listed, marked deprecated.
+   * Listing is a synchronous catalog read: no auth probe, no network (issue #52).
    */
   async function editJudge(): Promise<void> {
     const judge = config.routing.judge ?? { mode: "fast-chain" as JudgeMode };
     const current: JudgeMode = normalizeJudgeMode(judge);
-    const decisionModels = modelList().filter((m) => m.api === DECISION_API_TYPE);
+    const decisionModels = decisionModelsFor(registry, modelList());
     const opts = judgeModeOptions(current, decisionModels.length);
     const picked = await ctx.ui.select("🧭 Judge — the model that picks your model", opts);
     const idx = picked ? opts.indexOf(picked) : -1;
@@ -699,7 +710,9 @@ export async function routeConfigWizard(
       routing: { ...config.routing, judge: { mode: "decision" as JudgeMode, models: items } },
     };
     const endpoints = await resolveJudgeEndpoints(candidate, store, auth, process.env, registry);
-    if (endpoints.length === 0 || endpoints[0]!.apiType !== DECISION_API_TYPE) {
+    const first = endpoints[0];
+    const usable = first && (!!first.classifier || first.apiType === DECISION_API_TYPE);
+    if (!usable) {
       ctx.ui.notify(
         "pi-shift-router: could not resolve the selected decision model (missing auth or baseUrl). 🧭 Judge mode unchanged.",
         "error",
@@ -707,11 +720,17 @@ export async function routeConfigWizard(
       return;
     }
     config.routing.judge = { mode: "decision", models: items };
-    const timeout = ensureDecisionJudgeTimeout(config);
+    const timeout = ensureDecisionJudgeTimeout(
+      config,
+      first.classifier
+        ? classifierTimeoutFloor(first.classifier.api ?? first.apiType)
+        : DECISION_MIN_JUDGE_TIMEOUT_MS,
+    );
     ctx.ui.notify(
-      `pi-shift-router: 🧭 Judge = 🧮 Jev (Beta) ${endpoints[0]!.provider}/${endpoints[0]!.modelId}` +
+      `pi-shift-router: 🧭 Judge = 🧮 decision model ${first.provider}/${first.modelId} ` +
+        (first.classifier ? `(pi classifier: ${first.apiType})` : "(legacy endpoint — deprecated)") +
         (timeout.raised
-          ? ` — judgeTimeout ${timeout.from} → ${timeout.to} ms (decision calls measured 1.4–6.6 s)`
+          ? ` — judgeTimeout ${timeout.from} → ${timeout.to} ms (decision calls need the protocol floor)`
           : "") +
         " · falls back to your LLM judge if it becomes unreachable",
       "info",

@@ -8,6 +8,8 @@
 
 import { readFile, writeFile, access, mkdir } from "node:fs/promises";
 import { appendRouterLog } from "./log.js";
+import { DECISION_API_TYPE } from "./judge.js";
+import { classifierEndpoint, findClassifierModel } from "./decision.js";
 import { homedir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import {
@@ -296,6 +298,30 @@ export function isModelUnavailable(
  *   2. cheapest model with valid auth (global fallback)
  */
 /**
+ * Legacy decision endpoints are deprecated (issue #54): they are the router's
+ * own protocol client, kept for hosts without pi's classifier layer and for
+ * hand-configured endpoints. Warn once per endpoint per process — a log line
+ * per turn would be noise, and silence would hide the migration.
+ */
+const legacyDecisionWarned = new Set<string>();
+
+function warnLegacyDecisionEndpoint(endpoint: ProviderEndpoint): void {
+  if (endpoint.classifier || endpoint.apiType !== DECISION_API_TYPE) return;
+  const key = `${endpoint.provider}/${endpoint.modelId}`;
+  if (legacyDecisionWarned.has(key)) return;
+  legacyDecisionWarned.add(key);
+  appendRouterLog(
+    `[ShiftRouter] Decision judge ${key} uses the legacy ${DECISION_API_TYPE} transport ` +
+      `(deprecated) — switch to a pi classifier model in /router config`,
+  );
+}
+
+/** Test seam: forget which endpoints were already warned about. */
+export function resetLegacyDecisionWarnings(): void {
+  legacyDecisionWarned.clear();
+}
+
+/**
  * Resolve ONE `provider/model` into an endpoint: registry first (pi owns the
  * catalog and credentials), store + auth.json as the fallback (SPEC §5.4).
  */
@@ -482,9 +508,19 @@ export async function resolveJudgeEndpoints(
   const primary: ProviderEndpoint[] = [];
   const models = [...(config.routing.judge?.models ?? [])].sort((a, b) => a.priority - b.priority);
   for (const ref of models) {
+    // Native path first (issue #54): a ref that names a model in pi's
+    // classifier catalog runs through `registry.classify()`, so pi resolves
+    // the key and the router never speaks the protocol itself. Synchronous
+    // catalog read — no auth probe, no network.
+    const classifier = mode === "decision" ? findClassifierModel(registry, ref.provider, ref.model) : null;
+    if (classifier) {
+      primary.push(classifierEndpoint(ref.provider, classifier));
+      continue;
+    }
     const ep = await resolveEndpoint(ref.provider, ref.model, store, auth, env, registry);
     if (ep) primary.push(ep);
   }
+  for (const ep of primary) warnLegacyDecisionEndpoint(ep);
 
   // The judge ladder (SPEC §8.6), expressed as one ordered list so a single
   // `classify()` walk covers BOTH failure kinds in the same turn:

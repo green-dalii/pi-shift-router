@@ -69,10 +69,10 @@ describe("Judge menu (SPEC §8.6)", () => {
     expect(matchMenuChoice("🔒 Cache-aware routing")).toBe("cache");
   });
 
-  it("shows what is actually judging when Jev was chosen but is unusable", () => {
+  it("shows what is actually judging when a decision model was chosen but is unusable", () => {
     const cfg = (judge?: any) => ({ routing: { judge } }) as any;
     expect(judgeSummary(cfg({ mode: "decision", models: [{ provider: "typesafe", model: "jev-latest", priority: 1 }] }), 0)).toBe(
-      "Jev unavailable — LLM judge active",
+      "decision model unavailable — LLM judge active",
     );
   });
 
@@ -92,7 +92,7 @@ describe("Judge menu (SPEC §8.6)", () => {
           ],
         }),
       ),
-    ).toBe("Jev (Beta): typesafe/jev-1.13.0 +1");
+    ).toBe("decision model (Beta): typesafe/jev-1.13.0 +1");
   });
 });
 
@@ -141,7 +141,7 @@ describe("Wizard indicator vocabulary — one idiom per semantics", () => {
   });
 
   it("keeps exclusive pickers on circles (● current / ○ other)", () => {
-    expect(judgeModeOptions("decision", 1)[2]).toBe("● 🧮 Jev — decision model (Beta) — 1 available");
+    expect(judgeModeOptions("decision", 1)[2]).toBe("● 🧮 Decision model (Beta) — 1 available");
     expect(judgeModeOptions("fast-chain", 1)[0]).toBe("● 🦾 Reuse the Fast tier chain (default)");
   });
 
@@ -188,16 +188,16 @@ describe("chatCapableModels — judge-only endpoints never reach a tier picker",
   });
 });
 
-describe("Jev is an opt-in Beta judge (SPEC §8.6)", () => {
-  it("leads with the legacy default, not Jev", () => {
+describe("decision models are an opt-in Beta judge (SPEC §8.6)", () => {
+  it("leads with the legacy default, not a decision model", () => {
     const rows = judgeModeOptions("fast-chain", 2);
     expect(rows[0]).toBe("● 🦾 Reuse the Fast tier chain (default)");
     expect(JUDGE_MODE_ORDER).toEqual(["fast-chain", "custom", "decision"]);
   });
 
-  it("labels Jev as Beta and keeps it last", () => {
+  it("labels the mode as Beta and keeps it last", () => {
     const rows = judgeModeOptions("fast-chain", 2);
-    expect(rows[2]).toContain("🧮 Jev — decision model (Beta)");
+    expect(rows[2]).toContain("🧮 Decision model (Beta)");
     expect(rows[2]).toContain("2 available");
   });
 
@@ -207,7 +207,7 @@ describe("Jev is an opt-in Beta judge (SPEC §8.6)", () => {
     expect(rows[1]).toContain("🔬 Dedicated Judge LLM chain");
   });
 
-  it("says Jev is less battle-tested and that routing falls back regardless", () => {
+  it("says decision models are less battle-tested and that routing falls back regardless", () => {
     const guide = decisionSetupGuide().join("\n");
     expect(guide).toContain("Beta");
     expect(guide).toContain("falls back either way");

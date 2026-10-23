@@ -93,8 +93,8 @@ tiers:
 | `enabled` | `true` | 总开关。`/router off` 停用。 |
 | `tiers.<tier>.models[]` | `[]` | 按 `priority` 排序。首个命中；其余项作运行时备用。 |
 | `routing.judgeTimeout` | `5000` | ms。Judge 调用超时。 |
-| `routing.judge.mode` | `"fast-chain"` | Judge 链来源：`fast-chain`（复用 Fast 档，默认）、`custom`（专用 `routing.judge.models` LLM 链）、`decision`（类型化决策模型，Jev/System One 类）。 |
-| `routing.judge.models` | `[]` | `custom` / `decision` 使用的模型链（按优先级，结构与档位链相同）。`fast-chain` 下忽略。 |
+| `routing.judge.mode` | `"fast-chain"` | Judge 链来源：`fast-chain`（复用 Fast 档，默认）、`custom`（专用 `routing.judge.models` LLM 链）、`decision`（类型化决策模型——走 pi 的 classifier 目录，或 `models.json` 里标 `typesafe-decisions` 的端点）。 |
+| `routing.judge.models` | `[]` | `custom` / `decision` 使用的模型链（按优先级，结构与档位链相同）。`decision` 模式下先按 pi 的 classifier 目录匹配；只在 `models.json` 里存在的引用走旧传输。`fast-chain` 下忽略。 |
 | `routing.window.size` | `5` | 判定记忆窗口长度（保留用于降级连胜分析与展示）。 |
 | `routing.window.minConfidence` | `0.5` | Judge 置信度低于此 = 无信号（hold：绝不切换，且打断 fast 连胜）。 |
 | `routing.window.threshold` | 旧版 | v1.4.0 之前的旧旋钮。**平滑迁移：旧默认值 `0.6` 已死**——配置里带着它（例如向导快照）会静默回落到新规则 `θ = 1/reworkPenalty`，而不是被重解释成保守的 θ=0.6。只有**不等于** `0.6` 的值才作为**原始 θ** 覆盖（并在 `/router status` 中显示）。优先用 `economics.reworkPenalty` / `/router eco|default|sport`。 |
@@ -133,13 +133,13 @@ tiers:
 
 1. `fast-chain`（默认）——复用 Fast 档链，无需额外配置，与旧版本行为一致；链解析为空时回落到"最便宜的已鉴权模型"（旧行为）。
 2. `custom` —— 在 `routing.judge.models` 单独配置 Judge LLM 链，编辑方式与档位链完全相同。适合想让分类器比 Fast 档更便宜/更严格的场景。**不**做最便宜模型回落：专用链解析不到端点时**保持原档**，不会跑在你没选过的模型上。
-3. `decision` —— 使用**决策模型**（TypeSafe Jev / System One 类）：返回类型化答案 + 校准概率，不生成文本。向导只列出支持该协议的端点，并**在本地校验**选择（auth + baseUrl）——保存时不发任何网络请求。若端点运行时不可用，路由器**逐级降级而不是卡住**：**Jev → 你的 LLM 判定 → 关闭路由**（不切模型、不编排、只提示一次）。决策模式绝不伪造判定。
+3. `decision` —— 使用**决策模型**：返回类型化答案 + 概率，不生成文本。pi ≥ 1.4.0 时判定走 pi 自己的 classifier 层：模型从 pi 的 classifier 目录里选（TypeSafe Jev、OpenAI `gpt-6-luna` Decisions、Cloudflare Clef、Perplexity Decider 等），Key 解析、请求归因、重试和计价都由 pi 负责——不用写 `models.json`，也不用核对 base URL。更旧的宿主，或自定义端点，由插件自己说 System One 协议（`api: "typesafe-decisions"`）；那条传输已**弃用**并会写日志。两种情况下，端点不可用都是逐级降级而不是卡住：**决策模型 → 你的 LLM 判定 → 关闭路由**（不切模型、不编排、只提示一次），失败绝不产生伪造判定。
 
 **模型 id：用 `jev-latest`。** Jev 每次响应都会回传实际解析到的版本（即使请求用的是别名，也返回 `"model": "jev-1.13.0"`），路由器发现版本变化就写日志——所以别名移动是**可见的**，不是静默的。固定版本（`jev-1.13.0`）用这份韧性换取逐位可复现，代价是厂商下架该 build 的那天直接失效。优先用别名，并盯日志。
 
-决策协议（模式 3）：`POST {baseUrl}/v1/systemone`，请求体 `{model, state, questions:{tier:{type:"choice",…}, orchestrate:{type:"noul",…}}}`。路由器读 `tier.choice`，用 `tier.probabilities[tier]` 作置信度，并把 `orchestrate.noul >= 0.5` 作编排信号。决策模式没有 `reason`（模型不生成文本），仪表盘 "Last:" 行只显示档位 + 概率。
+决策传输。**原生（默认）：** `registry.classify(model, { state: { prompt }, questions })`，一个 `choice`（`tier`：fast/smart，criteria 就是 rubric）加一个 `bool`（`orchestrate`）；pi 会把 `bool` 映射成 System One 的 `noul`、OpenAI Decisions 的 `predicate`。路由器读 `answers.tier.choice`，用 `answers.tier.probabilities[choice]` 作置信度，并把 `answers.orchestrate.probability >= 0.5` 作编排信号；`stopReason !== "stop"`、答案缺失或 `refusal` 都算 hold。**旧路径（已弃用）：** `POST {baseUrl}/v1/systemone`，请求体 `{model, state, questions:{tier:{type:"choice",…}, orchestrate:{type:"noul",…}}}`。决策模式没有 `reason`（模型不生成文本），仪表盘 "Last:" 行只显示档位 + 概率。
 
-**顺序：老默认在前，Jev 作为 Beta 放最后。** 向导顺序是 `🦾 Reuse the Fast tier chain (default)` → `🔬 Dedicated Judge LLM chain` → `🧮 Jev — decision model (Beta)`。Jev 处于公测：独立验证少于 LLM 判定，Provider 算力也仍在爬坡，所以它是**可选**而非推荐默认。配置默认值仍是 `fast-chain`，升级不会把你悄悄换成另一类模型来判定。若专用链 / 决策链解析不到任何端点（模型下架、Key 被删、Provider 消失），路由器会**回退到 LLM 判定并写入日志**，而不是每轮保持原档；向导行也会告诉你实际生效的是谁（`Jev unavailable — LLM judge active`）。单次调用失败仍然保持原档：那是瞬时故障，不是配置腐化。
+**顺序：老默认在前，决策模型作为 Beta 放最后。** 向导顺序是 `🦾 Reuse the Fast tier chain (default)` → `🔬 Dedicated Judge LLM chain` → `🧮 决策模型（Beta）`。决策模型处于公测：独立验证少于 LLM 判定，模型之间的排序也随任务变化，所以它是**可选**而非推荐默认。配置默认值仍是 `fast-chain`，升级不会把你悄悄换成另一类模型来判定。若专用链 / 决策链解析不到任何端点（模型下架、Key 被删、Provider 消失），路由器会**回退到 LLM 判定并写入日志**，而不是每轮保持原档；向导行也会告诉你实际生效的是谁（`Decision model unavailable — LLM judge active`）。单次调用失败仍然保持原档：那是瞬时故障，不是配置腐化。
 
 注意：切到决策模型会改变置信度**分布**；现有阈值（θ、`minConfidence`）是按 LLM 置信度调过的，请拿到实测数据后再重新标定。
 
@@ -147,13 +147,13 @@ tiers:
 
 **判定器阶梯。** 无论你选哪个模式，路由器都走两级阶梯，绝不猜：
 
-1. **你配置的判定链** —— Jev 决策模型（`decision`）、独立 LLM 链（`custom`）、或 Fast 档链（`fast-chain`）。
+1. **你配置的判定链** —— 决策模型（`decision`，原生 classifier 或旧端点）、独立 LLM 链（`custom`）、或 Fast 档链（`fast-chain`）。
 2. **你的 LLM 判定** —— Fast 档链（v1.7.0 之前的默认行为）。第一级**解析不到**（模型下架、Key 被删、Provider 消失）**或在调用时失败**（429 / 5xx / 超时 / 冷却中），都会落到这里——是同轮落到，不是下一轮。
 3. 若第二级也耗尽：这一轮**停止路由**——不切模型、不编排，并把你**会话开始时用的模型**还给你（手动 `/route-force` 覆盖会被尊重）。每会话提示一次。最差情况就是"像没装这个插件一样"。
 
 **老配置无需迁移。** v1.7.0 之前的配置根本没有 `routing.judge`，默认即 `fast-chain`，行为与之前完全一致。另两种形态也已处理：有 `judge.models` 但没有 `mode` → 迁移为 `custom`（否则合并后的默认值会静默忽略这个列表）；`mode` 拼错或未知 → 降级为 `fast-chain`，绝不让路由崩掉。向导显示的是归一化后的模式，菜单与实际行为永远一致。
 
-**决策模式需要的远远超过默认值。** 对 `api.typesafe.ai` 的实测（2026-09-18）：**1.4–6.6 秒**（中位 ~5 秒），且 payload 缩小 5 倍也不会更快——等待来自 Jev 公测期间的 Provider 侧算力，与 payload 或集成层无关。因此 `/router config` → `🧭 Judge` → `🧮 Decision model` 会在你的值更低时**自动抬到 15000 ms**，并在通知里明确说明。低于 ~15 秒时，大多数决策调用会被超时打断，路由器于是"每轮都默默保持原档"。等公测算力上线后，这个数字应当会下降。
+**决策模式需要自己的超时。** 对 `api.typesafe.ai` 的实测（2026-09-18）：**1.4–6.6 秒**（中位 ~5 秒），且 payload 缩小 5 倍也不会更快——等待来自 Provider 侧算力，与 payload 或集成层无关。路由器按**协议下限**生效且不改写你的配置：System One 15 000 ms，OpenAI Decisions 8 000 ms（后者外部基准是几百毫秒级）。`/router config` 在你的值更低时也会**抬到 15000 ms**，并在通知里说明。低于下限时，大多数决策调用会被超时打断，路由器于是"每轮都默默保持原档"。
 
 **`routing.window.size`** — 滑动窗口长度。默认 `5`。越大越稳定（反应越慢），越小越敏捷（可能抖动）。
 

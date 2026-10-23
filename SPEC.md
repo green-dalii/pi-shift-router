@@ -670,7 +670,7 @@ On failover, show a toast notification (unless `quietMode`):
 - Manual override (`/route-force`) bypasses cooldown (user explicitly asked).
 - A 2xx success for a model in cooldown clears it immediately (recovery).
 
-### 8.6 Judge Modes and Protocols (v1.7.0)
+### 8.6 Judge Modes and Protocols (v1.7.0, native path v1.7.3)
 
 The Judge is a high-frequency, latency- and cost-sensitive classifier whose
 output is **thresholded** (`pSmart >= θ`, §2.3). The LLM judge stays the
@@ -682,10 +682,64 @@ default; two more modes were added without changing it.
 |------|--------------|-------|
 | `fast-chain` (default) | `tiers.fast.models` | Byte-identical to pre-v1.7.0 behaviour. Absent `routing.judge` ⇒ this mode. Cheapest-authenticated-model fallback applies (§4.3 step 2). |
 | `custom` | `routing.judge.models` | A dedicated Judge LLM chain (same chain-editor UX as Fast/Smart). No cheapest-model fallback: an unresolvable chain **holds position**. |
-| `decision` | `routing.judge.models` (decision-capable endpoints) | Typed-answer models (Jev / System One class). No cheapest-model fallback; failures **hold**. |
+| `decision` | `routing.judge.models`, resolved against **pi's classifier catalog first**, then `models.json` (legacy) | Typed-answer models (decision-model class). No cheapest-model fallback; failures **hold**. |
 
-**Decision protocol (`apiType: "typesafe-decisions"`).** `POST {baseUrl}/v1/systemone`,
-Bearer auth, one round trip for all questions:
+**Decision judges use pi's classifier layer (v1.7.3+).** pi models decision
+endpoints natively: `ClassifierApi` is `typesafe-system-one |
+cloudflare-workers-ai-system-one | openai-decisions | llama-cpp-classify`, and
+`ModelRegistry.classify(model, context, options)` resolves auth from pi's
+credential store, applies identity/attribution headers, retries, and returns
+`{ answers, stopReason, errorMessage, usage }` — never a thrown error. pi 1.4.0
+ships a catalog of **53 classifier models** (OpenRouter 30, Vercel AI Gateway
+14, Cloudflare Workers AI 5, OpenCode 2, TypeSafe 1, OpenAI 1), covering
+TypeSafe Jev, OpenAI `gpt-6-luna` Decisions, Azure OpenAI, Cloudflare
+Clef/Clef-flash/Clef-omni, Perplexity Decider, Microsoft Decision-1, Liquid d1,
+Upstage Solar-Decide, Baseten, Inception, Respan, ScaleDown, Together and
+ConvAI Laya. The router therefore asks pi instead of speaking a protocol
+itself:
+
+| Step | Behaviour |
+|------|-----------|
+| Resolution | a `routing.judge.models` ref that resolves to a **classifier** model is judged through `registry.classify()`; the ref is matched with `getModelsOfType("classifier", provider)` — synchronous, no network, no auth probe |
+| Questions | one `choice` (`tier`: `fast`/`smart`, criteria = the same rubric) and one `bool` (`orchestrate`). pi maps `bool` to `noul` on System One and to `predicate` on OpenAI Decisions |
+| State | `{ prompt }` — the same assembled turn text the LLM judge receives |
+| Verdict | `answers.tier.choice` + `answers.tier.probabilities[choice]` → `pSmart`; `answers.orchestrate.probability >= 0.5` → orchestrate |
+| Failure | `stopReason !== "stop"`, a missing or out-of-set answer, or a `refusal` ⇒ **hold**; the ladder then continues into the LLM judge |
+
+**Why delegation is the default path and not another adapter layer.** The
+transport work — protocol differences, auth, attribution headers, retries,
+per-attempt timeouts, token cost — is the part most likely to rot as vendors
+move, and it already lives in pi, which ships it together with the catalog. A
+router-owned adapter would need a release for every new decision model;
+delegation means a model that appears in pi's catalog is usable the day it
+lands.
+
+**Host defects this path works around (verified live, 2026-10-23).** pi 1.4.0
+flattens the TypeSafe classifier's catalog base URL (`https://api.typesafe.ai/v1/`)
+down to the provider root, so its System One transport calls `/systemone` and
+gets **404**; the adapter normalizes that one host back to `/v1` until pi ships
+the fix (gateways are unaffected — OpenRouter and Vercel already end in `/v1`).
+pi also retries classifier requests twice by default, which behind our own
+timeout turns one slow verdict into three; the native call passes
+`maxRetries: 0`.
+
+**Per-protocol timeout floors, applied without mutating config.** OpenAI
+Decisions 8 000 ms; System One 15 000 ms (measured 1.4–6.6 s against
+`api.typesafe.ai`). The native call also passes `maxRetries: 0`: pi retries
+twice by default, and stacked behind our own timeout that turns one slow
+verdict into three.
+
+**Version floor and fallback.** The native path requires pi ≥ 1.4.0
+(`getModelsOfType` / `getAvailableOfType`); pi 1.2.0 has `classify()` but no
+enumeration, older hosts have neither. The router feature-detects both and
+falls back to the legacy transport, so a `decision` config keeps working across
+the transition — it just logs the deprecation.
+
+**Legacy self-built transport (deprecated, `apiType: "typesafe-decisions"`).**
+Still supported for hand-configured `models.json` endpoints and for hosts
+without the classifier layer; planned for removal once the native path is the
+only one in use. `POST {baseUrl}/v1/systemone`, Bearer auth, one round trip for
+all questions:
 
 ```jsonc
 {
@@ -701,13 +755,21 @@ Bearer auth, one round trip for all questions:
 ```
 
 Response mapping (tolerant — accept an `answers` envelope or a bare top-level
-map):
+map; the native path has already normalized both wire shapes into
+`answers[name]`):
 
 - `tier = questions.tier.choice` (must be one of the declared options, else hold)
 - `confidence = questions.tier.probabilities[tier] ?? questions.tier.confidence`
   — a **calibrated probability**, not an elicited LLM confidence. `reason` is
   absent by design (decision models do not generate prose; the dashboard omits it).
 - `orchestrate = questions.orchestrate.noul >= 0.5` (Noul returns 0–1, no confidence field)
+
+**Migration between the two paths is invisible to everything above.** A ref that
+resolves in pi's catalog takes the native path (same model, same probability
+contract); one that only exists in `models.json` keeps the legacy path for that
+endpoint. The wizard lists native classifier models first and marks
+`models.json` decision endpoints as legacy. Switching a config between them does
+not change `pSmart` semantics — only where the number came from.
 
 Failover/cooldown machinery is protocol-agnostic and unchanged (§8.5): a
 failover signature cools the endpoint; anything else holds.

@@ -105,6 +105,27 @@
 
 **Judge 也需要 JSON-mode 端点。** 任何现代 Flash 档（Qwen 3.5+、Gemma 4、MiMo V2.x）都满足；本地 Judge 会多花 ~0.5–2 秒/轮。推荐组合：本地 fast + 本地或云 smart + Judge 放在你最信任的那个 smart 上。
 
+## 决策模型（仅作 Judge）
+
+决策模型是另一类模型：用概率回答类型化问题，不生成文本。它们不能跑你的任务——路由器只拿它们当 Judge，也永远不会出现在 Fast/Smart 选择器里。
+
+pi ≥ 1.4.0 时，下表来自 pi 自带的 classifier 目录，所以 `/router config` → `🧭 Judge` → `🧮 决策模型（Beta）` 列出的就是你的凭据能触及的范围：
+
+| Provider | 模型 | 说明 |
+|---|---|---|
+| TypeSafe | `jev-latest`、`jev-1.13`、`jev-1.14` | 参考实现；对官方 API 实测每次 1.4–6.6 秒；输出免费 |
+| OpenAI | `gpt-6-luna` | Decisions API（`/v1/decisions`）；$0.10/百万输入，输出不计费；单请求最多 400 个问题 |
+| Azure OpenAI | `gpt-6-luna` | 同形状，`api-key` 鉴权，`/openai/v1/decisions`；仅美国区，不含 East US 2 |
+| Cloudflare Workers AI | `clef`、`clef-flash`、`clef-omni` | 开源权重（Apache-2.0），兼容 System One，这一族里最便宜 |
+| Perplexity | `pplx-decider-v1.2`、`pplx-decider-flash` | 27B / 4B，多模态 |
+| Microsoft · Liquid · Upstage · Baseten · Inception · Respan · ScaleDown · Together · ConvAI | `microsoft-decision-1`、`d1`、`solar-decide`…… | 多数经 OpenRouter 或 Vercel AI Gateway 可达 |
+
+同一个模型经网关常有两个 id（例如 OpenRouter 上的 `openai/gpt-6-luna-decisions` 走 System One 形状）。两个都行——选择器展示的是 pi 目录里实际存在的。
+
+不提供决策模型：Anthropic、Google、DeepSeek 没有决策端点，这些请继续用 LLM 判定，没有可配的东西。
+
+切换前先读 README 里的代价：不同模型的置信度分布不同，θ 不是按你挑的那个模型调的。
+
 ## 怎么验证
 
 - pi 列出的是你运行时能鉴权的一切。开发模式 `pi remove pi-shift-router && pi install .`（本仓库根），发布版 `pi install npm:pi-shift-router`，然后 `/model` 就是真相。

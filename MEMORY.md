@@ -10,6 +10,46 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-10-23 — decision judges go through pi's classifier layer; the self-built transport is deprecated
+
+**Decision.** `routing.judge.mode: "decision"` resolves a `routing.judge.models` ref against **pi's
+classifier catalog first** and judges through `registry.classify()` (L1). The router's own System
+One HTTP client remains as a fallback for hosts without the classifier layer and for
+hand-configured `api: "typesafe-decisions"` endpoints (L2) — it is **deprecated**, logs a notice,
+and a later release removes it. Judge chain stays single-model + Fast-chain fallback; per-endpoint
+θ is deferred (Phase C). Issue #54.
+
+**Why.** The decision-model category outgrew one vendor, and pi already implements the transport:
+`KnownClassifierApi = typesafe-system-one | cloudflare-workers-ai-system-one | openai-decisions |
+llama-cpp-classify`, `ModelRegistry.classify()` (1.2.0+) with `getModelsOfType("classifier")` /
+`getAvailableOfType()` (1.4.0+), and a catalog of **53 classifier models** in 1.4.0 (openrouter 30,
+vercel 14, cloudflare 5, opencode 2, typesafe 1, openai 1) — TypeSafe Jev, OpenAI `gpt-6-luna`
+Decisions, Azure, Cloudflare Clef, Perplexity Decider, Microsoft Decision-1, Liquid d1, Upstage
+Solar-Decide and more. A router-owned adapter would need a release per new model; delegation means
+a model in pi's catalog is usable the day it lands. pi also brings auth, identity/attribution
+headers, retries, per-attempt timeouts and priced usage — the exact surface where #48 bit us.
+
+**Rejected.** (a) A second hand-written protocol adapter (`openai-decisions` in our own code) as the
+primary path — duplicates pi, and becomes wrong when pi's mapping changes. (b) Requiring
+`models.json` entries for every decision model — the setup tax that made Jev beta painful.
+(c) Auto-switching a configured model to a pi catalog equivalent — silently changes the endpoint a
+user pinned. (d) Per-endpoint θ now — no measured data yet; the picker warns instead.
+
+**Gotchas.** `getAvailableOfType()` awaits auth probing (`getAuthenticatedProviders`), so the
+wizard uses the **synchronous** `getModelsOfType()` + `hasConfiguredAuth()` — the #52 freeze must
+not come back through a new door. pi retries classifier requests twice by default: pass
+`maxRetries: 0` or one slow verdict becomes three behind our timeout. Per-protocol floors (OpenAI
+Decisions 8 s, System One 15 s) are applied at call time, not written into config. The native path
+returns the *requested* model id, not the resolved version, so the `jev-latest` drift log is weaker
+there — pin when reproducibility matters.
+
+**pi 1.4.0 drops the TypeSafe `/v1`.** Its catalog says
+`https://api.typesafe.ai/v1/`, but the runtime exposes the provider root
+(`https://api.typesafe.ai`), and the System One transport appends `systemone` — so the native call
+404s. Verified with curl (`/systemone` 404, `/v1/systemone` 403 without a key) and fixed with a
+one-host normalization in the adapter, which stops matching once pi corrects the catalog. Live
+after the fix: `stopReason: "stop"`, 1.1 s, `{tier: fast, confidence: 1, orchestrate: false}` price 0.
+
 ## 2026-10-15 — the wizard must never await pi's registry refresh
 
 **Decision.** `/router config` builds its catalog through `prepareWizardCatalog()`: cache invalidation

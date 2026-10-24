@@ -11,11 +11,11 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.zh-CN.md
 - docs: README.md / README.zh-CN.md / docs/CONFIG.zh-CN.md / docs/MODELS.zh-CN.md / docs/TROUBLESHOOTING.zh-CN.md
 - first-published: v0.4.0
-- latest: v1.7.2
+- latest: v1.8.0
 - last-updated: 2026-10
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
-- search-intents: "为什么要做模型路由", "模型分层 价格跨度", "LLM 路由 省钱", "OpenRouter auto router 替代", "Jev 怎么用", "TypeSafe Jev 决策模型", "Jev 校准概率 路由器", "决策模型为什么比 LLM Judge 更契合", "拿概率回答的判定器", "System One 决策模型 路由", "决策模型 HTTP API", "自动路由 pi agent 每轮", "可插拔 Judge 模型", "Jev 作为 Judge", "决策模型做路由判定", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "402 余额不足自动切换模型", "Codex usage limit 自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排", "worker 花费归因", "编排成本统计", "TUI 状态仪表盘", "pi 模型目录对齐", "router config 与 /model 一致", "ModelRegistry available 快照"、"向导 打开 卡顿"、"模型目录 后台刷新"
-- features: 两层路由、任务级编排（Smart 档作为 CTO 派发给 Fast 工程师）、可插拔 Judge（复用 Fast 链 / 独立 Judge LLM / 决策模型如 Jev（Beta、可选）—— 见 Jev 小节）、LLM Judge、JSON-mode 分类器、滑动窗口降级门、多模型 fallback 链、TUI 配置向导、指数退避运行时 failover（429/402/5xx + Codex usage limit 耗尽）、路由与 Judge 共享冷却、cache-aware 路由（同 Provider 缓存保护）、跨 Provider、零配置起步、token 吞吐遥测、TUI 状态仪表盘（上下文窗口与缓存命中率仪表、链内联冷却、最近决策、花费）、per-worker 花费归因（有界编排账本，`orchestration $X (N workers)`）、EV 经济学路由与齿轮预设（eco/default/sport）、任务级编排（默认开启：Smart 档作为 CTO 派发给 Fast 子代理；需安装 pi-subagents）、pi 模型目录对齐（向导 + Judge + 遥测共享 `/model` 等价列表），秒开配置向导（provider 目录后台刷新）
+- search-intents: "pi classifier 决策模型"、"OpenAI Decisions API 判定"、"为什么要做模型路由", "模型分层 价格跨度", "LLM 路由 省钱", "OpenRouter auto router 替代", "Jev 怎么用", "TypeSafe Jev 决策模型", "Jev 校准概率 路由器", "决策模型为什么比 LLM Judge 更契合", "拿概率回答的判定器", "System One 决策模型 路由", "决策模型 HTTP API", "自动路由 pi agent 每轮", "可插拔 Judge 模型", "Jev 作为 Judge", "决策模型做路由判定", "LLM 作为分类器", "两层模型路由", "遇 429 模型的自动 failover", "402 余额不足自动切换模型", "Codex usage limit 自动 failover", "成本与质量模型选择", "pi-coding-agent 扩展", "模型冷却指数退避", "JSON-mode 分类器", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "pi 自动切换便宜模型", "任务级编排 pi", "Smart CTO 派发 Fast 子代理", "pi agent 子代理编排", "worker 花费归因", "编排成本统计", "TUI 状态仪表盘", "pi 模型目录对齐", "router config 与 /model 一致", "ModelRegistry available 快照"、"向导 打开 卡顿"、"模型目录 后台刷新"
+- features: 两层路由、任务级编排（Smart 档作为 CTO 派发给 Fast 工程师）、可插拔 Judge（复用 Fast 链 / 独立 Judge LLM / 决策模型（Beta、可选，走 pi 原生 classifier 目录）—— 见决策模型小节）、LLM Judge、JSON-mode 分类器、滑动窗口降级门、多模型 fallback 链、TUI 配置向导、指数退避运行时 failover（429/402/5xx + Codex usage limit 耗尽）、路由与 Judge 共享冷却、cache-aware 路由（同 Provider 缓存保护）、跨 Provider、零配置起步、token 吞吐遥测、TUI 状态仪表盘（上下文窗口与缓存命中率仪表、链内联冷却、最近决策、花费）、per-worker 花费归因（有界编排账本，`orchestration $X (N workers)`）、EV 经济学路由与齿轮预设（eco/default/sport）、任务级编排（默认开启：Smart 档作为 CTO 派发给 Fast 子代理；需安装 pi-subagents）、pi 模型目录对齐（向导 + Judge + 遥测共享 `/model` 等价列表），秒开配置向导（provider 目录后台刷新）
 - direct-competitor: "@tenchi4u/pi-bifrost（7 阶段启发式 + 订阅配额）· pi-smart-router（12 阶段本地管线 + HyDRA + Virtual Cost v2）"
 - author: green-dalii（https://github.com/green-dalii）
 -->
@@ -30,7 +30,7 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 [![Downloads](https://img.shields.io/npm/dm/pi-shift-router.svg)](https://www.npmjs.com/package/pi-shift-router)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Pi Agent](https://img.shields.io/badge/pi--agent-extension-purple)](https://pi.dev/packages/pi-shift-router)
-[![Jev](https://img.shields.io/badge/judge-Jev%20(Beta)-blueviolet)](https://docs.typesafe.ai/introduction/quickstart)
+[![Decision models](https://img.shields.io/badge/judge-Decision%20models%20(Beta)-blueviolet)](https://docs.typesafe.ai/introduction/quickstart)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-green)](https://nodejs.org)
 [![deps](https://img.shields.io/badge/deps-0%20runtime-blue)](package.json)
 [![size](https://img.shields.io/badge/install%20size-~409kB-blue)](https://packagephobia.com/package/pi-shift-router)
@@ -39,7 +39,7 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 
 [English](README.md) | [简体中文]
 
-[🌐 项目官网](https://shiftrouter.greenerai.top) | [⚙️ 工作原理](#工作原理) | [🚀 为什么是现在](#为什么是现在) | [🚀 快速开始](#快速开始) | [🧭 Jev：用数字回答的判定器](#jev让决策模型来当判定器beta) | [⚖️ 对比其它方案](#对比其它方案) | [❓ 常见问题](#常见问题) | [🔧 配置参考](docs/CONFIG.zh-CN.md) | [🩺 故障排查](docs/TROUBLESHOOTING.zh-CN.md)
+[🌐 项目官网](https://shiftrouter.greenerai.top) | [⚙️ 工作原理](#工作原理) | [🚀 为什么是现在](#为什么是现在) | [🚀 快速开始](#快速开始) | [🧭 决策模型：用数字回答的判定器](#决策模型作为判定器beta) | [⚖️ 对比其它方案](#对比其它方案) | [❓ 常见问题](#常见问题) | [🔧 配置参考](docs/CONFIG.zh-CN.md) | [🩺 故障排查](docs/TROUBLESHOOTING.zh-CN.md)
 
 你为两档智能付了钱，但每轮只能用其中一档。
 
@@ -59,7 +59,7 @@ SEO 元数据（用户不可见，供爬虫 / LLM 解析）：
 
 > **编排需要 [`pi-subagents`](https://www.npmjs.com/package/pi-subagents)**（`pi install npm:pi-subagents`）。没装也能照常路由，只是复杂任务直接在 Smart 档上跑，不做派发。
 
-判定器本身有三种模式，第三种是另一类模型：**Jev**，用概率而不是文字回答的决策模型。没有东西需要解析，一次判定约 \$0.0001，默认关闭、标注 Beta——[完整的实话在这里](#jev让决策模型来当判定器beta)。
+判定器本身有三种模式，第三种是另一类模型：**决策模型**，用概率而不是文字回答。没有东西需要解析，一次判定约 \$0.0001，默认关闭、标注 Beta——[完整的实话在这里](#决策模型作为判定器beta)。
 
 - 升级立刻生效；降级要连续两轮 `fast`。
 - 每档都是 fallback 链，配指数退避冷却，429 不会中断你的会话。
@@ -94,7 +94,7 @@ pi install npm:pi-shift-router   # 然后：/router config → /router status
 
 **3. 判定本身成了一种专门的模型类别。**
 
-以前判断"这轮难不难"，得调一个前沿模型，再从它写的话里抠 JSON。2026 年 9 月 TypeSafe 发布了 **Jev**，一个 *System One* 模型：给它 state 和类型化问题，返回带概率的类型化答案，不生成一句话。用分类模型做分类，既更便宜也更不容易碎——[细节和代价在这里](#jev让决策模型来当判定器beta)。
+以前判断"这轮难不难"，得调一个前沿模型，再从它写的话里抠 JSON。2026 年 9 月 TypeSafe 发布了 **Jev**，一个 *System One* 模型：给它 state 和类型化问题，返回带概率的类型化答案，不生成一句话。这个品类后来不再只有一家——OpenAI 的 Decisions API、Cloudflare 的 Clef、Perplexity 的 Decider——而 pi 已经把它们的传输层内置了。用分类模型做分类，既更便宜也更不容易碎——[细节和代价在这里](#决策模型作为判定器beta)。
 
 ---
 
@@ -135,7 +135,7 @@ pi install npm:pi-shift-router   # 然后：/router config → /router status
 
 判定必须机器可读：OpenAI 兼容端点用 `response_format: json_object`（非 JSON 会被 API 拒绝），Anthropic 用 `{` 前缀强制 JSON。判定期间状态栏显示 `🧭 judging…`。判定调用失败时，路由器保持当前档位，不猜。
 
-**三种判定模式（v1.7.0）。** 复用 Fast 档链（默认，无需额外配置）、独立的 Judge LLM 链（编辑方式与档位相同）、或决策模型——见 [Jev](#jev让决策模型来当判定器beta)。
+**三种判定模式（v1.7.0）。** 复用 Fast 档链（默认，无需额外配置）、独立的 Judge LLM 链（编辑方式与档位相同）、或决策模型——见 [决策模型](#决策模型作为判定器beta)。
 
 ### 当 Provider 挂掉时
 
@@ -150,44 +150,54 @@ Judge 与路由共用同一张冷却表（判定失败也会走完整条 fast �
 
 ---
 
-## Jev：让决策模型来当判定器（Beta）
+## 决策模型作为判定器（Beta）
 
-判定器每轮只回答一个问题：这活难不难？多数路由器的做法是问一个 LLM，再从回复里抠 JSON。Jev 是另一类模型——你给它一个带选项的问题，它直接回选项和概率：
+判定器每轮只回答一个问题：这活难不难？多数路由器的做法是问一个 LLM，再从回复里抠 JSON。决策模型是另一类模型——你给它类型化的问题，它直接回选项和概率：
 
 ```jsonc
-// POST /v1/systemone —— 实际返回就是这个
-{ "model": "jev-1.13.0",
+// 实际返回（System One 形状；OpenAI Decisions 的形状会被归一化成这个）
+{ "model": "jev-1.14.0",
   "answers": {
     "tier":        { "choice": "fast", "probabilities": { "fast": 0.99, "smart": 0.01 } },
     "orchestrate": { "noul": 0.13 } } }
 ```
 
-路由器需要的全在这份响应里：拿 `0.99` 跟 θ 一比，完事。没有 JSON 模式、没有解析步骤，也就没有了"模型多加一个逗号导致判定失败"这一整类故障。字段缺失＝没有判定，路由器保持原档。同一次调用还顺带回答了要不要编排（`noul ≥ 0.5`），复杂任务不需要判两次。
+路由器需要的全在这份响应里：拿 `0.99` 跟 θ 一比，完事。没有 JSON 模式、没有解析步骤，也就没有了"模型多加一个逗号导致判定失败"这一整类故障。字段缺失＝没有判定，路由器保持原档。同一次调用还顺带回答了要不要编排，复杂任务不需要判两次。
 
-便宜也是同一个原因：判定只花输入 token，一次约 **\$0.0001**。LiteLLM 在 2026 年 9 月把同样的思路做进自家 Auto Router，实测 `jev` 分类器比 Haiku 级快 **5.43 倍**、便宜 **96%**。
+便宜也是同一个原因：判定只花输入 token——按 TypeSafe 的 \$0.25–0.42/百万输入 token 算，一次约 **\$0.0001**，输出免费。
+
+### pi 已经内置了这套协议
+
+不用再手写 `models.json`。从 pi 1.4.0 起，pi 自带传输层和经济型模型目录，本插件通过 pi 的 classifier 层判定——Key 解析、请求归因、重试、成本计价都由 pi 负责：
+
+| Provider | 模型 |
+|---|---|
+| TypeSafe | `jev-latest`、`jev-1.13`、`jev-1.14` |
+| OpenAI | `gpt-6-luna`（Decisions API） |
+| Cloudflare | `clef`、`clef-flash`、`clef-omni` |
+| Perplexity | `pplx-decider-v1.2`、`pplx-decider-flash` |
+| Microsoft · Liquid · Upstage | `microsoft-decision-1` · `d1` · `solar-decide` |
+| 聚合网关 | OpenRouter（30 个）、Vercel AI Gateway（14 个）、OpenCode、Azure OpenAI |
+
+`/router config` → `🧭 Judge` → `🧮 决策模型（Beta）` 只列出你这套装实际可达的模型，已配置凭据的排在前面。打开菜单时**不发任何网络请求**。
+
+在 `models.json` 里手配的 `api: "typesafe-decisions"` 端点仍然可用。这条路已**弃用**——它是插件自己的协议代码，只留给旧版 pi 和自定义端点，等原生路径完全替代后移除。走这条路会在日志里留一条弃用提示。
 
 ### 代价
 
-Jev 在公测，实话是：
+决策模型处于公测，实话是：
 
-- **现在慢。** 我们实测每次 **1.4–6.6 秒**（中位约 5 秒），而且把 prompt 缩小 5 倍也不会变快——那是 Provider 算力还在爬坡，不是集成层能解决的。同一份 rubric 交给快的 LLM 判定约 1.4 秒。批处理、后台任务、高吞吐路由合适；交互式对话仍然用 LLM 判定更好。
-- **证据是混合的。** 2026 年 9 月的独立评测发现，决策模型在 15 项标注任务中有 14 项落后于当项最佳 LLM。
-- **所以它是可选项。** `/router config` → `🧭 Judge` 里两个 LLM 方案排在前，Jev 排第三并标注 Beta。升级不会改变你的默认。
+- **可能很慢。** 对 `api.typesafe.ai` 我们实测每次 **1.4–6.6 秒**（中位约 5 秒），prompt 缩小 5 倍也不会变快——那是 Provider 算力，不是集成层。OpenAI 的 Decisions API 在外部基准里是几百毫秒级，这也是选择器不绑定单一厂商的原因之一。
+- **证据是混合的。** 2026 年 9 月的独立评测发现决策模型在 15 项标注任务中有 14 项落后于当项最佳 LLM；2026 年 10 月的基准显示排序随任务变化——决策模型之间也一样。
+- **所以它是可选项。** `/router config` → `🧭 Judge` 里两个 LLM 方案排在前，决策模型排第三并标注 Beta。升级不会改变你的默认。
 
 ### 接入它
 
-pi 没有内置 Jev provider，需要在 `~/.pi/agent/models.json` 加一个：
+1. 先登录一个提供决策模型的 Provider——`/login typesafe`、`/login openai`，或你已有的 OpenRouter Key。
+2. `/router config` → `🧭 Judge` → `🧮 决策模型（Beta）` → 选模型。
+3. 保存。保存时不发网络探针；如果你的超时值会掐断决策调用，向导会把它抬高（默认 5 秒不够）。
 
-```jsonc
-{ "providers": { "typesafe": {
-    "baseUrl": "https://api.typesafe.ai",
-    "api": "typesafe-decisions",     // 本插件识别决策端点的标记
-    "apiKey": "$TYPESAFE_API_KEY",
-    "models": [ { "id": "jev-latest", "name": "Jev", "input": ["text"],
-                  "contextWindow": 64000, "cost": { "input": 0.042, "output": 0 } } ] } } }
-```
-
-Key 在 [TypeSafe 控制台](https://console.typesafe.ai/settings/keys) 领（早期访问）。然后 `/router config` → `🧭 Judge` → `🧮 Jev — decision model (Beta)` → `typesafe/jev-latest`。保存时不发网络请求，向导会顺手把 `judgeTimeout` 抬到 15 秒——默认 5 秒会把大多数决策调用掐断。Jev 不响应时，路由器降到你的 LLM 判定而不是卡住；再不行就退回纯路由。它不会出现在 Fast/Smart 选择器里：pi 无法把该协议当聊天模型流式调用。
+决策模型不响应时，路由器降到你的 LLM 判定而不是卡住；再不行就退回纯路由。它不会出现在 Fast/Smart 选择器里：pi 无法把该协议当聊天模型流式调用。
 
 ---
 
@@ -358,42 +368,31 @@ Money · this session
 
 降级需要**连续 2 轮决定性 fast 判定**（`economics.downgradeMemory`，默认 2）+ cache-aware 空闲门——一轮例行任务降不下来；无信号 hold（置信度 < `minConfidence`）或任何 smart 判定都会重置连击。想更粘/更省调 `economics.reworkPenalty`（默认 3，θ≈0.33）：调高到 5 更省，调低到 2 更粘。升级在决定性 smart 判定时永远立即。
 
-### 怎么配置 Jev？
+### 怎么配置决策模型？
 
 三步：
 
-1. **拿一个 Jev API Key。** Jev 处于早期访问，在 [TypeSafe 控制台](https://console.typesafe.ai/settings/keys) 申请。Key 的放法与其它 Provider 凭据一致：放进 `~/.pi/agent/auth.json`，或在 shell 里 export `TYPESAFE_API_KEY`。
-2. **在 `~/.pi/agent/models.json` 里注册 Provider**——这是插件识别 Jev 的依据：
-   ```jsonc
-   { "providers": { "typesafe": {
-       "baseUrl": "https://api.typesafe.ai",
-       "api": "typesafe-decisions",     // 本插件识别的决策端点标记
-       "apiKey": "$TYPESAFE_API_KEY",
-       "models": [ { "id": "jev-latest", "name": "Jev", "input": ["text"],
-                     "contextWindow": 64000,
-                     "cost": { "input": 0.042, "output": 0 } } ] } } }
-   ```
-3. **在向导里选 Jev。** 重启 pi，然后 `/router config` → `🧭 Judge` → `🧮 Jev — decision model (Beta)` → `typesafe/jev-latest`。向导只在本地校验（不发网络请求），并把 `judgeTimeout` 抬到 15 秒——默认 5 秒会把大多数决策调用掐断。
+1. **登录一个提供决策模型的 Provider。** TypeSafe（`/login typesafe`）、OpenAI（`/login openai`），或你已有的 OpenRouter Key；Cloudflare Workers AI、Azure OpenAI、Vercel AI Gateway 也可以。Key 按你平常的方式存，解析交给 pi。
+2. **在向导里选它。** `/router config` → `🧭 Judge` → `🧮 决策模型（Beta）`。列表来自 pi 自带的 classifier 目录（TypeSafe Jev、OpenAI `gpt-6-luna`、Cloudflare Clef、Perplexity Decider 等），不用写 `models.json`，也不用核对 base URL。
+3. **保存。** 保存时不发网络探针；如果你的超时值会掐断决策调用，向导会把它抬高（默认 5 秒不够）。
+
+比 classifier 层更旧的 pi，或自定义端点，仍可手写 `"api": "typesafe-decisions"` 注册。这条路已弃用，使用时会写日志。
 
 ### 能让 pi 直接帮我配吗？
 
-可以。pi-shift-router 把 Jev 需要的所有信息都内化了，你把任务交给 pi，它会自己改 `models.json`、检查 Key 并重启。直接发给 pi：
+可以。把任务直接发给 pi：
 
-> 帮我在 pi 里接入 TypeSafe Jev，让 pi-shift-router 用它当判定器。我已经把 `TYPESAFE_API_KEY` 导出了。改完 `~/.pi/agent/models.json` 后重启一次，然后打开 `/router config` → `🧭 Judge`，确认 `🧮 Jev — decision model (Beta)` 能选；任何问题都告诉我。
+> 把 pi-shift-router 的判定器设成决策模型，走 pi 自带的 classifier 目录。先看我已经登录了哪些 Provider，再从里面挑一个决策模型，配到 `/router config` → `🧭 Judge` → `🧮 决策模型（Beta）`，不要改 `models.json`。告诉我你选了什么、为什么。
 
-或者英文：
+### Judge 菜单里看不到决策模型，怎么排查？
 
-> Add a TypeSafe Jev model to my pi config so pi-shift-router can use it as the judge. I already have `TYPESAFE_API_KEY` exported. After you edit `~/.pi/agent/models.json`, restart the agent and open `/router config` → `🧭 Judge` to confirm `🧮 Jev — decision model (Beta)` is selectable. Tell me what went wrong if anything.
+向导列出的是 pi 的 classifier 目录里、你的凭据能触及的部分。按顺序查：
 
-### Judge 菜单里看不到 Jev，怎么排查？
+- **pi 版本。** 原生路径需要 pi 1.4.0 及以上（`pi --version`）。更旧的宿主会回退到手配的 `typesafe-decisions` 端点。
+- **凭据。** `/login typesafe` 或 `/login openai`，或一个 OpenRouter Key；Provider 没有凭据时模型仍会列出，但标记为不可用。
+- **Provider 本身是否提供决策模型。** Anthropic、Google、DeepSeek 没有决策端点——这些情况继续用 LLM 判定，没有可配的东西。
 
-向导只列出支持决策协议的 Provider。按顺序检查三件事：
-
-- `~/.pi/agent/models.json` 里的 provider 条目带 `api: "typesafe-decisions"`（不是 `openai-completions` 或别的）。这是路由器认的标记。
-- `models` 数组里至少有一个 Jev 模型 id（`jev-latest`、`jev-1.13.0`、`jev-preview`）。
-- `TYPESAFE_API_KEY` 能取到——`echo "$TYPESAFE_API_KEY"` 不应为空。
-
-三件事都对，重启后再开 `/router config`，Jev 那行就会出现并标注 Beta。
+手配的条目只有在标记 `api: "typesafe-decisions"` 时才会列出；`openai-completions` 不会出现。
 
 ### 这和 OpenRouter 的 Auto Router 有什么区别？
 

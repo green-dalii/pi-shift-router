@@ -15,9 +15,19 @@ import { readFileSync } from "node:fs";
 import { appendRouterLog } from "./log.js";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import type { JudgeResult, Tier, ProviderEndpoint } from "./types.js";
+import type { JudgeResult, Tier, ProviderEndpoint, ModelRegistryLike } from "./types.js";
 import { detectFailoverError } from "./failover.js";
 import { providerSessionHeaders } from "./provider-attribution.js";
+import {
+  ORCHESTRATE_CRITERIA,
+  ORCHESTRATE_INSTRUCTIONS,
+  TIER_CRITERIA,
+  buildClassifierContext,
+  decisionTimeoutFor,
+  mapClassifierResult,
+  normalizeClassifierModel,
+  statusFromClassifierError,
+} from "./decision.js";
 
 // ─── Judge system prompt ──────────────────────────────────────────
 
@@ -97,9 +107,6 @@ export function judgeApiUrl(baseUrl: string, apiType: string): string {
 }
 
 /** Fixed orchestration criteria text (the tier rubric comes from judge.md). */
-const ORCHESTRATE_INSTRUCTIONS =
-  "This turn should be orchestrated (a Smart main agent planning phases and delegating " +
-  "to Fast workers) rather than handled inline by a single agent.";
 
 /**
  * Decision-protocol request body: one `choice` question for the tier and one
@@ -117,18 +124,12 @@ export function buildDecisionRequestBody(
       tier: {
         type: "choice",
         instructions: JUDGE_PROMPT,
-        criteria: {
-          fast: "Routine, well-specified work: execution, small fixes, following existing patterns.",
-          smart: "Complex, ambiguous, high-stakes, cross-cutting, or architecture-level work.",
-        },
+        criteria: { ...TIER_CRITERIA },
       },
       orchestrate: {
         type: "noul",
         instructions: ORCHESTRATE_INSTRUCTIONS,
-        criteria: {
-          true: "Multi-phase work that benefits from delegation to workers.",
-          false: "Single-agent work; inline execution is appropriate.",
-        },
+        criteria: { ...ORCHESTRATE_CRITERIA },
       },
     },
   };
@@ -287,11 +288,17 @@ async function classifyLLM(
     }
     const result: JudgeResult = {
       tier: answer.tier,
-      // Decision endpoints report a measured, calibrated probability; the
-      // routing algorithm treats both sources as measured signal (SPEC §8.6).
+      // Decision endpoints report a measured probability; the routing algorithm
+      // treats both sources as measured signal (SPEC §8.6).
       source: isDecisionApi(endpoint.apiType) ? "decision" : "llm",
+      ...(isDecisionApi(endpoint.apiType) ? { decisionProtocol: endpoint.apiType } : {}),
       ...(answer.confidence !== undefined ? { confidence: answer.confidence } : {}),
       ...(answer.reason !== undefined ? { reason: answer.reason } : {}),
+      // The judge's own orchestration answer (prompt §2, required on smart).
+      // It was parsed since v1.1.0 but never carried into the verdict, so every
+      // path silently fell back to the tier default; the native classifier path
+      // would then disagree with the legacy one on the same answer.
+      ...(answer.orchestrate !== undefined ? { orchestrate: answer.orchestrate } : {}),
       ...(resolved !== undefined ? { resolvedModel: resolved } : {}),
     };
     return { ok: true, result };
@@ -453,6 +460,74 @@ function parseConfidenceFromText(text: string): number | undefined {
  *
  * Only when ALL fast-tier models fail do we hold position (fallback).
  */
+/**
+ * One judgement through pi's classifier layer (issue #54).
+ *
+ * pi owns the transport — credentials, identity/attribution headers (including
+ * the OpenCode session header that issue #48 was about), retries and priced
+ * usage. The router owns only the questions and the "is this a verdict?" rule.
+ */
+async function classifyClassifier(
+  prompt: string,
+  endpoint: ProviderEndpoint,
+  registry: ModelRegistryLike,
+  timeoutMs: number,
+  signal: AbortSignal,
+  verbose: boolean,
+  sessionId: string | undefined,
+): Promise<JudgeCallOutcome> {
+  const requested = endpoint.classifier!;
+  // pi builds the URL from `model.baseUrl`; normalize the one host whose
+  // catalog entry disagrees with the API path (see normalizeClassifierModel).
+  const model = normalizeClassifierModel(requested);
+  const protocol = model.api ?? endpoint.apiType;
+  const attribution = providerSessionHeaders(
+    { ...endpoint, provider: model.provider, baseUrl: model.baseUrl ?? endpoint.baseUrl },
+    sessionId,
+  );
+
+  if (verbose) {
+    appendRouterLog(`[ShiftRouter] Judge → ${model.provider}/${model.id} (${protocol}, pi classifier)`);
+  }
+
+  try {
+    // `maxRetries: 0`: pi retries classifier requests twice by default, and
+    // stacked behind our own timeout one slow verdict becomes three.
+    const raw = await registry.classify!(model, buildClassifierContext(prompt, JUDGE_PROMPT), {
+      timeoutMs,
+      maxRetries: 0,
+      signal,
+      ...(Object.keys(attribution).length > 0 ? { headers: attribution } : {}),
+    });
+
+    const verdict = mapClassifierResult(raw);
+    if (!verdict) {
+      if (verbose) {
+        appendRouterLog(
+          `[ShiftRouter] Judge classifier returned no verdict ` +
+            `(${raw?.stopReason ?? "?"}${raw?.errorMessage ? `: ${raw.errorMessage}` : ""})`,
+        );
+      }
+      return { ok: false, code: statusFromClassifierError(raw?.errorMessage) };
+    }
+
+    return {
+      ok: true,
+      result: {
+        tier: verdict.tier,
+        source: "decision",
+        decisionProtocol: protocol,
+        ...(verdict.confidence !== undefined ? { confidence: verdict.confidence } : {}),
+        ...(verdict.orchestrate !== undefined ? { orchestrate: verdict.orchestrate } : {}),
+        ...(typeof raw?.model === "string" && raw.model.length > 0 ? { resolvedModel: raw.model } : {}),
+      },
+    };
+  } catch (err) {
+    if (verbose) appendRouterLog(`[ShiftRouter] Judge classifier threw: ${err}`);
+    return { ok: false, code: null };
+  }
+}
+
 export async function classify(
   prompt: string,
   endpoints: ProviderEndpoint[] | null | undefined,
@@ -461,15 +536,25 @@ export async function classify(
   isCooldown?: (provider: string, model: string) => boolean,
   onFailure?: (provider: string, model: string, code: string) => void,
   sessionId?: string,
+  registry?: ModelRegistryLike,
 ): Promise<JudgeResult> {
   const list = endpoints ?? [];
 
   for (const endpoint of list) {
     if (isCooldown?.(endpoint.provider, endpoint.modelId)) continue;
 
+    // A classifier endpoint gets its protocol floor even when the configured
+    // timeout is the LLM default — 5 s would abort most System One calls.
+    const effectiveTimeout = endpoint.classifier
+      ? decisionTimeoutFor(endpoint.classifier.api ?? endpoint.apiType, timeout)
+      : timeout;
+
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    const outcome = await classifyLLM(prompt, endpoint, controller.signal, verbose, sessionId);
+    const timer = setTimeout(() => controller.abort(), effectiveTimeout);
+    const outcome =
+      endpoint.classifier && typeof registry?.classify === "function"
+        ? await classifyClassifier(prompt, endpoint, registry, effectiveTimeout, controller.signal, verbose, sessionId)
+        : await classifyLLM(prompt, endpoint, controller.signal, verbose, sessionId);
     clearTimeout(timer);
 
     if (outcome.ok) return outcome.result;

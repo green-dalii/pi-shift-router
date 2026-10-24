@@ -107,6 +107,34 @@ Common runtimes that expose an OpenAI-compatible API the router can hit: **ollam
 
 **The Judge also needs a JSON-mode endpoint.** Any modern Flash class (Qwen 3.5+, Gemma 4, MiMo V2.x) supports it; a local Judge adds ~0.5–2 s per turn. Recommended: local `fast` + cloud or local `smart` + Judge on whichever `smart` you trust most for the kind of work you do.
 
+## Decision models (judge only)
+
+Decision models are a separate model class: they answer typed questions with probabilities and
+never generate text. They cannot run your turns — the router uses one only as the Judge, and
+they never appear in the Fast/Smart pickers.
+
+On pi ≥ 1.4.0 this list comes from pi's own classifier catalog, so `/router config` →
+`🧭 Judge` → `🧮 Decision model (Beta)` shows exactly what your credentials can reach:
+
+| Provider | Models | Notes |
+|---|---|---|
+| TypeSafe | `jev-latest`, `jev-1.13`, `jev-1.14` | the reference implementation; 1.4–6.6 s per verdict measured against the official API; output free |
+| OpenAI | `gpt-6-luna` | Decisions API (`/v1/decisions`); $0.10/M input, output not billed; up to 400 questions per request |
+| Azure OpenAI | `gpt-6-luna` | same shape, `api-key` auth, `/openai/v1/decisions`; US regions, East US 2 excluded |
+| Cloudflare Workers AI | `clef`, `clef-flash`, `clef-omni` | open weights (Apache-2.0), System One compatible, the cheapest of the family |
+| Perplexity | `pplx-decider-v1.2`, `pplx-decider-flash` | 27B / 4B, multimodal |
+| Microsoft · Liquid · Upstage · Baseten · Inception · Respan · ScaleDown · Together · ConvAI | `microsoft-decision-1`, `d1`, `solar-decide`, … | mostly reachable through OpenRouter or Vercel AI Gateway |
+
+Through a gateway the same model often has a second id (e.g. `openai/gpt-6-luna-decisions` on
+OpenRouter speaks the System One shape). Either entry works — the picker shows what pi's
+catalog exposes.
+
+Not decision models: Anthropic, Google and DeepSeek ship no decision endpoint. Use the LLM
+judge for those; there is nothing to configure.
+
+Before switching, read the caveats in the README: confidence distributions differ per model,
+and θ was not tuned for the one you pick.
+
 ## How to verify any of this
 
 - `pi` lists whatever your runtime can auth against. `pi remove pi-shift-router && pi install .` from this repo (in dev) or `pi install npm:pi-shift-router` (published) and then `/model` is the source of truth.

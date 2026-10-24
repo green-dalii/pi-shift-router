@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.8.0] — Decision judges run on pi's classifier layer
+
+### Added
+
+- **Decision-model judges now run through pi's own classifier layer.** On pi ≥ 1.4.0 the judge
+  chain resolves against pi's catalog — 53 decision models across TypeSafe (Jev), OpenAI
+  (`gpt-6-luna` Decisions, also via Azure), Cloudflare (Clef/​Clef-flash), Perplexity (Decider),
+  Microsoft, Liquid, Upstage, Baseten, Inception, Respan and more — and is judged with
+  `registry.classify()`, so credentials, request attribution, retries and pricing are handled by
+  pi. `/router config` → 🧭 Judge → 🧮 Decision model — no `models.json` entry needed.
+- The wizard lists pi's decision models first and marks hand-configured decision endpoints as
+  deprecated. Opening the menu performs **no network or auth probe**.
+
+### Changed
+
+- Judge mode labels drop the vendor name: `🧮 Jev (Beta)` is now `🧮 Decision model (Beta)`, and a
+  chosen-but-unusable decision judge reports "decision model unavailable — LLM judge active".
+
+### Fixed
+
+- **The judge's `orchestrate` answer reached no one.** It has been parsed since v1.1.0 and the
+  prompt requires it on smart turns, but the verdict never carried it — every path silently used
+  the tier default instead of the judge's own answer.
+- **System One calls to the official TypeSafe host no longer 404.** pi 1.4.0 flattens the model's
+  catalog base URL (`https://api.typesafe.ai/v1/` → the provider root), so pi-native judgement hit
+  `/systemone`; the adapter restores the `/v1` prefix for that one host until pi corrects it.
+- Classifier error statuses are extracted from both of pi's error shapes
+  (`"… returned 429"` and `"… error (402): {…}"`), so rate-limit and billing-exhausted endpoints
+  cool down exactly like the HTTP path does.
+
+### Deprecated
+
+- **Hand-configured `api: "typesafe-decisions"` endpoints.** They still work (older pi hosts,
+  custom endpoints), log a one-time notice, and will be removed once the native path has fully
+  displaced them.
+
 ## [1.7.2] — Config wizard opens instantly
 
 ### Fixed

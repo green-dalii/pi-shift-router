@@ -10,11 +10,11 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 - repo: https://github.com/green-dalii/pi-shift-router
 - docs: README.md / README.zh-CN.md / docs/CONFIG.md / docs/MODELS.md / docs/TROUBLESHOOTING.md
 - first-published: v0.4.0
-- latest: v1.7.2
+- latest: v1.8.0
 - last-updated: 2026-10
 - alternate-names: shift router, pi extension, model router, two-tier router, auto router, tier model router, model failover router
-- search-intents: "why route between models", "provider model tiers pricing spread", "LLM routing cost savings", "OpenRouter auto router alternative", "Jev how it works", "TypeSafe Jev decision model", "Jev calibrated probability router", "why a decision model beats an LLM judge", "purpose-built classifier for LLM routing", "judge that answers with a probability", "System One model routing", "decision model HTTP API", "auto-route pi agent turns", "pluggable judge model", "Jev judge pi", "decision model router judge", "LLM as classifier", "two-tier model routing", "model failover on 429", "model failover on 402 insufficient balance", "codex usage limit failover", "cost vs quality model selection", "pi-coding-agent extension", "model cooldown exponential backoff", "JSON-mode classifier", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "auto switch models in pi agent", "task-level orchestration pi", "Smart CTO delegates to Fast subagents", "pi agent subagent orchestration", "per-worker cost attribution", "orchestration cost tracking pi", "TUI status dashboard pi", "pi model registry alignment", "router config matches /model", "ModelRegistry available snapshot", "config wizard slow to open", "model catalog background refresh"
-- features: two-tier routing, task-level orchestration (Smart CTO delegates to Fast engineers), pluggable judge (reuse Fast chain / dedicated Judge LLM / decision model such as Jev (Beta, opt-in) — see the Jev section), LLM judge, JSON-mode classifier, sliding-window downgrade gate, multi-model fallback chains, TUI config wizard, exponential-backoff runtime failover (429/402/5xx + Codex usage-limit exhaustion), shared cooldown map between routing and Judge, cache-aware routing (same-provider cache protection), cross-provider native, zero-config defaults, token throughput telemetry, TUI status dashboard (context-window + cache-hit gauges, chains with inline cooldowns, last decision, money), per-worker cost attribution (bounded orchestration ledger, `orchestration $X (N workers)`), EV economics routing with gear presets (eco/default/sport), task-level orchestration (on by default: Smart CTO delegates to Fast subagents; requires pi-subagents), pi model-registry aligned catalog (wizard + Judge + telemetry share `/model`-equivalent list), instant-open config wizard (provider catalog refreshed in the background)
+- search-intents: "decision models via pi classifier layer", "OpenAI Decisions API as judge", "why route between models", "provider model tiers pricing spread", "LLM routing cost savings", "OpenRouter auto router alternative", "Jev how it works", "TypeSafe Jev decision model", "Jev calibrated probability router", "why a decision model beats an LLM judge", "purpose-built classifier for LLM routing", "judge that answers with a probability", "System One model routing", "decision model HTTP API", "auto-route pi agent turns", "pluggable judge model", "Jev judge pi", "decision model router judge", "LLM as classifier", "two-tier model routing", "model failover on 429", "model failover on 402 insufficient balance", "codex usage limit failover", "cost vs quality model selection", "pi-coding-agent extension", "model cooldown exponential backoff", "JSON-mode classifier", "pi-shift-router vs pi-bifrost", "pi-shift-router vs pi-smart-router", "auto switch models in pi agent", "task-level orchestration pi", "Smart CTO delegates to Fast subagents", "pi agent subagent orchestration", "per-worker cost attribution", "orchestration cost tracking pi", "TUI status dashboard pi", "pi model registry alignment", "router config matches /model", "ModelRegistry available snapshot", "config wizard slow to open", "model catalog background refresh"
+- features: two-tier routing, task-level orchestration (Smart CTO delegates to Fast engineers), pluggable judge (reuse Fast chain / dedicated Judge LLM / decision model (Beta, opt-in) — see the decision-model section), LLM judge, JSON-mode classifier, sliding-window downgrade gate, multi-model fallback chains, TUI config wizard, exponential-backoff runtime failover (429/402/5xx + Codex usage-limit exhaustion), shared cooldown map between routing and Judge, cache-aware routing (same-provider cache protection), cross-provider native, zero-config defaults, token throughput telemetry, TUI status dashboard (context-window + cache-hit gauges, chains with inline cooldowns, last decision, money), per-worker cost attribution (bounded orchestration ledger, `orchestration $X (N workers)`), EV economics routing with gear presets (eco/default/sport), task-level orchestration (on by default: Smart CTO delegates to Fast subagents; requires pi-subagents), pi model-registry aligned catalog (wizard + Judge + telemetry share `/model`-equivalent list), instant-open config wizard (provider catalog refreshed in the background)
 - direct-competitor: "@tenchi4u/pi-bifrost (7-stage heuristic + subscription quota) · pi-smart-router (12-stage local pipeline + HyDRA + Virtual Cost v2)"
 - author: green-dalii (https://github.com/green-dalii)
 - canonical: https://github.com/green-dalii/pi-shift-router/blob/main/README.md
@@ -30,7 +30,7 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 [![Downloads](https://img.shields.io/npm/dm/pi-shift-router.svg)](https://www.npmjs.com/package/pi-shift-router)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Pi Agent](https://img.shields.io/badge/pi--agent-extension-purple)](https://pi.dev/packages/pi-shift-router)
-[![Jev](https://img.shields.io/badge/judge-Jev%20(Beta)-blueviolet)](https://docs.typesafe.ai/introduction/quickstart)
+[![Decision models](https://img.shields.io/badge/judge-Decision%20models%20(Beta)-blueviolet)](https://docs.typesafe.ai/introduction/quickstart)
 [![Node](https://img.shields.io/badge/node-%E2%89%A524-green)](https://nodejs.org)
 [![deps](https://img.shields.io/badge/deps-0%20runtime-blue)](package.json)
 [![size](https://img.shields.io/badge/install%20size-~409kB-blue)](https://packagephobia.com/package/pi-shift-router)
@@ -39,7 +39,7 @@ SEO metadata (not user-visible, parsed by crawlers / LLMs):
 
 [English] | [简体中文](README.zh-CN.md)
 
-[🌐 Project site](https://shiftrouter.greenerai.top) | [⚙️ How it works](#how-it-works) | [🚀 Why now](#why-now) | [🧭 Jev: a judge that answers with a number](#jev-a-decision-model-as-the-judge-beta) | [⚖️ vs. the alternatives](#vs-the-alternatives) | [❓ FAQ](#faq) | [🔧 Configuration](docs/CONFIG.md) | [🩺 Troubleshooting](docs/TROUBLESHOOTING.md)
+[🌐 Project site](https://shiftrouter.greenerai.top) | [⚙️ How it works](#how-it-works) | [🚀 Why now](#why-now) | [🧭 Decision models: a judge that answers with a number](#decision-models-as-the-judge-beta) | [⚖️ vs. the alternatives](#vs-the-alternatives) | [❓ FAQ](#faq) | [🔧 Configuration](docs/CONFIG.md) | [🩺 Troubleshooting](docs/TROUBLESHOOTING.md)
 
 You pay for two tiers of intelligence and can only use one of them per turn.
 
@@ -71,9 +71,9 @@ iterates. That is task-level orchestration, and it is on by default for complex 
 > (`pi install npm:pi-subagents`). Without it the router works normally — complex tasks just
 > run on the Smart tier directly, with no delegation.
 
-The judge itself comes in three modes, and the third is a different kind of model: **Jev**,
-a decision model that returns a probability instead of prose. Nothing to parse, about
-$0.0001 per turn, off by default and labelled Beta — [the honest case for it is here](#jev-a-decision-model-as-the-judge-beta).
+The judge itself comes in three modes, and the third is a different kind of model: a
+**decision model** that returns a probability instead of prose. Nothing to parse, about
+$0.0001 per turn, off by default and labelled Beta — [the honest case for it is here](#decision-models-as-the-judge-beta).
 
 - Upgrades happen immediately; downgrades wait for two consecutive `fast` turns.
 - Each tier is a fallback chain with exponential-backoff cooldown, so a 429 does not end your session.
@@ -108,7 +108,7 @@ OpenRouter alone lists **380** priced models, spanning **1579×** from Mistral N
 
 **3. Judging became a model class of its own.**
 
-Classifying a turn used to mean calling a frontier model and parsing JSON out of its prose. In September 2026 TypeSafe shipped **Jev**, a *System One* model: send it a state and typed questions, get typed answers with probabilities, and no generated sentence. Using a classification model for a classification is both cheaper and less fragile — [details, and the catches](#jev-a-decision-model-as-the-judge-beta).
+Classifying a turn used to mean calling a frontier model and parsing JSON out of its prose. In September 2026 TypeSafe shipped **Jev**, a *System One* model: send it a state and typed questions, get typed answers with probabilities, and no generated sentence. The category has since grown past one vendor — OpenAI's Decisions API, Cloudflare's Clef, Perplexity's Decider — and pi ships the transport for all of them. Using a classification model for a classification is both cheaper and less fragile — [details, and the catches](#decision-models-as-the-judge-beta).
 
 ---
 
@@ -169,7 +169,7 @@ holds the current tier rather than guessing.
 
 **Three judge modes (v1.7.0).** Reuse the Fast tier chain (default, no extra config), a
 dedicated Judge LLM chain you edit like a tier, or a decision model — see
-[Jev](#jev-a-decision-model-as-the-judge-beta).
+[decision models](#decision-models-as-the-judge-beta).
 
 ### When a provider goes down
 
@@ -184,15 +184,15 @@ The judge shares the same cooldown map (it walks the full fast-tier chain before
 
 ---
 
-## Jev: a decision model as the judge (Beta)
+## Decision models as the judge (Beta)
 
 The judge answers one question per turn: is this hard? Most routers ask an LLM and then
-parse JSON out of the reply. Jev is a different kind of model — hand it a question with
-options and it hands back the option plus a probability:
+parse JSON out of the reply. A decision model is a different kind of model — hand it typed
+questions and it hands back the option plus a probability:
 
 ```jsonc
-// POST /v1/systemone — what actually comes back
-{ "model": "jev-1.13.0",
+// what comes back (System One shape; the OpenAI Decisions shape is normalized to this)
+{ "model": "jev-1.14.0",
   "answers": {
     "tier":        { "choice": "fast", "probabilities": { "fast": 0.99, "smart": 0.01 } },
     "orchestrate": { "noul": 0.13 } } }
@@ -201,46 +201,61 @@ options and it hands back the option plus a probability:
 That response is everything the router needs. It compares `0.99` against θ and moves on, so
 there is no JSON mode and no parse step, which removes the whole "the judge failed because a
 model added a comma" category. A missing field means no verdict and the router holds. The same
-call also answers the orchestration question (`noul ≥ 0.5`), so a complex turn needs one
-judgment rather than two.
+call also answers the orchestration question, so a complex turn needs one judgment rather than
+two.
 
-It is cheap for the same reason: a verdict costs input tokens only, about **$0.0001** per
-turn. LiteLLM added the same idea to its Auto Router in September 2026 and measured a
-`jev` classifier **5.43× faster and 96% cheaper** than a Haiku-class one.
+It is cheap for the same reason: a verdict costs input tokens only — at TypeSafe's
+$0.25–0.42 per million input tokens that is about **$0.0001** per turn, with output free.
+
+### pi already speaks this protocol
+
+You do not need a custom `models.json` entry any more. Since pi 1.4.0, pi ships the transport
+and a catalog of decision models, and this router judges through pi's classifier layer — so
+pi resolves the key, attributes the request, retries it and prices the call:
+
+| Provider | Models |
+|---|---|
+| TypeSafe | `jev-latest`, `jev-1.13`, `jev-1.14` |
+| OpenAI | `gpt-6-luna` (the Decisions API) |
+| Cloudflare | `clef`, `clef-flash`, `clef-omni` |
+| Perplexity | `pplx-decider-v1.2`, `pplx-decider-flash` |
+| Microsoft · Liquid · Upstage | `microsoft-decision-1` · `d1` · `solar-decide` |
+| Gateways | OpenRouter (30 models), Vercel AI Gateway (14), OpenCode, Azure OpenAI |
+
+`/router config` → `🧭 Judge` → `🧮 Decision model (Beta)` lists what your install can
+actually reach, authenticated entries first. Nothing is probed over the network when the menu
+opens.
+
+A hand-configured `api: "typesafe-decisions"` endpoint in `models.json` still works. That path
+is **deprecated** — it is the router's own protocol code, kept for older pi hosts and custom
+endpoints, and it will be removed once the native path has displaced it. Using it logs a
+deprecation line.
 
 ### The catch
 
-Jev is in public beta, and the honest version of that is:
+Decision models are public beta, and the honest version of that is:
 
-- **It is slow right now.** We measure **1.4–6.6 s** per verdict (median ~5 s), and sending
-  a 5× smaller prompt does not help — that is provider capacity still ramping, not something
-  an integration can fix. The same rubric on a fast LLM judge takes ~1.4 s. Good for batch,
-  background and high-volume routing; for interactive turns the LLM judge is still better.
+- **They can be slow.** We measure **1.4–6.6 s** per verdict against `api.typesafe.ai`
+  (median ~5 s), and a 5× smaller prompt does not help — that is provider capacity, not the
+  integration. OpenAI's Decisions API answers in the hundreds of milliseconds in external
+  benchmarks, which is one reason the picker is not tied to one vendor.
 - **The evidence is mixed.** A September 2026 independent evaluation found decision models
-  behind the per-task best LLM on 14 of 15 annotation tasks.
-- **So it is opt-in.** `/router config` → `🧭 Judge` lists both LLM options first and Jev
-  third, labelled Beta. Upgrading does not change your default.
+  behind the per-task best LLM on 14 of 15 annotation tasks, and October 2026 benchmarks show
+  the ranking changing with the task — including between decision models themselves.
+- **So it is opt-in.** `/router config` → `🧭 Judge` lists both LLM options first and the
+  decision mode third, labelled Beta. Upgrading does not change your default.
 
 ### Setting it up
 
-pi ships no Jev provider, so add one to `~/.pi/agent/models.json`:
+1. Authenticate a provider that serves a decision model — `/login typesafe`, `/login openai`,
+   or an OpenRouter key you already have.
+2. `/router config` → `🧭 Judge` → `🧮 Decision model (Beta)` → pick the model.
+3. Save. There is no network probe at save time; the wizard raises `judgeTimeout` when your
+   value would cut decision calls off, because the 5 s default does.
 
-```jsonc
-{ "providers": { "typesafe": {
-    "baseUrl": "https://api.typesafe.ai",
-    "api": "typesafe-decisions",     // the marker this router looks for
-    "apiKey": "$TYPESAFE_API_KEY",
-    "models": [ { "id": "jev-latest", "name": "Jev", "input": ["text"],
-                  "contextWindow": 64000, "cost": { "input": 0.042, "output": 0 } } ] } } }
-```
-
-Keys come from the [TypeSafe console](https://console.typesafe.ai/settings/keys) (early
-access). Then `/router config` → `🧭 Judge` → `🧮 Jev — decision model (Beta)` →
-`typesafe/jev-latest`. Saving makes no network call, and the wizard raises `judgeTimeout`
-to 15 s for you, because the 5 s default would cut off most decision calls. If Jev stops
-answering, the router steps down to your LLM judge rather than stalling, and to plain
-routing if that fails too. It never shows up in the Fast/Smart pickers: pi cannot stream
-that protocol as a chat model.
+If the decision model stops answering, the router steps down to your LLM judge rather than
+stalling, and to plain routing if that fails too. It never shows up in the Fast/Smart
+pickers: pi cannot stream that protocol as a chat model.
 
 ---
 
@@ -436,42 +451,35 @@ Yes. Each tier is an ordered list of `{provider, model, priority}` — combine f
 
 Downgrades need **two consecutive decisive fast decisions** (`economics.downgradeMemory`, default 2) plus the cache-aware idle gate — a single routine turn never drops you, and a hold (confidence < `minConfidence`) or any smart decision resets the streak. Tune `economics.reworkPenalty` (default 3, θ ≈ 0.33): raise it to 5 for cheaper routing, lower it to 2 to stay on Smart longer. Upgrades are always immediate on a decisive smart decision.
 
-### How do I set up Jev as the judge?
+### How do I set up a decision model as the judge?
 
 Three steps:
 
-1. **Get a Jev API key.** Jev is in early access; create one in the [TypeSafe console](https://console.typesafe.ai/settings/keys). Store it like any other provider credential — in `~/.pi/agent/auth.json`, or export `TYPESAFE_API_KEY` in your shell.
-2. **Register the provider in `~/.pi/agent/models.json`** — this is what the wizard reads to find Jev:
-   ```jsonc
-   { "providers": { "typesafe": {
-       "baseUrl": "https://api.typesafe.ai",
-       "api": "typesafe-decisions",     // the marker this router looks for
-       "apiKey": "$TYPESAFE_API_KEY",
-       "models": [ { "id": "jev-latest", "name": "Jev", "input": ["text"],
-                     "contextWindow": 64000,
-                     "cost": { "input": 0.042, "output": 0 } } ] } } }
-   ```
-3. **Pick Jev in the wizard.** Restart pi, then `/router config` → `🧭 Judge` → `🧮 Jev — decision model (Beta)` → `typesafe/jev-latest`. The wizard validates the choice locally (no network call) and raises `judgeTimeout` to 15 s, because the 5 s default would cut off most decision calls.
+1. **Authenticate a provider that serves one.** TypeSafe (`/login typesafe`), OpenAI (`/login openai`), or any OpenRouter key you already have; Cloudflare Workers AI, Azure OpenAI and Vercel AI Gateway work too if you already use them for chat. Store the key the way you store any other provider credential — pi resolves it.
+2. **Pick it in the wizard.** `/router config` → `🧭 Judge` → `🧮 Decision model (Beta)`. The list comes from pi's own classifier catalog (TypeSafe Jev, OpenAI `gpt-6-luna`, Cloudflare Clef, Perplexity Decider, and more), so there is no `models.json` entry to write and no base URL to get right.
+3. **Save.** There is no network probe at save time; the wizard raises `judgeTimeout` when your value would cut decision calls off, because the 5 s default does.
+
+On a pi older than the classifier layer, or for a custom endpoint, you can still register `"api": "typesafe-decisions"` by hand in `models.json`. That path is deprecated and logs a notice.
 
 ### Can I just ask pi to set it up for me?
 
-Yes. The router ships with everything Jev needs to know, so you can hand pi the task and it handles `models.json`, the key resolution and the restart. Send pi something like:
+Yes. Send pi something like:
 
-> Add a TypeSafe Jev model to my pi config so pi-shift-router can use it as the judge. I already have `TYPESAFE_API_KEY` exported. After you edit `~/.pi/agent/models.json`, restart the agent and open `/router config` → `🧭 Judge` to confirm `🧮 Jev — decision model (Beta)` is selectable. Tell me what went wrong if anything.
+> Set pi-shift-router's judge to a decision model through pi's own classifier catalog. Check which providers I am authenticated with, pick a decision model from that set, and configure `🧭 Judge` → `🧮 Decision model (Beta)` — no `models.json` edit needed. Tell me what you picked and why.
 
 …or, in Chinese:
 
-> 帮我在 pi 里接入 TypeSafe Jev，让 pi-shift-router 用它当判定器。我已经把 `TYPESAFE_API_KEY` 导出了。改完 `~/.pi/agent/models.json` 后重启一次，然后打开 `/router config` → `🧭 Judge`，确认 `🧮 Jev — decision model (Beta)` 能选；任何问题都告诉我。
+> 把 pi-shift-router 的判定器设成决策模型，走 pi 自带的 classifier 目录。先看我已经登录了哪些 Provider，再从里面挑一个决策模型，配到 `/router config` → `🧭 Judge` → `🧮 决策模型（Beta）`，不要改 `models.json`。告诉我你选了什么、为什么。
 
-### Why doesn't Jev show up in my Judge menu?
+### Why doesn't a decision model show up in my Judge menu?
 
-The wizard only lists decision-capable providers. Check three things, in order:
+The wizard lists what pi's classifier catalog exposes *and* what your credentials can reach. Check in order:
 
-- The provider entry in `~/.pi/agent/models.json` has `api: "typesafe-decisions"` (not `openai-completions` or anything else). That is the marker the router reads.
-- The `models` array contains at least one Jev model id (`jev-latest`, `jev-1.13.0`, `jev-preview`).
-- `TYPESAFE_API_KEY` resolves — `echo "$TYPESAFE_API_KEY"` should not be empty.
+- **pi version.** The native path needs pi 1.4.0 or newer (`pi --version`). Older hosts fall back to hand-configured `typesafe-decisions` endpoints.
+- **Authentication.** `/login typesafe` or `/login openai`, or an OpenRouter key; a model whose provider has no credentials is listed but marked unavailable.
+- **The provider serves a classifier at all.** Anthropic, Google and DeepSeek do not ship a decision endpoint — for those, keep the LLM judge; there is nothing to configure.
 
-If all three check, restart and reopen `/router config`; the Jev row should be present and labelled Beta.
+A hand-configured entry is only listed when it is marked `api: "typesafe-decisions"`; `openai-completions` will not appear.
 
 ### How is this different from OpenRouter's Auto Router?
 

@@ -311,15 +311,30 @@ export function readDispatchReceipt(text: unknown): { receipt: boolean; runId?: 
 }
 
 /**
- * Record one delegation: a spawn call starts a round and puts a worker in
- * flight. Returns false when orchestration is not active.
+ * Does this spawn start a new delegate→review round?
+ *
+ * A `reviewer` inspects the work the current round produced, so it runs
+ * *inside* that round; counting it separately made a three-phase plan
+ * (worker, reviewer, worker) exhaust `maxRounds: 3` before its final review
+ * (measured e2e 2026-11-13: the fourth call was blocked at 3/3). Any other
+ * agent — worker, scout, researcher — opens a round.
  */
-export function recordDispatch(state: RouterState): boolean {
+export function countsAsRound(input: unknown): boolean {
+  const agent = (input as Record<string, unknown> | null)?.["agent"];
+  return !(typeof agent === "string" && agent === "reviewer");
+}
+
+/**
+ * Record one delegation: a spawn call puts a worker in flight, and starts a
+ * round unless it is a review-phase child. Returns false when orchestration is
+ * not active.
+ */
+export function recordDispatch(state: RouterState, startsRound = true): boolean {
   const orch = state.orchestration;
   if (!orch.active) return false;
   orch.spawned += 1;
   orch.pendingDispatches += 1;
-  orch.rounds += 1;
+  if (startsRound) orch.rounds += 1;
   return true;
 }
 

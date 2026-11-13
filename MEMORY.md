@@ -13,7 +13,8 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 ## 2026-11-13 — a dispatch is not a completion (orchestration accounting)
 
 **Decision.** A `subagent` spawn call is a **dispatch** (`spawned`, `rounds`,
-`pendingDispatches`); only a non-receipt tool result or a `subagent-notify` message
+`pendingDispatches`; a `reviewer` dispatch runs inside the round it reviews and
+does not open one); only a non-receipt tool result or a `subagent-notify` message
 is a **completion** (`done`). `action`-bearing calls are management: never counted,
 never blocked by a cap. `capHit` also bounds in-flight dispatches. The audit treats a
 pending dispatch as deferred, not missing. Orchestration now enters on the **verdict**

@@ -33,6 +33,7 @@ import {
   recordDispatch,
   recordCompletion,
   classifySubagentCall,
+  countsAsRound,
   readDispatchReceipt,
   capHit,
 } from "./orchestrate.js";
@@ -824,7 +825,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         reason: `orchestration cap reached (max ${config.orchestration.maxRounds} rounds, ${config.orchestration.escalationThreshold} escalations) — take over the phase yourself and wrap up`,
       };
     }
-    recordDispatch(state);
+    recordDispatch(state, countsAsRound(e?.input ?? e?.args));
     // Pair with the matching tool_result to compute this worker's tok/s.
     if (typeof e?.toolCallId === "string") {
       workerSpawnStarts.set(e.toolCallId, Date.now());

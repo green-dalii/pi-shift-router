@@ -19,6 +19,7 @@ import {
   readDispatchReceipt,
   recordDispatch,
   recordCompletion,
+  countsAsRound,
   capHit,
   shouldOrchestrate,
   enterOrchestration,
@@ -171,6 +172,43 @@ describe("dispatch vs completion accounting", () => {
     recordDispatch(state);
     recordCompletion(state, cfg, false);
     expect(state.orchestration.escalations).toBe(1);
+  });
+});
+
+describe("review rounds — a reviewer runs inside the round it reviews", () => {
+  it("a worker opens a round; a reviewer does not", () => {
+    expect(countsAsRound({ agent: "worker", task: "x" })).toBe(true);
+    expect(countsAsRound({ agent: "scout", task: "x" })).toBe(true);
+    expect(countsAsRound({ agent: "reviewer", task: "x" })).toBe(false);
+  });
+
+  it("worker → reviewer → worker is two rounds, not three", () => {
+    const state = activeState();
+    const cfg = makeConfig({ orchestration: { ...DEFAULT_CONFIG.orchestration, maxRounds: 3, escalationThreshold: 10 } });
+    const run = (input: unknown) => {
+      recordDispatch(state, countsAsRound(input));
+      recordCompletion(state, cfg, true);
+    };
+    run({ agent: "worker" });
+    run({ agent: "reviewer" });
+    run({ agent: "worker" });
+    expect(state.orchestration.spawned).toBe(3);
+    expect(state.orchestration.rounds).toBe(2);
+    expect(capHit(state, cfg)).toBe(false);
+  });
+
+  it("leaves budget for the closing review that the old unit blocked", () => {
+    const state = activeState();
+    const cfg = makeConfig({ orchestration: { ...DEFAULT_CONFIG.orchestration, maxRounds: 3, escalationThreshold: 10 } });
+    recordDispatch(state, true);                       // worker
+    recordCompletion(state, cfg, true);
+    recordDispatch(state, countsAsRound({ agent: "reviewer" }));
+    recordCompletion(state, cfg, true);
+    recordDispatch(state, true);                       // worker
+    recordCompletion(state, cfg, true);
+    expect(capHit(state, cfg)).toBe(false);            // the closing reviewer fits
+    recordDispatch(state, countsAsRound({ agent: "reviewer" }));
+    expect(state.orchestration.rounds).toBe(2);
   });
 });
 

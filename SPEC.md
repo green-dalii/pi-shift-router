@@ -1153,8 +1153,12 @@ Five rules fix the model:
    increments a counter and is never blocked by a cap — a capped orchestrator
    must still be able to inspect its runs.
 2. **A spawn call is a dispatch**: `spawned += 1`, `pendingDispatches += 1`,
-   `rounds += 1`. One call, one round — a workflow script with N children is
-   still one dispatch (inner fan-out is not separately observable).
+   and — unless it is a `reviewer` — `rounds += 1`. A review runs *inside* the
+   round whose work it inspects: counting it separately made a three-phase plan
+   (worker, reviewer, worker) exhaust `maxRounds: 3` before its final review
+   (measured 2026-11-13; the fourth call was blocked at 3/3). A workflow script
+   with N children is still one dispatch (inner fan-out is not separately
+   observable).
 3. **A launch receipt is not a completion.** Detect it from the tool result
    (run id + "detached") and stop: no `done`, no streak reset, no spend.
 4. **A completion** is either a non-receipt `subagent` tool result

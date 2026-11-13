@@ -27,6 +27,7 @@ import {
   capHit,
   recordWorkerOutcome,
   recordWorkerSpend,
+  recordDispatch,
 } from "../src/orchestrate.js";
 
 function makeConfig(partial?: Partial<ShiftRouterConfig>): ShiftRouterConfig {
@@ -141,7 +142,12 @@ describe("shouldOrchestrate", () => {
 
   it("ignores orchestrate signal on fast verdict (simple never orchestrates)", () => {
     const cfg = makeConfig();
-    expect(shouldOrchestrate(cfg, "fast", true, true, true)).toBe(false);
+    expect(shouldOrchestrate(cfg, "fast", undefined, true, true)).toBe(false);
+  });
+
+  it("honours an explicit orchestrate:true on a fast verdict (v1.8.1 override)", () => {
+    const cfg = makeConfig();
+    expect(shouldOrchestrate(cfg, "fast", true, true, true)).toBe(true);
   });
 
   it("returns false when Smart model unresolvable and requireSmartModel (backward-compat #4)", () => {
@@ -219,7 +225,7 @@ describe("buildOrchestratorPrompt", () => {
     expect(prompt).not.toContain("{{maxRounds}}");
     expect(prompt).toContain("5");
     expect(prompt).toContain("3");
-    expect(prompt).toContain("context: \"fresh\"");
+    expect(prompt).toContain("async: false");
     expect(prompt).toContain("subagent");
   });
 
@@ -307,11 +313,12 @@ describe("orchestration lifecycle", () => {
     expect(state.orchestration.escalations).toBe(0);
   });
 
-  it("recordWorkerOutcome success consumes a round and resets streak", () => {
+  it("a dispatch consumes a round; a success resets the streak", () => {
     const state: RouterState = createRouterState();
     const cfg = makeConfig({ orchestration: { ...DEFAULT_CONFIG.orchestration, mode: "auto", escalationThreshold: 2 } });
     enterOrchestration(state);
     state.orchestration.workerFailStreak = 1; // a prior failure happened
+    recordDispatch(state);
     recordWorkerOutcome(state, cfg, true);
     expect(state.orchestration.rounds).toBe(1);
     expect(state.orchestration.workerFailStreak).toBe(0);
@@ -326,7 +333,6 @@ describe("orchestration lifecycle", () => {
     recordWorkerOutcome(state, cfg, false);
     expect(state.orchestration.escalations).toBe(1);
     expect(state.orchestration.workerFailStreak).toBe(0); // reset after escalation
-    expect(state.orchestration.rounds).toBe(2);
     // One more failure starts a new streak toward the next escalation.
     recordWorkerOutcome(state, cfg, false);
     expect(state.orchestration.escalations).toBe(1);
@@ -342,7 +348,6 @@ describe("orchestration lifecycle", () => {
     recordWorkerOutcome(state, cfg, false); // streak=1 again
     expect(state.orchestration.escalations).toBe(0);
     expect(state.orchestration.workerFailStreak).toBe(1);
-    expect(state.orchestration.rounds).toBe(3);
   });
 
   it("capHit fires once escalations reach threshold via outcomes", () => {
@@ -357,13 +362,13 @@ describe("orchestration lifecycle", () => {
     expect(capHit(state, cfg)).toBe(true);
   });
 
-  it("capHit fires once rounds reach maxRounds via outcomes", () => {
+  it("capHit fires once rounds reach maxRounds via dispatches", () => {
     const state: RouterState = createRouterState();
     const cfg = makeConfig({ orchestration: { ...DEFAULT_CONFIG.orchestration, mode: "auto", maxRounds: 3, escalationThreshold: 10 } });
     enterOrchestration(state);
-    recordWorkerOutcome(state, cfg, true);
-    recordWorkerOutcome(state, cfg, true);
-    recordWorkerOutcome(state, cfg, true); // rounds=3 → cap
+    recordDispatch(state);
+    recordDispatch(state);
+    recordDispatch(state); // rounds=3 → cap
     expect(state.orchestration.rounds).toBe(3);
     expect(capHit(state, cfg)).toBe(true);
   });

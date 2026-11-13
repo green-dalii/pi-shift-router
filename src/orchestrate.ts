@@ -143,6 +143,7 @@ export function createOrchestrationState(): OrchestrationState {
     workerSpends: [],
     spawned: 0,
     done: 0,
+    pendingDispatches: 0,
     workerSpeeds: [],
     workerFailStreak: 0,
     goal: null,
@@ -169,6 +170,7 @@ export function enterOrchestration(state: RouterState): void {
     orch.workerSpends = [];
     orch.spawned = 0;
     orch.done = 0;
+    orch.pendingDispatches = 0;
     orch.workerSpeeds = [];
     orch.workerFailStreak = 0;
     orch.goal = null;
@@ -208,9 +210,13 @@ export function shouldOrchestrate(
 ): boolean {
   if (!config.enabled) return false;
   if (config.orchestration.mode !== "auto") return false;
-  if (judgeTier !== "smart") return false;
   // Explicit veto from the Judge wins: judge said smart but NOT orchestratable.
   if (judgeOrchestrate === false) return false;
+  // The VERDICT decides, not `decisionTier`: that field stays "smart" while a
+  // fast verdict is held by the downgrade rules (confidence window + cache
+  // gate), which used to orchestrate fast-judged turns (43 of 164 in the
+  // runtime log). An explicit `orchestrate: true` is the one override.
+  if (judgeTier !== "smart" && judgeOrchestrate !== true) return false;
   if (config.orchestration.requireSmartModel && !smartModelResolvable) return false;
   if (!subagentToolAvailable) return false;
   return true;
@@ -252,7 +258,6 @@ export function recordWorkerSpend(
 export function recordWorkerOutcome(state: RouterState, config: ShiftRouterConfig, ok: boolean): void {
   const orch = state.orchestration;
   if (!orch.active) return;
-  orch.rounds += 1;
   if (ok) {
     orch.workerFailStreak = 0;
     return;
@@ -264,10 +269,90 @@ export function recordWorkerOutcome(state: RouterState, config: ShiftRouterConfi
   }
 }
 
+// ─── Dispatch vs completion (SPEC §9.3 v1.8.1) ───────────────────
+
+/** What a `subagent` call is, from its input — no LLM, no heuristics. */
+export type SubagentCallKind = "spawn" | "manage" | "workflow";
+
+/**
+ * Classify a `subagent` tool call by shape.
+ *
+ * `action` means a management call (`status` / `list` / `models` / `resume` /
+ * `steer` / `stop`). Management must never consume a round nor be blocked by a
+ * cap: a capped orchestrator still has to be able to inspect its own runs.
+ */
+export function classifySubagentCall(input: unknown): SubagentCallKind {
+  if (input === null || typeof input !== "object") return "spawn";
+  const args = input as Record<string, unknown>;
+  if (typeof args.action === "string" && args.action.trim() !== "") return "manage";
+  if (args.workflow !== undefined || args.workflowScript !== undefined || args.workflowScriptPath !== undefined) {
+    return "workflow";
+  }
+  return "spawn";
+}
+
+const RECEIPT_RUN_ID = /\bAsync(?:\s+workflow)?\s*:?\s*([A-Za-z][\w.-]*)?\s*\[([0-9a-f][0-9a-f-]{7,})\]/i;
+const RECEIPT_DETACHED = /\bdetached\b|return control to the user/i;
+
+/**
+ * Detect a background launch receipt.
+ *
+ * pi-subagents runs children in the background by default, so the tool result
+ * is frequently `Async: worker [id] … detached` — a receipt, not a result.
+ * Scoring it as a completed worker made the caps and the acceptance audit
+ * claim success over work that had not started (`workers 1/1, spend $0.0000`).
+ */
+export function readDispatchReceipt(text: unknown): { receipt: boolean; runId?: string; agent?: string } {
+  if (typeof text !== "string" || text.length === 0) return { receipt: false };
+  const id = RECEIPT_RUN_ID.exec(text);
+  if (!id || !RECEIPT_DETACHED.test(text)) return { receipt: false };
+  const named = id[1] && id[1] !== "workflow" ? id[1] : undefined;
+  return { receipt: true, runId: id[2], ...(named ? { agent: named } : {}) };
+}
+
+/**
+ * Record one delegation: a spawn call starts a round and puts a worker in
+ * flight. Returns false when orchestration is not active.
+ */
+export function recordDispatch(state: RouterState): boolean {
+  const orch = state.orchestration;
+  if (!orch.active) return false;
+  orch.spawned += 1;
+  orch.pendingDispatches += 1;
+  orch.rounds += 1;
+  return true;
+}
+
+/**
+ * Settle one worker: the child reported (foreground tool result, or a
+ * `subagent-notify` message for a background run).
+ *
+ * A `notify` with nothing pending is a stale completion from a previous task
+ * and is ignored; a foreground result is trusted even without a prior
+ * dispatch (a worker spawned by something other than the orchestrator).
+ */
+export function recordCompletion(
+  state: RouterState,
+  config: ShiftRouterConfig,
+  ok: boolean,
+  source: "tool_result" | "notify" = "tool_result",
+): boolean {
+  const orch = state.orchestration;
+  if (!orch.active) return false;
+  if (source === "notify" && orch.pendingDispatches === 0) return false;
+  if (orch.pendingDispatches > 0) orch.pendingDispatches -= 1;
+  orch.done += 1;
+  recordWorkerOutcome(state, config, ok);
+  return true;
+}
+
 export function capHit(state: RouterState, config: ShiftRouterConfig): boolean {
   const orch = state.orchestration;
   if (!orch.active) return false;
   if (orch.rounds >= config.orchestration.maxRounds) return true;
   if (orch.escalations >= config.orchestration.escalationThreshold) return true;
+  // Background-only orchestrators never complete a round mid-turn; without
+  // this bound they could launch unlimited children past maxRounds.
+  if (orch.pendingDispatches >= config.orchestration.maxRounds) return true;
   return false;
 }

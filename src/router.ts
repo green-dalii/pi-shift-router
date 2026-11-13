@@ -40,6 +40,7 @@ export function createRouterState(): RouterState {
       workerSpends: [],
       spawned: 0,
       done: 0,
+      pendingDispatches: 0,
       workerSpeeds: [],
       workerFailStreak: 0,
       goal: null,

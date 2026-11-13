@@ -277,8 +277,15 @@ export interface OrchestrationState {
   workerSpends: WorkerSpendRecord[];
   /** Subagent workers spawned during this orchestration task. */
   spawned: number;
-  /** Subagent workers completed (tool_result received) this task. */
+  /** Subagent workers completed (tool_result or subagent-notify) this task. */
   done: number;
+  /**
+   * Spawn calls dispatched but not yet settled (SPEC §9.3 v1.8.1). A
+   * background launch returns a receipt, not a result; until the matching
+   * completion arrives this counter keeps the worker "in flight" so caps,
+   * telemetry and the audit do not mistake a dispatch for delivered work.
+   */
+  pendingDispatches: number;
   /**
    * Per-worker throughput readings (tokens/sec), one per completed worker
    * this task. Drives the "~N tok/s" segment of the workers status-bar

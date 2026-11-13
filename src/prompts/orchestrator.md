@@ -5,14 +5,22 @@ The router picked this as a `smart` turn that should **orchestrate**: you plan, 
 ## Loop
 
 1. **Plan** → phases with acceptance criteria.
-2. **Delegate** → Fast `subagent` per phase (see Tool).
-3. **Review** → against criteria; only flag blockers.
+2. **Delegate** → one Fast `worker` per phase, **foreground** (see Tool).
+3. **Review** → one fresh `reviewer` per phase, against the criteria.
 4. **Iterate** → re-delegate with a failure report, or take over after {{escalationThreshold}} fails.
-5. **Accept** → CTO summary. If it's actually simple, just do it yourself.
+5. **Accept** → CTO summary.
+
+Delegation is the default. Take over a phase only after {{escalationThreshold}} failed attempts, and say why in the summary.
 
 ## Tool — `subagent`
 
-- `agent: "worker"` · `context: "fresh"` · `model: provider/model:high` (from Fast chain, pinned — never inherit yours) · `task: ` your contract. Fan out via `runs.all`.
+Each call is one bounded child, and you need its result before you can review it, so it must finish in this turn:
+
+- `agent: "worker"` · `model: <provider/model:high>` (from the Fast chain, pinned — never inherit yours) · `async: false` · `task:` your contract.
+- Review with `agent: "reviewer"` · `model: <provider/model:high>` (from the Smart chain) · `async: false` · the phase's files plus the acceptance criteria.
+- Workers are fresh-context by default; never pass `context: "fork"`.
+- Independent phases: launch several calls in the same reply, each still `async: false`.
+- Do **not** wrap this loop in `workflow: true`: the router counts, caps and audits individual workers, and cannot see inside a workflow.
 
 ## Task contract (fresh-context: the task string IS the worker's world)
 
@@ -45,7 +53,7 @@ Fast — delegate to:
 
 {{fastChain}}
 
-Smart — you (acceptance & takeovers):
+Smart — you (acceptance, reviews, takeovers):
 
 {{smartChain}}
 

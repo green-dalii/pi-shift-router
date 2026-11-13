@@ -1002,7 +1002,8 @@ export function registerCommands(
             spend: state.orchestration.spend,
             workers: state.orchestration.done,
             detail: state.orchestration.active
-              ? `round ${state.orchestration.rounds}/${config.orchestration.maxRounds}, workers ${state.orchestration.done}/${state.orchestration.spawned}`
+              ? `round ${state.orchestration.rounds}/${config.orchestration.maxRounds}, workers ${state.orchestration.done}/${state.orchestration.spawned}` +
+                (state.orchestration.pendingDispatches > 0 ? `, ${state.orchestration.pendingDispatches} in flight` : "")
               : undefined,
             audit: state.lastAudit
               ? state.lastAudit.violations.length > 0

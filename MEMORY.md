@@ -10,6 +10,36 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-11-13 — a dispatch is not a completion (orchestration accounting)
+
+**Decision.** A `subagent` spawn call is a **dispatch** (`spawned`, `rounds`,
+`pendingDispatches`); only a non-receipt tool result or a `subagent-notify` message
+is a **completion** (`done`). `action`-bearing calls are management: never counted,
+never blocked by a cap. `capHit` also bounds in-flight dispatches. The audit treats a
+pending dispatch as deferred, not missing. Orchestration now enters on the **verdict**
+(`smart`, or an explicit `orchestrate: true`), never on `decisionTier`.
+
+**Why.** pi-subagents is background-by-default, so the tool result is often only
+`Async: worker [id] … detached`. The router scored that receipt as a completed worker
+(`isError:false` ⇒ success, no `usage` ⇒ `$0`), which fabricated telemetry: 152 of 157
+orchestrated turns spawned nothing, and 4 of the 5 that spawned reported `$0.0000`.
+The real completion arrives as a `subagent-notify` custom message, which the router
+never read. `decisionTier` stays `smart` while a fast verdict is held by the downgrade
+rules, so 43 of 164 orchestration lines carried `judge=fast`. Issues #57 / #58.
+
+**Rejected.** (a) Forcing `async: false` only in the prompt — behaviour-only fix, the
+accounting still lies when a model launches in the background. (b) Treating every
+`subagent-notify` as a completion — stale notices from earlier tasks would inflate
+`done`; only a pending dispatch is settled. (c) Counting a workflow call's children —
+pi-subagents exposes one tool call for N children; pretending otherwise would require
+a second source of truth for no reviewable gain.
+
+**Gotcha.** `context: "fresh"` belongs in `options`; `worker` already defaults to fresh,
+so the prompt now forbids `fork` instead of restating it. `runs.all` exists only inside a
+`workflow: true` script and is not usable from a direct child call.
+
+---
+
 ## 2026-10-23 — decision judges go through pi's classifier layer; the self-built transport is deprecated
 
 **Decision.** `routing.judge.mode: "decision"` resolves a `routing.judge.models` ref against **pi's

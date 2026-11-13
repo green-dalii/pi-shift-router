@@ -36,13 +36,20 @@ jobs:
           node-version: 24
           cache: npm
 
+      # Trusted publishing needs npm >= 11.5.1; the runner's bundled npm may lag.
+      - name: Ensure a recent npm
+        run: |
+          npm install -g npm@latest
+          node -v
+          npm -v
+
       - name: Install dependencies
         run: npm ci
 
       # prepublishOnly runs the full gate (vitest → tsc + copy-assets → pack:check),
       # so a broken tree cannot reach the registry.
       - name: Publish (OIDC — no token, no OTP)
-        run: npm publish --access public
+        run: npm publish --access public --provenance --loglevel=verbose
 
       - name: Report published version
         run: |

@@ -39,7 +39,7 @@ jobs:
       # Trusted publishing needs npm >= 11.5.1; the runner's bundled npm may lag.
       - name: Ensure a recent npm
         run: |
-          npm install -g npm@latest
+          npm install -g npm@11
           node -v
           npm -v
 

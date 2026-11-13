@@ -81,7 +81,7 @@
     "test:coverage": "vitest run --coverage",
     "clean": "rm -rf node_modules dist",
     "pack:check": "npm pack --dry-run && node scripts/pack-check.mjs",
-    "prepublishOnly": "npm run test && npm run build && npm run pack:check",
+    "prepublishOnly": "npm run build && npm run test && npm run pack:check",
     "check:isolated": "node scripts/check-isolated-load.mjs"
   },
   "peerDependencies": {

@@ -324,7 +324,7 @@ export interface OrchestrationState {
  * not plan size.
  */
 export const ORCHESTRATION_LIMITS = {
-  maxRounds: { min: 1, max: 12, fallback: 6 },
+  maxRounds: { min: 1, max: 20, fallback: 6, legacyDefault: 3 },
   escalationThreshold: { min: 1, max: 6, fallback: 2 },
 } as const;
 

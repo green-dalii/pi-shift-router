@@ -844,3 +844,50 @@ describe("normalizeJudgeMode — old-config migration (SPEC §8.6)", () => {
     expect(normalizeJudgeMode({ mode: "" })).toBe("fast-chain");
   });
 });
+
+// ─── Legacy orchestration defaults (v1.8.1) ─────────────────────────
+//
+// v1.0.0 shipped maxRounds 3 before delegation worked. A wizard save writes
+// the whole merged snapshot, so 3 sits in user configs nobody edited. Only the
+// legacy default is raised; any other value is treated as the user's own.
+describe("legacy orchestration defaults", () => {
+  let projectDir = "";
+
+  beforeEach(() => {
+    rmSync("/tmp/pi-shift-router-test-home", { recursive: true, force: true });
+    projectDir = "/tmp/pi-shift-router-migrate-" + Math.random().toString(36).slice(2, 8);
+    invalidateConfigCache();
+  });
+
+  afterEach(() => {
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync("/tmp/pi-shift-router-test-home", { recursive: true, force: true });
+    invalidateConfigCache();
+  });
+
+  const writeProject = (orchestration: Record<string, unknown>) => {
+    mkdirSync(join(projectDir, ".pi"), { recursive: true });
+    writeFileSync(
+      join(projectDir, ".pi", "pi-shift-router.json"),
+      JSON.stringify({ orchestration }),
+    );
+  };
+
+  it("raises the v1.0.0 default 3 to the current default", async () => {
+    writeProject({ maxRounds: 3 });
+    const cfg = await loadConfig(projectDir);
+    expect(cfg.orchestration.maxRounds).toBe(6);
+  });
+
+  it("leaves an explicit non-default budget alone", async () => {
+    writeProject({ maxRounds: 5 });
+    const cfg = await loadConfig(projectDir);
+    expect(cfg.orchestration.maxRounds).toBe(5);
+  });
+
+  it("accepts the new upper bound of 20", async () => {
+    writeProject({ maxRounds: 20 });
+    const cfg = await loadConfig(projectDir);
+    expect(cfg.orchestration.maxRounds).toBe(20);
+  });
+});

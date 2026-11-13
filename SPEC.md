@@ -1154,7 +1154,7 @@ Five rules fix the model:
    must still be able to inspect its runs.
 2. **A spawn call is a dispatch**: `spawned += 1`, `pendingDispatches += 1`,
    and — unless it is a `reviewer` — `rounds += 1`. The default budget is
-   **6 rounds** (`ORCHESTRATION_LIMITS`, range 1–12, editable in
+   **6 rounds** (`ORCHESTRATION_LIMITS`, range 1–20, editable in
    `/router config` → 🪄 Orchestration); `3` was a v1.0.0 placeholder chosen
    before delegation worked. A review runs *inside* the
    round whose work it inspects: counting it separately made a three-phase plan

@@ -45,7 +45,9 @@ Fast-tier prices. Settings live in `/router config` → 🪄 Orchestration.
 
 **Gotcha.** A saved config snapshots the whole merged default (`maxRounds: 3` is in
 `~/.pi/agent/pi-shift-router.json` because a wizard save wrote it, not because the user
-chose it) — a default change alone does not reach existing users; the wizard entry does.
+chose it) — a default change alone does not reach existing users. `migrateLegacyOrchestrationDefaults`
+raises exactly that legacy value to 6 on load (logged once) and leaves any other value alone;
+the wizard entry is the way to change it afterwards. Upper bound 20.
 
 **Gotcha.** `context: "fresh"` belongs in `options`; `worker` already defaults to fresh,
 so the prompt now forbids `fork` instead of restating it. `runs.all` exists only inside a

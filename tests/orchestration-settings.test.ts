@@ -22,7 +22,7 @@ describe("orchestration defaults", () => {
     // real task (4 modules, 2 phases + 2 reviews) exhausted it before its
     // closing review. Six covers P95 phase counts at ~10 min / <$0.30.
     expect(DEFAULT_CONFIG.orchestration.maxRounds).toBe(6);
-    expect(ORCHESTRATION_LIMITS.maxRounds).toEqual({ min: 1, max: 12, fallback: 6 });
+    expect(ORCHESTRATION_LIMITS.maxRounds).toEqual({ min: 1, max: 20, fallback: 6, legacyDefault: 3 });
   });
 
   it("keeps the escalation threshold about failures, not plan size", () => {
@@ -32,23 +32,24 @@ describe("orchestration defaults", () => {
 });
 
 describe("clampInt — the numeric input contract", () => {
-  it("accepts an in-range integer", () => {
-    expect(clampInt("4", 1, 12, 6)).toBe(4);
+  it("accepts an in-range integer, including the new upper bound", () => {
+    expect(clampInt("4", 1, 20, 6)).toBe(4);
+    expect(clampInt("20", 1, 20, 6)).toBe(20);
   });
 
   it("clamps to the bounds instead of rejecting", () => {
-    expect(clampInt("0", 1, 12, 6)).toBe(1);
-    expect(clampInt("99", 1, 12, 6)).toBe(12);
+    expect(clampInt("0", 1, 20, 6)).toBe(1);
+    expect(clampInt("99", 1, 20, 6)).toBe(20);
   });
 
   it("falls back on empty or non-numeric input", () => {
-    expect(clampInt("", 1, 12, 6)).toBe(6);
-    expect(clampInt("six", 1, 12, 6)).toBe(6);
-    expect(clampInt(undefined, 1, 12, 6)).toBe(6);
+    expect(clampInt("", 1, 20, 6)).toBe(6);
+    expect(clampInt("six", 1, 20, 6)).toBe(6);
+    expect(clampInt(undefined, 1, 20, 6)).toBe(6);
   });
 
   it("reads the leading integer of a sloppy entry", () => {
-    expect(clampInt(" 8 rounds ", 1, 12, 6)).toBe(8);
+    expect(clampInt(" 8 rounds ", 1, 20, 6)).toBe(8);
   });
 });
 

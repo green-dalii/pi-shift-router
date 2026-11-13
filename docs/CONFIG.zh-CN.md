@@ -57,7 +57,7 @@ pi-shift-router.json
     └── routerLogVerbose       调试日志写入 ~/.pi/agent/logs/shift-router.log；默认 false
 ├── orchestration            （SPEC §9.3，v1.0.0；全部可选）
     ├── mode                   "auto" | "off"；默认 auto（/router orchestrate off 关闭）
-    ├── maxRounds              每任务 delegate→review 轮数上限；默认 6（1–12）
+    ├── maxRounds              每任务 delegate→review 轮数上限；默认 6（1–20）
     ├── escalationThreshold    worker 失败 ≥N 次 → Smart 接管该阶段；默认 2
     └── requireSmartModel      Smart 模型不可用时跳过编排；默认 true
 ```
@@ -107,7 +107,7 @@ tiers:
 | `routing.cacheAware.idleBoundaryMs` | `300000` | 空闲超过该时长视为 prompt 缓存已过期，恢复允许降级。 |
 | `ux.quietMode` / `statusBar` / `inlineToast` / `routerLogVerbose` | 各自 | 界面开关；`routerLogVerbose` 把诊断追加到 `~/.pi/agent/logs/shift-router.log`。 |
 | `orchestration.mode` | `"auto"` | 任务级编排模式。`"auto"`（默认）：由 Judge 驱动——简单任务（fast 判定）走普通路由；复杂任务（smart 判定）升级为 Smart 编排执行（需安装 `pi-subagents` 扩展；未安装时退化为普通 smart 档运行）。`"off"`（`/router orchestrate off`）：永不编排——行为与现有路由完全一致。没有“总是”模式。 |
-| `orchestration.maxRounds` | `6` | 每任务的**轮数**硬上限。一轮 = 一个 worker 加验收它的那次 review（`reviewer` 不单独占一轮）；可设 1–12。达到即停，无论 Smart 想继续多少轮。可在向导里改：`/router config → 🪄 Orchestration`。 |
+| `orchestration.maxRounds` | `6` | 每任务的**轮数**硬上限。一轮 = 一个 worker 加验收它的那次 review（`reviewer` 不单独占一轮）；可设 1–20。达到即停，无论 Smart 想继续多少轮。可在向导里改：`/router config → 🪄 Orchestration`。仍带着 v1.0.0 默认值 `3` 的配置会在加载时提升到 `6`（记一条日志）；其它值不动。 |
 | `orchestration.escalationThreshold` | `2` | 某阶段 worker 失败 ≥N 次 → Smart 亲自接管该阶段。可设 1–6，向导内可改。 |
 | `orchestration.requireSmartModel` | `true` | 为 true 且 Smart 模型不可解析时跳过编排，按现有 smart 档运行（不崩溃）。 |
 | `orchestration.audit.enabled` | `true` | 每个**实际委派过 worker（spawned ≥ 1）**的编排轮结束后运行验收审计（托底 review）。确定性检查（worker 全部返回、CTO summary、cap 标记）始终在委派轮执行；为 true 时再让 Fast 档跑一次 LLM 审计，核验 CTO 的验收主张是否建立在 worker 结果之上。自执行轮（spawned = 0）完全豁免——零 violation、零警告，仅在 `/router status` 标记 `self-executed`。绝不阻断已完成轮次——发现的问题通过 `console.warn` + toast 与 `/router status` → `Last audit` 呈现。 |

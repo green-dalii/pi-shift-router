@@ -286,7 +286,7 @@ forked agent defend a plan it did not write.
 ### Hard caps
 
 Two numbers are enforced by the plugin, not by the prompt:
-- **`orchestration.maxRounds`** (default 6, 1–12) — max rounds per task, where one round is a worker plus its review. Set it in `/router config → 🪄 Orchestration`.
+- **`orchestration.maxRounds`** (default 6, 1–20) — max rounds per task, where one round is a worker plus its review. Set it in `/router config → 🪄 Orchestration`.
 - **`orchestration.escalationThreshold`** (default 2) — after N worker failures on a phase, the Smart agent takes over that phase itself.
 
 The loop stops when either the Smart agent says done or a cap is hit.

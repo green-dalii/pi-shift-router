@@ -220,7 +220,7 @@ worker 以 `context: "fresh"` 运行——不继承会话历史。任务字符�
 ### 硬上限
 
 插件强制执行两个数字，与 Smart 想做什么无关：
-- **`orchestration.maxRounds`**（默认 3）——每个任务最多 delegate→review 轮数。
+- **`orchestration.maxRounds`**（默认 6，可设 1–12）——每个任务最多几轮，一轮 = 一个 worker 加验收它的 review。在 `/router config → 🪄 Orchestration` 里改。
 - **`orchestration.escalationThreshold`**（默认 2）——某阶段 worker 连续失败 N 次，Smart 亲自接管该阶段。
 
 循环在 Smart 说完成、或命中上限时停止——两者任一即停。

@@ -1153,7 +1153,10 @@ Five rules fix the model:
    increments a counter and is never blocked by a cap — a capped orchestrator
    must still be able to inspect its runs.
 2. **A spawn call is a dispatch**: `spawned += 1`, `pendingDispatches += 1`,
-   and — unless it is a `reviewer` — `rounds += 1`. A review runs *inside* the
+   and — unless it is a `reviewer` — `rounds += 1`. The default budget is
+   **6 rounds** (`ORCHESTRATION_LIMITS`, range 1–12, editable in
+   `/router config` → 🪄 Orchestration); `3` was a v1.0.0 placeholder chosen
+   before delegation worked. A review runs *inside* the
    round whose work it inspects: counting it separately made a three-phase plan
    (worker, reviewer, worker) exhaust `maxRounds: 3` before its final review
    (measured 2026-11-13; the fourth call was blocked at 3/3). A workflow script

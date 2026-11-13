@@ -24,6 +24,7 @@ import {
   TIERS,
   ECONOMIC_MODE_PRESETS,
   LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT,
+  ORCHESTRATION_LIMITS,
   type JudgeMode,
 } from "./types.js";
 import {
@@ -72,7 +73,7 @@ import {
 
 // ─── `/route-config` wizard ──────────────────────────────────────
 
-type MenuChoice = "fast" | "smart" | "ux" | "cache" | "judge" | "refresh" | "done" | "cancel";
+type MenuChoice = "fast" | "smart" | "ux" | "cache" | "judge" | "orch" | "refresh" | "done" | "cancel";
 
 /**
  * Status label for the economics mode. A set preset wins; otherwise the
@@ -259,12 +260,33 @@ function formatConfigSource(): string {
 export function matchMenuChoice(label: string): MenuChoice {
   if (label.includes("Model catalog")) return "refresh";
   if (label.includes("Cache-aware")) return "cache";
+  if (label.includes("Orchestration")) return "orch";
   if (label.includes("Judge")) return "judge";
   if (label.includes("Fast")) return "fast";
   if (label.includes("Smart")) return "smart";
   if (label.includes("UX")) return "ux";
   if (label.includes("Save")) return "done";
   return "cancel";
+}
+
+/**
+ * One line for the main menu: mode, budget, audit state.
+ * Pure — the wizard re-renders it after every edit.
+ */
+export function orchestrationSummary(config: ShiftRouterConfig): string {
+  const o = config.orchestration;
+  return `${o.mode}, ${o.maxRounds} rounds, audit ${o.audit?.enabled !== false ? "on" : "off"}`;
+}
+
+/**
+ * Numeric inputs come back as free text. Clamp instead of rejecting: a user
+ * who types 99 wants "as many as allowed", not an error dialog. Junk keeps the
+ * current value.
+ */
+export function clampInt(raw: string | undefined, min: number, max: number, fallback: number): number {
+  const n = Number.parseInt(String(raw ?? "").trim(), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
 }
 
 /**
@@ -375,7 +397,7 @@ export async function routeConfigWizard(
     return false;
   }
 
-  type MenuChoice = "fast" | "smart" | "ux" | "cache" | "judge" | "refresh" | "done" | "cancel";
+  type MenuChoice = "fast" | "smart" | "ux" | "cache" | "judge" | "orch" | "refresh" | "done" | "cancel";
   async function saveDestination(): Promise<"user" | "project" | null> {
     const choice = await ctx.ui.select("Save configuration to…", [
       "📁 Project — <cwd>/.pi/pi-shift-router.json (shareable with team)",
@@ -394,6 +416,7 @@ export async function routeConfigWizard(
       `🦾 Fast — ${config.tiers.fast.models.length} model(s)  (engineer: execution, daily coding)`,
       `🧠 Smart — ${config.tiers.smart.models.length} model(s)  (CTO: direction, review, hard problems)`,
       `🧭 Judge — ${judgeSummary(config, decisionModelsFor(registry, models).length)}`,
+      `🪄 Orchestration — ${orchestrationSummary(config)}`,
       "🎨 UX settings",
       "🔒 Cache-aware routing",
       `🔄 Model catalog — refresh now (${models.length} available)`,
@@ -625,6 +648,51 @@ export async function routeConfigWizard(
     }
   }
 
+  async function editOrchestration(): Promise<void> {
+    const o = config.orchestration;
+    const limits = ORCHESTRATION_LIMITS;
+    for (;;) {
+      const lines = [
+        toggleRow("Mode — auto: complex turns run as a Smart CTO loop", o.mode === "auto"),
+        `🔁 Max rounds — ${o.maxRounds}  (worker → review rounds per task)`,
+        `🛟 Escalation threshold — ${o.escalationThreshold}  (take over after N consecutive worker failures)`,
+        toggleRow("Acceptance audit — review the CTO's claims post-turn", o.audit?.enabled !== false),
+        "✅ Done",
+      ];
+      const pick = await ctx.ui.select(`🪄 Orchestration Settings ${TOGGLE_LEGEND}`, lines);
+      if (!pick) return;
+      const idx = lines.indexOf(pick);
+      if (idx === 0) {
+        o.mode = o.mode === "auto" ? "off" : "auto";
+      } else if (idx === 1) {
+        const raw = await ctx.ui.input(
+          `Max rounds (${limits.maxRounds.min}–${limits.maxRounds.max}) — one round = one worker → review cycle`,
+          String(o.maxRounds),
+        );
+        if (raw !== undefined) {
+          o.maxRounds = clampInt(raw, limits.maxRounds.min, limits.maxRounds.max, limits.maxRounds.fallback);
+        }
+      } else if (idx === 2) {
+        const raw = await ctx.ui.input(
+          `Escalation threshold (${limits.escalationThreshold.min}–${limits.escalationThreshold.max}) — consecutive worker failures before the CTO takes over`,
+          String(o.escalationThreshold),
+        );
+        if (raw !== undefined) {
+          o.escalationThreshold = clampInt(
+            raw,
+            limits.escalationThreshold.min,
+            limits.escalationThreshold.max,
+            limits.escalationThreshold.fallback,
+          );
+        }
+      } else if (idx === 3) {
+        o.audit = { timeoutMs: o.audit?.timeoutMs ?? 5000, enabled: o.audit?.enabled === false };
+      } else if (idx === 4) {
+        return;
+      }
+    }
+  }
+
   /** Shared: open the chain editor (or a flat picker in non-TUI modes). */
   async function openChainEditor(
     items: ModelRef[],
@@ -751,6 +819,8 @@ export async function routeConfigWizard(
       await editCacheAware();
     } else if (choice === "judge") {
       await editJudge();
+    } else if (choice === "orch") {
+      await editOrchestration();
     } else if (choice === "refresh") {
       await refreshCatalog();
     }

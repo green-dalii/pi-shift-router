@@ -35,6 +35,18 @@ accounting still lies when a model launches in the background. (b) Treating ever
 pi-subagents exposes one tool call for N children; pretending otherwise would require
 a second source of truth for no reviewable gain.
 
+**Budget (2026-11-13, after the first real e2e).** A round is one worker plus the
+review that inspects it (`reviewer` does not open one), and the default moved
+**3 → 6**. `3` came from v1.0.0 (2026-08-13), chosen before delegation worked — the
+feature then ran 157 orchestrated turns with 152 zero-worker, so the number was never
+exercised. The first real task (4 modules: worker → reviewer → worker) hit 3/3 and was
+refused its closing review. 6 covers P95 phase counts at ~10 min and <$0.30 at observed
+Fast-tier prices. Settings live in `/router config` → 🪄 Orchestration.
+
+**Gotcha.** A saved config snapshots the whole merged default (`maxRounds: 3` is in
+`~/.pi/agent/pi-shift-router.json` because a wizard save wrote it, not because the user
+chose it) — a default change alone does not reach existing users; the wizard entry does.
+
 **Gotcha.** `context: "fresh"` belongs in `options`; `worker` already defaults to fresh,
 so the prompt now forbids `fork` instead of restating it. `runs.all` exists only inside a
 `workflow: true` script and is not usable from a direct child call.

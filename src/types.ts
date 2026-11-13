@@ -312,6 +312,22 @@ export interface OrchestrationState {
   goal: string | null;
 }
 
+/**
+ * Editable bounds for `/router config` → 🪄 Orchestration.
+ *
+ * The budget was 3 from v1.0.0 (2026-08-13) to v1.8.1: a placeholder chosen
+ * before delegation worked, when a "round" meant any subagent result. The first
+ * real orchestrated task (2026-11-13: 4 modules, 2 worker phases, 2 reviews)
+ * exhausted it before its closing review. Six covers the P95 phase count of a
+ * well-scoped task at roughly 10 minutes and well under $0.30 at observed
+ * Fast-tier prices; the escalation threshold stays about failure tolerance,
+ * not plan size.
+ */
+export const ORCHESTRATION_LIMITS = {
+  maxRounds: { min: 1, max: 12, fallback: 6 },
+  escalationThreshold: { min: 1, max: 6, fallback: 2 },
+} as const;
+
 /** Default configuration */
 export const DEFAULT_CONFIG: ShiftRouterConfig = {
   enabled: true,
@@ -347,8 +363,8 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
   },
   orchestration: {
     mode: "auto",
-    maxRounds: 3,
-    escalationThreshold: 2,
+    maxRounds: ORCHESTRATION_LIMITS.maxRounds.fallback,
+    escalationThreshold: ORCHESTRATION_LIMITS.escalationThreshold.fallback,
     requireSmartModel: true,
     audit: { enabled: true, timeoutMs: 5000 },
   },

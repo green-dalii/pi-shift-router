@@ -95,7 +95,10 @@ describe("orchestration: default config", () => {
     const cfg = JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as ShiftRouterConfig;
     expect(cfg.orchestration).toEqual({
       mode: "auto",
-      maxRounds: 3,
+      // v1.8.1: 3 → 6. A round is one worker → review cycle, and 3 was a
+      // v1.0.0 placeholder that exhausted before a two-phase task's closing
+      // review (e2e 2026-11-13).
+      maxRounds: 6,
       escalationThreshold: 2,
       requireSmartModel: true,
       audit: { enabled: true, timeoutMs: 5000 },

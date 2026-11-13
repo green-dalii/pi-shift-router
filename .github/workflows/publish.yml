@@ -1,0 +1,50 @@
+name: Publish
+
+# Trusted publishing (npm OIDC): the npm registry trusts this workflow directly,
+# so there is no NPM_TOKEN and no one-time password. Requirements on the npm
+# side (Package → Settings → Trusted Publisher):
+#   repository: green-dalii/pi-shift-router
+#   workflow:   publish.yml
+#   environment: (leave empty — this workflow declares none)
+# npm authenticates the run through its OIDC token, so `id-token: write` is the
+# only permission the job needs.
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # prepublishOnly runs the full gate (vitest → tsc + copy-assets → pack:check),
+      # so a broken tree cannot reach the registry.
+      - name: Publish (OIDC — no token, no OTP)
+        run: npm publish --access public
+
+      - name: Report published version
+        run: |
+          echo "published: $(node -p "require('./package.json').name + '@' + require('./package.json').version")"
+          npm view "$(node -p "require('./package.json').name")" version --registry=https://registry.npmjs.org/

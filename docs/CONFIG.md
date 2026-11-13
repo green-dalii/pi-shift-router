@@ -62,7 +62,7 @@ pi-shift-router.json
     └── routerLogVerbose       debug logging to ~/.pi/agent/logs/shift-router.log; default false
 ├── orchestration             (SPEC §9.3, v1.0.0; all optional)
     ├── mode                   "auto" | "off"; default auto (opt-out via /router orchestrate off)
-    ├── maxRounds              delegate→review rounds cap; default 3
+    ├── maxRounds              delegate→review rounds cap; default 6 (1–20)
     ├── escalationThreshold    worker fails ≥N → Smart takes over; default 2
     └── requireSmartModel      skip orchestration if Smart model unresolvable; default true
 ```
@@ -111,8 +111,8 @@ tiers:
 | `routing.cacheAware.idleBoundaryMs` | `300000` | Idle gap after which the prompt cache is considered expired; downgrades are allowed again. |
 | `ux.quietMode` / `statusBar` / `inlineToast` / `routerLogVerbose` | various | Display controls; `routerLogVerbose` appends diagnostics to `~/.pi/agent/logs/shift-router.log`. |
 | `orchestration.mode` | `"auto"` | Task-level orchestration mode. `"auto"` (default): Judge-driven — simple tasks (fast verdict) keep the plain router; complex tasks (smart verdict) escalate to Smart-orchestrated execution (requires the `pi-subagents` extension; without it, behavior degrades to the plain smart-tier run). `"off"` (via `/router orchestrate off`): never orchestrate — byte-for-byte today's router. There is no "always" mode. |
-| `orchestration.maxRounds` | `3` | Hard cap on delegate→review rounds per task; the loop stops when this is hit regardless of what the Smart agent wants. |
-| `orchestration.escalationThreshold` | `2` | A worker failing ≥N times on a phase → Smart takes over that phase itself. |
+| `orchestration.maxRounds` | `6` | Hard cap on **rounds** per task, where one round is a worker plus the review that inspects it (a `reviewer` does not open its own round); 1–20. The loop stops when this is hit regardless of what the Smart agent wants. Editable in the wizard: `/router config → 🪄 Orchestration`. A config still carrying the v1.0.0 default `3` is raised to `6` on load (logged once); any other value is left alone. |
+| `orchestration.escalationThreshold` | `2` | A worker failing ≥N times on a phase → Smart takes over that phase itself. 1–6, editable in the wizard. |
 | `orchestration.requireSmartModel` | `true` | When true and the Smart tier model can't be resolved, orchestration is skipped and the turn runs as today's smart-tier run (no crash). |
 | `orchestration.audit.enabled` | `true` | Run the post-turn acceptance audit (safety-net review) after every orchestrated turn **that actually delegated to workers (`spawned ≥ 1`)**. Deterministic checks (workers all returned; CTO summary; cap flag) always run on delegated turns; when `true` an LLM pass on the fast tier verifies the CTO's acceptance claim is grounded in the worker results. Self-executed turns (`spawned = 0`) are exempt — no violations, no warnings, marked `self-executed` in `/router status`. Never blocks the turn — findings surface via `console.warn` + toast and `/router status` → `Last audit`. |
 | `orchestration.audit.timeoutMs` | `5000` | Max time for the audit LLM call (best-effort; a failure degrades to a warn, never a crash). |

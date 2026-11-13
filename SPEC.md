@@ -1015,6 +1015,12 @@ reviews each result, sends failed work back with concrete feedback, takes over
 directly when a subagent repeatedly fails past a threshold, and does the final
 acceptance pass. This is the Teams / Orchestra pattern.
 
+**Entry gate (v1.8.1).** The turn orchestrates when the **verdict** is `smart`
+**or** the Judge answered `orchestrate: true` explicitly. It must not gate on
+`decisionTier`: that field stays `smart` while a `fast` verdict is held by the
+downgrade rules (confidence window + cache gate), which is how 43 of 164
+orchestration log lines came to read `judge=fast`.
+
 **Two architectural layers.** Orchestration *authority* lives in the **LLM
 layer**, not in the extension. The Smart main agent owns planning, delegation,
 review, escalation and acceptance, using pi's subagent tool to spawn isolated
@@ -1132,6 +1138,44 @@ LLM review; the *quantity* answer (reached max rounds / N escalations / budget
 spent) is the plugin's hard cap. The loop stops when either one says stop —
 Smart's judgment decides *what* is wrong, the plugin's caps decide *how long*
 we keep paying for it.
+
+**Delegation accounting (v1.8.1) — a dispatch is not a completion.** pi-subagents
+runs children in the background by default; a launch therefore returns a
+*receipt* (`Run fan-out: … Async: worker [id] … detached`), not a result. Before
+v1.8.1 the router scored that receipt as a completed worker (done+1,
+`isError:false` ⇒ success, `usage` absent ⇒ `$0`), which made the caps and the
+audit report green over work that never happened: of 157 orchestrated turns,
+152 spawned nothing and 4 of the 5 "successful" ones ended at `$0.0000`.
+Five rules fix the model:
+
+1. **Only spawn-shaped calls count.** A call that carries `action`
+   (`status` / `list` / `models` / `resume` / …) is management: it never
+   increments a counter and is never blocked by a cap — a capped orchestrator
+   must still be able to inspect its runs.
+2. **A spawn call is a dispatch**: `spawned += 1`, `pendingDispatches += 1`,
+   and — unless it is a `reviewer` — `rounds += 1`. The default budget is
+   **6 rounds** (`ORCHESTRATION_LIMITS`, range 1–20, editable in
+   `/router config` → 🪄 Orchestration); `3` was a v1.0.0 placeholder chosen
+   before delegation worked. A review runs *inside* the
+   round whose work it inspects: counting it separately made a three-phase plan
+   (worker, reviewer, worker) exhaust `maxRounds: 3` before its final review
+   (measured 2026-11-13; the fourth call was blocked at 3/3). A workflow script
+   with N children is still one dispatch (inner fan-out is not separately
+   observable).
+3. **A launch receipt is not a completion.** Detect it from the tool result
+   (run id + "detached") and stop: no `done`, no streak reset, no spend.
+4. **A completion** is either a non-receipt `subagent` tool result
+   (foreground child) or a `subagent-notify` custom message (background child).
+   Both settle the dispatch: `done += 1`, `pendingDispatches -= 1`, then the
+   existing outcome/streak/spend accounting runs. A settle with nothing
+   pending is ignored (stale notification from a previous task).
+5. **Caps bound in-flight work too**: `capHit` also fires when
+   `pendingDispatches >= maxRounds`, so an orchestrator that only launches
+   background children cannot bypass the round cap.
+
+The audit's completeness check treats a still-pending dispatch as **deferred,
+not missing** (`spawned === done + pending` is complete) — a turn cannot be
+blamed for a worker that is still running, but it also cannot claim its result.
 
 **Acceptance audit (v1.3.0, safety-net review; v1.4.0 domain-restricted)** — because
 the *content* judgment is Smart's alone, the plugin adds a post-turn safety net.

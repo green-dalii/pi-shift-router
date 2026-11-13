@@ -10,6 +10,51 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-11-13 — a dispatch is not a completion (orchestration accounting)
+
+**Decision.** A `subagent` spawn call is a **dispatch** (`spawned`, `rounds`,
+`pendingDispatches`; a `reviewer` dispatch runs inside the round it reviews and
+does not open one); only a non-receipt tool result or a `subagent-notify` message
+is a **completion** (`done`). `action`-bearing calls are management: never counted,
+never blocked by a cap. `capHit` also bounds in-flight dispatches. The audit treats a
+pending dispatch as deferred, not missing. Orchestration now enters on the **verdict**
+(`smart`, or an explicit `orchestrate: true`), never on `decisionTier`.
+
+**Why.** pi-subagents is background-by-default, so the tool result is often only
+`Async: worker [id] … detached`. The router scored that receipt as a completed worker
+(`isError:false` ⇒ success, no `usage` ⇒ `$0`), which fabricated telemetry: 152 of 157
+orchestrated turns spawned nothing, and 4 of the 5 that spawned reported `$0.0000`.
+The real completion arrives as a `subagent-notify` custom message, which the router
+never read. `decisionTier` stays `smart` while a fast verdict is held by the downgrade
+rules, so 43 of 164 orchestration lines carried `judge=fast`. Issues #57 / #58.
+
+**Rejected.** (a) Forcing `async: false` only in the prompt — behaviour-only fix, the
+accounting still lies when a model launches in the background. (b) Treating every
+`subagent-notify` as a completion — stale notices from earlier tasks would inflate
+`done`; only a pending dispatch is settled. (c) Counting a workflow call's children —
+pi-subagents exposes one tool call for N children; pretending otherwise would require
+a second source of truth for no reviewable gain.
+
+**Budget (2026-11-13, after the first real e2e).** A round is one worker plus the
+review that inspects it (`reviewer` does not open one), and the default moved
+**3 → 6**. `3` came from v1.0.0 (2026-08-13), chosen before delegation worked — the
+feature then ran 157 orchestrated turns with 152 zero-worker, so the number was never
+exercised. The first real task (4 modules: worker → reviewer → worker) hit 3/3 and was
+refused its closing review. 6 covers P95 phase counts at ~10 min and <$0.30 at observed
+Fast-tier prices. Settings live in `/router config` → 🪄 Orchestration.
+
+**Gotcha.** A saved config snapshots the whole merged default (`maxRounds: 3` is in
+`~/.pi/agent/pi-shift-router.json` because a wizard save wrote it, not because the user
+chose it) — a default change alone does not reach existing users. `migrateLegacyOrchestrationDefaults`
+raises exactly that legacy value to 6 on load (logged once) and leaves any other value alone;
+the wizard entry is the way to change it afterwards. Upper bound 20.
+
+**Gotcha.** `context: "fresh"` belongs in `options`; `worker` already defaults to fresh,
+so the prompt now forbids `fork` instead of restating it. `runs.all` exists only inside a
+`workflow: true` script and is not usable from a direct child call.
+
+---
+
 ## 2026-10-23 — decision judges go through pi's classifier layer; the self-built transport is deprecated
 
 **Decision.** `routing.judge.mode: "decision"` resolves a `routing.judge.models` ref against **pi's

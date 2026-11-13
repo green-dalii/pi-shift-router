@@ -29,8 +29,12 @@ import {
   enterOrchestration,
   exitOrchestration,
   resetOrchestration,
-  recordWorkerOutcome,
   recordWorkerSpend,
+  recordDispatch,
+  recordCompletion,
+  classifySubagentCall,
+  countsAsRound,
+  readDispatchReceipt,
   capHit,
 } from "./orchestrate.js";
 import { auditOrchestration, callAuditLLM, extractFinalAssistantText, extractWorkerResults } from "./audit.js";
@@ -417,7 +421,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     try {
       if (
         orchestrationAllowed &&
-        shouldOrchestrate(config, result.decisionTier, judgeResult.orchestrate, smartResolvable, subagentAvailable)
+        shouldOrchestrate(config, judgeResult.tier, judgeResult.orchestrate, smartResolvable, subagentAvailable)
       ) {
         enterOrchestration(state);
         // Snapshot the user's original goal for the post-turn acceptance
@@ -588,6 +592,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         const audit = await auditOrchestration({
           spawned: o.spawned,
           done: o.done,
+          pending: o.pendingDispatches,
           rounds: o.rounds,
           escalations: o.escalations,
           maxRounds: config.orchestration.maxRounds,
@@ -795,6 +800,16 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
       }
       return;
     }
+    // Management calls (`status` / `list` / `models` / `resume` / `steer` /
+    // `stop`) are not workers: they must never consume a round, and a capped
+    // orchestrator must still be able to inspect its own runs (SPEC §9.3
+    // v1.8.1). Before this guard a `{action:"resume"}` was blocked by the cap.
+    if (classifySubagentCall(e?.input ?? e?.args) === "manage") {
+      if (config.ux.routerLogVerbose) {
+        appendRouterLog(`[ShiftRouter][diag] subagent management call (action=${(e?.input ?? e?.args)?.action}) — not counted`);
+      }
+      return;
+    }
     // Hard cap (SPEC §9.3): once maxRounds or escalationThreshold is reached,
     // physically refuse new worker spawns — the plugin's cap is not a prompt
     // suggestion, it is a block. The Smart agent sees the blocked call and
@@ -810,7 +825,7 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
         reason: `orchestration cap reached (max ${config.orchestration.maxRounds} rounds, ${config.orchestration.escalationThreshold} escalations) — take over the phase yourself and wrap up`,
       };
     }
-    state.orchestration.spawned += 1;
+    recordDispatch(state, countsAsRound(e?.input ?? e?.args));
     // Pair with the matching tool_result to compute this worker's tok/s.
     if (typeof e?.toolCallId === "string") {
       workerSpawnStarts.set(e.toolCallId, Date.now());
@@ -832,11 +847,28 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     const e: any = event;
     if (e?.toolName !== "subagent") return;
     if (!state.orchestration.active) return;
-    // Hard-cap accounting (SPEC §9.3): every subagent result consumes a round;
-    // an errored result advances the escalation streak. isError is pi's
-    // standard field on tool_result events (see extensions docs).
-    recordWorkerOutcome(state, config, e?.isError !== true);
-    state.orchestration.done += 1;
+    if (classifySubagentCall(e?.input ?? e?.args) === "manage") return;
+
+    // A background launch returns a RECEIPT, not a result (SPEC §9.3 v1.8.1).
+    // Scoring it as a completed worker is what produced "workers 1/1, spend
+    // $0.0000" and let the audit report green over work that never ran. The
+    // real completion arrives as a `subagent-notify` message (handler below).
+    const resultText = Array.isArray(e?.content)
+      ? e.content.map((c: any) => (typeof c?.text === "string" ? c.text : "")).join("\n")
+      : typeof e?.content === "string" ? e.content : "";
+    const receipt = readDispatchReceipt(resultText);
+    if (receipt.receipt) {
+      appendRouterLog(
+        `[ShiftRouter] 🪄 dispatch receipt (run ${receipt.runId ?? "?"}, agent ${receipt.agent ?? "?"}) — ` +
+        `${state.orchestration.pendingDispatches} in flight; completion arrives as subagent-notify`,
+      );
+      if (config.ux.statusBar) updateBar(ctx.ui, config, state);
+      return;
+    }
+
+    // Hard-cap accounting (SPEC §9.3): a real result settles one dispatch;
+    // an errored result advances the escalation streak.
+    recordCompletion(state, config, e?.isError !== true);
     // Per-worker throughput: pair toolCallId back to its spawn time and
     // compute tokens/sec from usage.output. The bar shows the AVERAGE of
     // these readings, stable under concurrent completions.
@@ -860,9 +892,33 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     if (config.ux.statusBar) updateBar(ctx.ui, config, state);
     if (config.ux.routerLogVerbose) {
       appendRouterLog(
-        `[ShiftRouter][diag] subagent tool_result: done=${state.orchestration.done}/${state.orchestration.spawned}, active=${state.orchestration.active}, cost=$${cost.toFixed(4)} → updateBar`,
-      );
+        `[ShiftRouter][diag] subagent tool_result: done=${state.orchestration.done}/${state.orchestration.spawned}, pending=${state.orchestration.pendingDispatches}, active=${state.orchestration.active}, cost=$${cost.toFixed(4)} → updateBar`,
+      )
     }
+  });
+
+  // Background subagent completions (SPEC §9.3 v1.8.1). pi-subagents reports
+  // an async child through a `subagent-notify` custom message, *not* through
+  // `tool_result` — pi appends it via `_appendCustomMessage`, which emits
+  // `message_end`. Without this handler the real result of every background
+  // worker was invisible to the router.
+  pi.on("message_end", async (event, ctx) => {
+    if (!initialized) await init(ctx);
+    if (!config?.enabled) return;
+    const m: any = (event as any)?.message;
+    if (m?.role !== "custom" || m?.customType !== "subagent-notify") return;
+    const text = typeof m.content === "string" ? m.content : "";
+    const ok = !/^\s*background task failed/i.test(text);
+    const settled = state.orchestration.active
+      ? recordCompletion(state, config, ok, "notify")
+      : false;
+    appendRouterLog(
+      `[ShiftRouter] 🪄 subagent-notify (${ok ? "completed" : "failed"}) — ` +
+      (settled
+        ? `settled a dispatch (workers ${state.orchestration.done}/${state.orchestration.spawned}, pending ${state.orchestration.pendingDispatches})`
+        : "no pending dispatch (stale, or the orchestration turn already ended)"),
+    );
+    if (settled && config.ux.statusBar) updateBar(ctx.ui, config, state);
   });
 
   pi.on("turn_end", async (event) => {

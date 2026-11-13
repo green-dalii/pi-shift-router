@@ -277,8 +277,15 @@ export interface OrchestrationState {
   workerSpends: WorkerSpendRecord[];
   /** Subagent workers spawned during this orchestration task. */
   spawned: number;
-  /** Subagent workers completed (tool_result received) this task. */
+  /** Subagent workers completed (tool_result or subagent-notify) this task. */
   done: number;
+  /**
+   * Spawn calls dispatched but not yet settled (SPEC §9.3 v1.8.1). A
+   * background launch returns a receipt, not a result; until the matching
+   * completion arrives this counter keeps the worker "in flight" so caps,
+   * telemetry and the audit do not mistake a dispatch for delivered work.
+   */
+  pendingDispatches: number;
   /**
    * Per-worker throughput readings (tokens/sec), one per completed worker
    * this task. Drives the "~N tok/s" segment of the workers status-bar
@@ -304,6 +311,22 @@ export interface OrchestrationState {
    */
   goal: string | null;
 }
+
+/**
+ * Editable bounds for `/router config` → 🪄 Orchestration.
+ *
+ * The budget was 3 from v1.0.0 (2026-08-13) to v1.8.1: a placeholder chosen
+ * before delegation worked, when a "round" meant any subagent result. The first
+ * real orchestrated task (2026-11-13: 4 modules, 2 worker phases, 2 reviews)
+ * exhausted it before its closing review. Six covers the P95 phase count of a
+ * well-scoped task at roughly 10 minutes and well under $0.30 at observed
+ * Fast-tier prices; the escalation threshold stays about failure tolerance,
+ * not plan size.
+ */
+export const ORCHESTRATION_LIMITS = {
+  maxRounds: { min: 1, max: 20, fallback: 6, legacyDefault: 3 },
+  escalationThreshold: { min: 1, max: 6, fallback: 2 },
+} as const;
 
 /** Default configuration */
 export const DEFAULT_CONFIG: ShiftRouterConfig = {
@@ -340,8 +363,8 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
   },
   orchestration: {
     mode: "auto",
-    maxRounds: 3,
-    escalationThreshold: 2,
+    maxRounds: ORCHESTRATION_LIMITS.maxRounds.fallback,
+    escalationThreshold: ORCHESTRATION_LIMITS.escalationThreshold.fallback,
     requireSmartModel: true,
     audit: { enabled: true, timeoutMs: 5000 },
   },

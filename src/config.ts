@@ -23,6 +23,7 @@ import {
   type ProviderEndpoint,
   DEFAULT_CONFIG,
   TIERS,
+  ORCHESTRATION_LIMITS,
 } from "./types.js";
 
 const PI_AGENT_DIR = join(homedir(), ".pi", "agent");
@@ -598,6 +599,22 @@ export function validateConfig(config: ShiftRouterConfig, store: ModelsStore): s
 // ─── Config loading (user → project merge) ────────────────────────
 
 /**
+ * A config saved before v1.8.1 carries the old default budget (3). The value is
+ * usually a snapshot of the default, not a decision — a wizard save writes the
+ * whole merged object, which is why 3 sits in ~/.pi/agent/pi-shift-router.json
+ * on machines whose owner never touched it. Raise exactly the legacy default;
+ * any other value is the user's own.
+ *
+ * Mutates in place; returns true when it fired (the caller logs once).
+ */
+export function migrateLegacyOrchestrationDefaults(config: ShiftRouterConfig): boolean {
+  const { maxRounds } = config.orchestration;
+  if (maxRounds !== ORCHESTRATION_LIMITS.maxRounds.legacyDefault) return false;
+  config.orchestration.maxRounds = ORCHESTRATION_LIMITS.maxRounds.fallback;
+  return true;
+}
+
+/**
  * Load configuration with caching.
  * Layering:
  *   1. User config (~/.pi/agent/pi-shift-router.json) — personal defaults
@@ -618,6 +635,13 @@ export async function loadConfig(cwd: string): Promise<ShiftRouterConfig> {
   const merged: ShiftRouterConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
   deepMerge(merged as unknown as Record<string, unknown>, userCfg);
   deepMerge(merged as unknown as Record<string, unknown>, projectCfg);
+  if (migrateLegacyOrchestrationDefaults(merged)) {
+    appendRouterLog(
+      `[ShiftRouter] orchestration.maxRounds: ${ORCHESTRATION_LIMITS.maxRounds.legacyDefault} → ` +
+      `${ORCHESTRATION_LIMITS.maxRounds.fallback} (legacy default, not a user choice) — ` +
+      `change it in /router config → 🪄 Orchestration`,
+    );
+  }
   _config = merged;
 
   // Track which layer is authoritative (project if it exists, else user;

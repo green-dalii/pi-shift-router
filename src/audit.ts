@@ -131,6 +131,12 @@ export function hasCtoSummary(text: string): boolean {
 export function deterministicAudit(input: {
   spawned: number;
   done: number;
+  /**
+   * Dispatches still in flight (SPEC §9.3 v1.8.1). A background worker that
+   * has not reported yet is deferred, not missing — the turn cannot be blamed
+   * for it, and it cannot claim its result either.
+   */
+  pending?: number;
   rounds: number;
   escalations: number;
   maxRounds: number;
@@ -138,7 +144,8 @@ export function deterministicAudit(input: {
   messages: unknown[];
 }): Pick<OrchestrationAudit, "complete" | "hasCtoSummary" | "capHit" | "violations"> {
   const violations: string[] = [];
-  const complete = input.spawned === 0 || input.done >= input.spawned;
+  const pending = input.pending ?? 0;
+  const complete = input.spawned === 0 || input.done + pending >= input.spawned;
   if (!complete) {
     violations.push(`worker results incomplete (done ${input.done}/${input.spawned})`);
   }
@@ -149,7 +156,7 @@ export function deterministicAudit(input: {
   // report over their results. A self-executed turn (spawned = 0) that ends
   // without the marker is a normal smart answer — not an unclosed loop — so it
   // never produces a violation or a warning.
-  if (input.spawned > 0 && !ctoSummary) {
+  if (input.spawned > 0 && !ctoSummary && pending === 0) {
     violations.push("no CTO summary in the final assistant message (acceptance not reported)");
   }
   const capHit =
@@ -305,6 +312,8 @@ export const callAuditLLM: AuditLLMCall = async (
 export async function auditOrchestration(input: {
   spawned: number;
   done: number;
+  /** Still-in-flight dispatches; deferred, not missing (v1.8.1). */
+  pending?: number;
   rounds: number;
   escalations: number;
   maxRounds: number;

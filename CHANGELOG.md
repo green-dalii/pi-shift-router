@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.9.0] — Orchestration you can trust and tune
+
+### Added
+
+- **`/router config` → 🪄 Orchestration.** Mode (auto/off), max rounds (1–20), escalation
+  threshold (1–6) and the acceptance-audit toggle, all editable in the wizard; the two
+  numbers used to exist only in the JSON file. The main menu shows the current budget
+  (`auto, 6 rounds, audit on`).
+- **Delegation telemetry you can act on.** `/router status` reports dispatches still in
+  flight, and a background launch is logged as a receipt instead of being counted as a
+  finished worker.
+- **Background completions are ingested.** pi-subagents reports an async child through a
+  `subagent-notify` message; the router now settles that dispatch (done, failure streak,
+  spend) instead of ignoring the real result.
+
+### Changed
+
+- **Round budget: default 3 → 6, range 1–20.** A round is one worker **plus the review that
+  inspects it** — a `reviewer` no longer consumes a round of its own. **3** came from v1.0.0
+  (2026-08-13), chosen before delegation worked; the first real task (four modules,
+  worker → reviewer → worker) exhausted it before its closing review.
+- **Legacy configs migrate.** A config still carrying the v1.0.0 default `3` is raised to `6`
+  on load (one log line). Any other value is left alone — a wizard save persists the whole
+  merged snapshot, so `3` in the file was usually a default, not a decision.
+- The orchestrator prompt runs workers and reviewers **in the foreground** (`async: false`),
+  names a fresh `reviewer` per phase, and no longer suggests `runs.all` (a workflow-script-only
+  API) or the "if it's actually simple, just do it yourself" escape hatch.
+
+### Fixed
+
+- **A launch receipt was scored as a completed worker.** pi-subagents runs children in the
+  background by default, so the tool result is often `Async: worker [id] … detached`; the
+  router recorded `done`, success and `$0.0000`, which made 152 of 157 orchestrated turns
+  report no delegation and 4 of the 5 that did report a zero cost.
+- **Management calls consumed rounds and were blocked by the cap.** `status` / `list` /
+  `models` / `resume` are no longer counted, so a capped orchestrator can still inspect its
+  own runs (a `resume` was previously rejected).
+- **Orchestration gated on the running tier, not the verdict.** 43 of 164 logged orchestration
+  turns read `judge=fast`; the gate now uses the Judge's verdict, with an explicit
+  `orchestrate: true` as the only override.
+- **The closing review could be refused.** With rounds counted per call, a two-phase plan
+  filled a three-round budget (worker, reviewer, worker) and the final reviewer was blocked;
+  the acceptance audit then reported "ended at hard cap" over a run that passed.
+- The audit treats a still-running worker as **deferred, not missing**, and does not demand a
+  CTO summary while one is in flight.
+
 ## [1.8.0] — Decision judges run on pi's classifier layer
 
 ### Added

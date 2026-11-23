@@ -590,6 +590,7 @@ cannot invent a third style, and tests assert the two idioms stay separate.
 | Slogan + CTO/Engineer terminology unification | ✅ | v0.9.1 | Docs, SPEC, judge prompt, tests |
 | **Coverage reporting (≥90% on router/failover)** | ✅ | v0.9.x (dev) | `vitest --coverage` in CI; router 100% / failover 95.5% |
 | **Cache-aware routing** | ✅ | v0.10.0 | §9.2: same-family threshold raise + warm-cache downgrade suppression |
+| **Per-session profiles** | ✅ | v1.10.0 | §9.6: named tier-chain preset, session-scoped selection (launch flag + `/router profile`), never written to disk |
 
 ### 8.5 Runtime Failover (Exponential Backoff)
 
@@ -1400,7 +1401,7 @@ the cost curve is measured.
 (message length, token counts and tool counts are forbidden inputs, exactly as the Judge
 forbids keyword rules); no change to θ, `minConfidence`, or cache-aware behaviour.
 
-### 9.6 Per-session profiles (designed, not implemented)
+### 9.6 Per-session profiles (implemented — pending release)
 
 **The gap.** The configuration system has two file scopes (§5.1): user
 (`~/.pi/agent/pi-shift-router.json`) and project (`<cwd>/.pi/pi-shift-router.json`).

@@ -10,6 +10,49 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-11-23 — the base/effective config split makes the write invariant structural (#65)
+
+**Decision.** The extension keeps **two** config objects: `baseConfig` (what is on
+disk: defaults ← user ← project) and `config` (the **effective** config = base merged
+with the selected profile). Everything that reads the router's behaviour uses the
+effective one; **everything that mutates or saves uses the base**. `saveConfig` writes
+the whole merged snapshot, so handing it an effective config would put the session's
+profile chains into the user's global file — the one thing the feature must never do.
+
+**Why.** The alternative designs all failed the same test. (a) *One config object,
+mutated in place:* the wizard and the `/router on|off|quiet|verbose|eco` commands all
+mutate-then-save, so a profile's chains would ride along into the file. (b) *Effective
+config threaded through every call site:* ~15 places in `index.ts` would have to switch
+to `effectiveConfig()`, each one a chance to forget one — and a forgotten one is a
+silent bug, not a compile error. (c) *Strip profile chains inside `saveConfig`:*
+`saveConfig` cannot know which chains came from a profile. Splitting the object once,
+at the top of the extension, makes the invariant hold by construction: the profile
+path has **no write call in it at all**.
+
+**Consequences to remember.** `registerCommands` now takes **both** configs
+(`getConfig` = effective, for display; `getBaseConfig` = base, for mutate+save), and
+the wizard receives the base. The status panel and `/router status` show the
+**effective** chains (that is what actually ran), while `/router config` edits the
+**saved** ones — with a profile active the wizard warns, because "I edited the chain
+and nothing happened" is the failure mode to avoid.
+
+**Gotcha (cost one debugging cycle).** The command handler captures `config` once at
+entry. A profile selection produces a **new** effective object, so the captured one is
+stale — anything read after the change must re-read `getConfig()`.
+
+**Gotcha.** `pi.registerFlag` / `pi.getFlag` exist only from **pi 1.0.0** (verified:
+absent in 0.80.0, present in 1.0.0 and 1.6.0). The repo's devDependency floor is
+0.80.0, so both calls are guarded with a `typeof` check — an older host must still
+load the extension; only the launch flag is unavailable there.
+
+**Rejected: shipping profiles with the config-layer switch.** They were planned as one
+work item because the whole-snapshot write was the profiles feature's only technical
+blocker. The base/effective split removed the blocker, so the layer switch became a
+pure hygiene item (it still fixes the pre-existing cross-layer leak for ordinary
+settings) and the two shipped apart.
+
+---
+
 ## 2026-11-15 — a profile is a preset; the *selection* is session state (#65)
 
 **Decision.** A **profile** is a named preset holding tier chains only

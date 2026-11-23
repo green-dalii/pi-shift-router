@@ -127,6 +127,12 @@ definitions live in the user file, so they are reusable across projects; the cho
 which one is active is session state. Two windows on the same repo can therefore run
 different profiles at the same time.
 
+The launch flag behaves like `pi --model`: it is a **process-level default**, so it
+re-applies after `/new` inside the same window. It needs pi 1.0.0 or newer (older hosts
+have no extension-flag API — the `/router profile` command still works there). `/router
+config` always edits the **saved** config, never the session's live chains; with a
+profile active the wizard says so.
+
 **Two things worth knowing.** In the default `fast-chain` Judge mode the Judge chain
 *is* the Fast chain, so a profile that replaces Fast also changes which model judges —
 `/router status` shows the active profile and its Judge. And a profile that does not

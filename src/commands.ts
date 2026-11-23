@@ -44,7 +44,7 @@ import {
 import { resetOrchestration } from "./orchestrate.js";
 import { appendRouterLog } from "./log.js";
 import { computeStats, judgeModelDisplay } from "./stats.js";
-import { resolveJudgeEndpoints, normalizeJudgeMode } from "./config.js";
+import { resolveJudgeEndpoints, normalizeJudgeMode, listProfiles } from "./config.js";
 import { DECISION_API_TYPE, DECISION_MIN_JUDGE_TIMEOUT_MS } from "./judge.js";
 import { listDecisionChoices, classifierTimeoutFloor } from "./decision.js";
 import { StatusPanel, assembleStatusData, type StatusPanelInput } from "./tui/status-panel.js";
@@ -222,10 +222,18 @@ function sameFamilyFactorDisplay(config: ShiftRouterConfig): string {
  * commands go through this — an in-memory mutation alone is lost on the
  * next `onConfigChanged()` reload.
  */
-async function persistConfig(config: ShiftRouterConfig, cwd: string): Promise<boolean> {
+/**
+ * Persist the config to the authoritative layer.
+ *
+ * The parameter is deliberately named `base`: it MUST be the on-disk config,
+ * never the EFFECTIVE config (base merged with the selected profile).
+ * `saveConfig` writes the whole snapshot, so an effective config would put
+ * this session's profile chains into the user's global file (SPEC §9.6).
+ */
+async function persistConfig(base: ShiftRouterConfig, cwd: string): Promise<boolean> {
   const path = getConfigPath();
   const scope = path !== null && path === userConfigPath() ? "user" : "project";
-  return saveConfig(config, cwd, scope);
+  return saveConfig(base, cwd, scope);
 }
 
 /**
@@ -244,6 +252,32 @@ function formatConfigSource(): string {
     return `Config: user (${src.path})`;
   }
   return "Config: defaults (no config file yet — saving creates one)";
+}
+
+/**
+ * The tier chain as a short "provider/model, provider/model" string — used
+ * to tell the user what a profile selection actually changed (SPEC §9.6).
+ */
+function chainSummary(config: ShiftRouterConfig, tier: Tier): string {
+  const models = config.tiers[tier]?.models ?? [];
+  if (models.length === 0) return "(empty)";
+  return models.map((m) => `${m.provider}/${m.model}`).join(", ");
+}
+
+/**
+ * The "— active: …" part of the `/router profile` listing (SPEC §9.6).
+ *
+ * A profile that was removed from the config while it was selected is
+ * STALE: the session runs the configured chains, so saying so is the honest
+ * answer — otherwise the user sees "active: gone" next to chains that have
+ * nothing to do with it.
+ */
+export function describeActiveProfile(active: string | null, defined: string[]): string {
+  if (active === null) return "none";
+  if (!defined.includes(active)) {
+    return `${active} ⚠ no longer defined, using the configured chains`;
+  }
+  return active;
 }
 
 /**
@@ -845,22 +879,77 @@ export async function routeConfigWizard(
 export function registerCommands(
   pi: ExtensionAPI,
   getConfig: () => ShiftRouterConfig,
+  getBaseConfig: () => ShiftRouterConfig,
   getState: () => RouterState,
-  onConfigChanged: () => void,
+  onConfigChanged: () => void | Promise<void>,
   onManualOverrideTier: (tier: Tier) => void,
   updateStatus: (ui: any) => void,
+  onProfileChange: (name: string | null, ui: any) => void | Promise<void>,
 ): void {
   // ── /router ──────────────────────────────────────────────────
   pi.registerCommand("router", {
     description: "pi-shift-router: show status, enable/disable",
     getArgumentCompletions: (prefix: string) => {
-      const cmds = ["on", "off", "status", "quiet", "verbose", "config", "orchestrate", "eco", "default", "sport"].filter((c) => c.startsWith(prefix));
+      const cmds = ["on", "off", "status", "quiet", "verbose", "config", "orchestrate", "eco", "default", "sport", "profile"].filter((c) => c.startsWith(prefix));
+      // "/router profile <prefix>" → complete the profile names.
+      const parts = prefix.trimStart().split(/\s+/);
+      if (parts.length >= 2 && parts[0]!.toLowerCase() === "profile") {
+        const names = listProfiles(getBaseConfig()).filter((n) => n.startsWith(parts[1]!));
+        return names.length > 0 ? names.map((n) => ({ value: `profile ${n}`, label: n })) : null;
+      }
       return cmds.length > 0 ? cmds.map((c) => ({ value: c, label: c })) : null;
     },
     handler: async (args, ctx) => {
+      // `config` is the EFFECTIVE config (what the router is actually
+      // running — base merged with the selected profile); `base` is the
+      // on-disk config. Anything that MUTATES or SAVES must use `base`:
+      // saveConfig writes the whole snapshot, so an effective config would
+      // push this session's profile chains into the user's global file.
       const config = getConfig();
+      const base = getBaseConfig();
       const state = getState();
-      const arg = args.trim().toLowerCase();
+      const rawArgs = args.trim();
+      const arg = rawArgs.toLowerCase();
+
+      // ── /router profile [name|off] ───────────────────────────
+      // The selection is SESSION state (SPEC §9.6) — it is never written
+      // to disk. The profile DEFINITIONS live in the base config.
+      if (arg === "profile" || arg.startsWith("profile ")) {
+        const rest = rawArgs.slice("profile".length).trim();
+        const profiles = listProfiles(base);
+        if (!rest) {
+          const items = profiles.length
+            ? profiles.map((n) => `${n === state.activeProfile ? "●" : "○"} ${n}`).join("   ")
+            : "none defined — add a \"profiles\" map to your pi-shift-router.json";
+          ctx.ui.notify(
+            `pi-shift-router: 🗂 Profiles: ${items}   — active: ${describeActiveProfile(state.activeProfile, profiles)}`,
+            "info",
+          );
+          return;
+        }
+        if (profiles.includes(rest)) {
+          await onProfileChange(rest, ctx.ui);
+          ctx.ui.notify(
+            `pi-shift-router: 🗂 Profile "${rest}" active for this session — ` +
+              // Re-read the config: the selection produced a NEW effective
+              // config object, so the one captured at handler entry is stale.
+              `Fast: ${chainSummary(getConfig(), "fast")} · Smart: ${chainSummary(getConfig(), "smart")}`,
+            "info",
+          );
+          return;
+        }
+        if (rest.toLowerCase() === "off") {
+          await onProfileChange(null, ctx.ui);
+          ctx.ui.notify("pi-shift-router: 🗂 Profile cleared — using the configured tier chains", "info");
+          return;
+        }
+        ctx.ui.notify(
+          `pi-shift-router: ⚠ No profile named "${rest}" — nothing changed` +
+            (profiles.length ? ` (defined: ${profiles.join(", ")})` : " (no profiles are defined)"),
+          "warning",
+        );
+        return;
+      }
 
       if (arg === "orchestrate") {
         ctx.ui.notify(
@@ -870,50 +959,59 @@ export function registerCommands(
         return;
       }
       if (arg === "orchestrate auto") {
-        config.orchestration.mode = "auto";
-        await persistConfig(config, ctx.cwd);
-        onConfigChanged();
+        base.orchestration.mode = "auto";
+        await persistConfig(base, ctx.cwd);
+        await onConfigChanged();
         updateStatus(ctx.ui);
         ctx.ui.notify("pi-shift-router: 🪄 Orchestration AUTO — complex tasks will run as Smart-orchestrated loops, simple tasks stay on the plain router", "info");
         return;
       }
       if (arg === "orchestrate off") {
-        config.orchestration.mode = "off";
+        base.orchestration.mode = "off";
         resetOrchestration(state);
         updateStatus(ctx.ui);
-        await persistConfig(config, ctx.cwd);
-        onConfigChanged();
+        await persistConfig(base, ctx.cwd);
+        await onConfigChanged();
         ctx.ui.notify("pi-shift-router: 🪄 Orchestration OFF — back to plain tier routing", "info");
         return;
       }
       if (arg === "orchestrate on") {
         // Legacy alias: "on" meant the same judge-driven behavior; map to auto.
-        config.orchestration.mode = "auto";
-        await persistConfig(config, ctx.cwd);
-        onConfigChanged();
+        base.orchestration.mode = "auto";
+        await persistConfig(base, ctx.cwd);
+        await onConfigChanged();
         ctx.ui.notify("pi-shift-router: 🪄 Orchestration AUTO (legacy `on` mapped to auto) — complex tasks orchestrate, simple tasks stay on the plain router", "info");
         return;
       }
 
       if (arg === "on") {
-        config.enabled = true;
-        await persistConfig(config, ctx.cwd);
-        onConfigChanged();
+        base.enabled = true;
+        await persistConfig(base, ctx.cwd);
+        await onConfigChanged();
         updateStatus(ctx.ui);
         ctx.ui.notify("pi-shift-router: ✅ Enabled", "info");
         return;
       }
       if (arg === "off") {
-        config.enabled = false;
-        await persistConfig(config, ctx.cwd);
-        onConfigChanged();
+        base.enabled = false;
+        await persistConfig(base, ctx.cwd);
+        await onConfigChanged();
         updateStatus(ctx.ui);
         ctx.ui.notify("pi-shift-router: ⛔ Disabled", "info");
         return;
       }
       if (arg === "config") {
-        await routeConfigWizard(getConfig(), ctx.cwd, ctx);
-        onConfigChanged();
+        // The wizard edits the SAVED config — it must never receive the
+        // effective config, or a profile's chains would be written to disk.
+        if (state.activeProfile) {
+          ctx.ui.notify(
+            `pi-shift-router: 🗂 Profile "${state.activeProfile}" is active — this wizard edits the SAVED config; ` +
+              `the session keeps running the profile's chains until "/router profile off"`,
+            "warning",
+          );
+        }
+        await routeConfigWizard(base, ctx.cwd, ctx);
+        await onConfigChanged();
         updateStatus(ctx.ui);
         // Show which layer is now authoritative — a wizard save may have
         // created the project file (default write target) just now.
@@ -921,18 +1019,18 @@ export function registerCommands(
         return;
       }
       if (arg === "quiet") {
-        config.ux.quietMode = !config.ux.quietMode;
-        await persistConfig(config, ctx.cwd);
-        onConfigChanged();
-        ctx.ui.notify(`pi-shift-router: ${config.ux.quietMode ? "🔇 Quiet" : "🔊 Notifications"}`, "info");
+        base.ux.quietMode = !base.ux.quietMode;
+        await persistConfig(base, ctx.cwd);
+        await onConfigChanged();
+        ctx.ui.notify(`pi-shift-router: ${base.ux.quietMode ? "🔇 Quiet" : "🔊 Notifications"}`, "info");
         return;
       }
       if (arg === "verbose" || arg === "log") {
-        config.ux.routerLogVerbose = !config.ux.routerLogVerbose;
-        await persistConfig(config, ctx.cwd);
-        onConfigChanged();
+        base.ux.routerLogVerbose = !base.ux.routerLogVerbose;
+        await persistConfig(base, ctx.cwd);
+        await onConfigChanged();
         ctx.ui.notify(
-          `pi-shift-router: ${config.ux.routerLogVerbose ? "📝 Verbose logging ON → ~/.pi/agent/logs/shift-router.log" : "📝 Verbose logging OFF"}`,
+          `pi-shift-router: ${base.ux.routerLogVerbose ? "📝 Verbose logging ON → ~/.pi/agent/logs/shift-router.log" : "📝 Verbose logging OFF"}`,
           "info",
         );
         return;
@@ -945,11 +1043,14 @@ export function registerCommands(
       if (gearMatch) {
         const mode = gearMatch[1] as EconomicMode;
         const R = ECONOMIC_MODE_PRESETS[mode];
-        config.routing.economics = { ...(config.routing.economics ?? { reworkPenalty: 3, downgradeMemory: 2 }), mode };
-        await persistConfig(config, ctx.cwd);
-        onConfigChanged();
+        base.routing.economics = { ...(base.routing.economics ?? { reworkPenalty: 3, downgradeMemory: 2 }), mode };
+        await persistConfig(base, ctx.cwd);
+        await onConfigChanged();
         updateStatus(ctx.ui);
         const theta = (1 / R).toFixed(2);
+        // The EFFECTIVE config here: theta is derived from the tier chains
+        // the router will actually use (a profile may have replaced them),
+        // and routing is shared by reference with the base config.
         const effective = effectiveTheta(config);
         const effNote =
           Math.abs(effective - 1 / R) > 1e-9 && shareProviderFamily(config)
@@ -1082,6 +1183,19 @@ export function registerCommands(
               : null,
           },
           configSource: getConfigSource(),
+          profile: {
+            name: state.activeProfile,
+            // The Judge chain IS the Fast chain in fast-chain mode, so a
+            // profile that replaced Fast also replaced the Judge. Disclosed
+            // here rather than left to be discovered (SPEC §9.6).
+            judgeFollowsFastChain:
+              state.activeProfile !== null &&
+              normalizeJudgeMode(config.routing.judge) === "fast-chain" &&
+              base?.profiles?.[state.activeProfile]?.fast !== undefined,
+            // A profile that was removed from the config while selected is
+            // stale — the session runs the configured chains.
+            defined: state.activeProfile === null || base?.profiles?.[state.activeProfile] !== undefined,
+          },
           now,
         };
 

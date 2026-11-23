@@ -105,6 +105,14 @@ export interface StatusPanelInput {
     workers?: number;
   };
   configSource: { source: "project" | "user" | "default"; path: string | null; userLayerExists: boolean };
+  /**
+   * The active per-session profile (SPEC §9.6). `name` is null when no
+   * profile is selected. `judgeFollowsFastChain` is true when the profile
+   * replaced the Fast chain AND the Judge runs in `fast-chain` mode — the
+   * Judge chain IS the Fast chain there, so the coupling is disclosed
+   * rather than left to be discovered.
+   */
+  profile: { name: string | null; judgeFollowsFastChain: boolean; defined: boolean };
   now: number;
 }
 
@@ -142,7 +150,7 @@ export interface StatusPanelData {
     tierLabel: string;
     models: ChainModelRow[];
   }>;
-  health: { judgeModel: string; cooldownCount: number; windowGlyphs: Tier[]; orchLine: string; auditLine: string };
+  health: { judgeModel: string; cooldownCount: number; windowGlyphs: Tier[]; orchLine: string; auditLine: string; profileLine: string };
   /** Money-section row for orchestrated worker spend; null when nothing recorded. */
   orchestrationSpendLine: { cost: number; workers: number } | null;
   gearLine: { label: string; barPct: number; downgradeMemory: number; cacheAware: boolean };
@@ -265,6 +273,11 @@ export function assembleStatusData(input: StatusPanelInput): StatusPanelData {
       windowGlyphs: input.windowGlyphs,
       orchLine: `orchestration: 🪄 ${input.orchestration.mode}${input.orchestration.active ? `, ACTIVE${input.orchestration.detail ? ` (${input.orchestration.detail})` : ""}` : ", idle"}`,
       auditLine: `audit: ${input.orchestration.audit ?? "—"}`,
+      profileLine: input.profile.name
+        ? `profile 🗂 ${input.profile.name} (this session only)` +
+          (input.profile.defined ? "" : " ⚠ no longer defined — using the configured chains") +
+          (input.profile.judgeFollowsFastChain ? " · judge follows this profile's Fast chain" : "")
+        : `profile 🗂 none (using the configured chains)`,
     },
     orchestrationSpendLine:
       input.orchestration.spend && input.orchestration.spend > 0
@@ -380,6 +393,7 @@ export class StatusPanel {
 
     // Health
     section("Health");
+    add(`  ${data.health.profileLine}`);
     add(`  judge 🧭 ${data.health.judgeModel} · cooldowns: ${data.health.cooldownCount}`);
     if (data.health.windowGlyphs.length > 0) {
       const glyphs = data.health.windowGlyphs

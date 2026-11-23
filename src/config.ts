@@ -21,6 +21,7 @@ import {
   type ProviderEntry,
   type StoredModel,
   type ProviderEndpoint,
+  type SessionProfile,
   DEFAULT_CONFIG,
   TIERS,
   ORCHESTRATION_LIMITS,
@@ -612,6 +613,50 @@ export function migrateLegacyOrchestrationDefaults(config: ShiftRouterConfig): b
   if (maxRounds !== ORCHESTRATION_LIMITS.maxRounds.legacyDefault) return false;
   config.orchestration.maxRounds = ORCHESTRATION_LIMITS.maxRounds.fallback;
   return true;
+}
+
+/**
+ * Apply a named per-session profile to the base config (SPEC §9.6).
+ *
+ * This is the **single merge point** — no consumer re-applies the profile
+ * itself; the router simply reads the effective config everywhere.
+ *
+ * Semantics:
+ *   - no profile selected, or an unknown name → the base is returned
+ *     **by identity** (no copy, no allocation). With no profile selected the
+ *     router's behaviour is byte-identical to having no profile feature.
+ *   - a profile's `fast` / `smart` **replaces** that tier's chain wholesale.
+ *     Replace, not append: the user's mental model is "this session's Fast
+ *     tier *is* Haiku", and an appending profile would leave them unable to
+ *     tell which models are live.
+ *   - a tier the profile omits keeps the base chain.
+ *
+ * Pure: `base` is never mutated, and the returned tier chains share no
+ * mutable state with it — so the effective config can never leak into the
+ * base that gets written to disk.
+ */
+export function applyProfile(
+  base: ShiftRouterConfig,
+  name: string | null | undefined,
+): ShiftRouterConfig {
+  const profile: SessionProfile | undefined = name ? base?.profiles?.[name] : undefined;
+  if (!profile) return base;
+
+  const effective: ShiftRouterConfig = {
+    ...base,
+    tiers: {
+      fast: { ...base.tiers.fast, models: [...base.tiers.fast.models] },
+      smart: { ...base.tiers.smart, models: [...base.tiers.smart.models] },
+    },
+  };
+  if (profile.fast) effective.tiers.fast.models = profile.fast.map((m) => ({ ...m }));
+  if (profile.smart) effective.tiers.smart.models = profile.smart.map((m) => ({ ...m }));
+  return effective;
+}
+
+/** Names of the defined profiles (SPEC §9.6) — empty when none are defined. */
+export function listProfiles(base: ShiftRouterConfig): string[] {
+  return Object.keys(base?.profiles ?? {});
 }
 
 /**

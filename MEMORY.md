@@ -10,6 +10,64 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-11-15 — a profile is a preset; the *selection* is session state (#65)
+
+**Decision.** A **profile** is a named preset holding tier chains only
+(`{ fast?: ModelRef[]; smart?: ModelRef[] }`), defined in the **user** config under
+`profiles`. The **selection** of a profile is **session state** (`RouterState`), never
+written to disk, selected by `pi --shift-router-profile=<name>` (extension flag) or
+`/router profile <name>`. A profile's chain **replaces** the base chain wholesale
+(never appends); an omitted field keeps the base value. `/route-force` stays a one-turn
+override and outranks the profile; `/router smart|fast` forces a tier but still
+resolves the model from the profile's chain for that tier. SPEC §9.6.
+
+**Why.** The request ([#65](https://github.com/green-dalii/pi-shift-router/issues/65))
+was for a third config scope, because the two file scopes are shared by every session
+on a project: a review session wanting Opus-on-Smart cannot coexist with a coding
+session wanting Sonnet. The existing escapes (`/route-force`, `/router smart|fast`)
+pin a tier or a *single* model, and `/route-force` is cleared at the end of the turn —
+so "this session's Fast chain is Haiku and its Smart chain is Opus" was inexpressible.
+
+The definition/selection split is the load-bearing part, not a detail: "which profile is
+active" is a fact about **one** session, so putting it in a file would make concurrent
+sessions overwrite each other — the exact bug being fixed. And a preset is static,
+reusable and worth keeping, so it belongs next to the rest of the personal config.
+
+**Replace, not append.** The user's mental model is "this session's Fast tier *is*
+Haiku"; an appending profile would leave them unable to tell which models are live.
+
+**Rejected.** (a) *A third config file* (`<session>.json`) — needs a stable session id,
+survives restarts, needs cleanup, and reintroduces the shared-state problem; a session
+selection belongs in session state. (b) *Storing the active profile in the config
+file* — two concurrent sessions would fight over one value. (c) *Overriding the whole
+`ShiftRouterConfig`* — `routing`/`ux`/`orchestration` are global behaviour, not a
+per-session model preference. (d) *A profile that overrides the Judge chain* — in
+`fast-chain` mode the Judge **is** the Fast chain (`resolveFastEndpoints`), so the
+coupling is inherent; a user who wants an independent Judge is already in `custom` mode
+with `routing.judge.models`. The coupling is surfaced in `/router status`, not hidden.
+
+**Gotchas (verified, not assumed).** (1) `src/config.ts` caches the merged config in a
+**module-level** `_config`, and that module instance **survives** `/new` and `/resume`
+— pi reuses the cached extension factory when the cwd is unchanged
+(`dist/core/extensions/loader.js`, `moduleCache:false` + `extensionCache` hit). A probe
+confirmed a stale config across a session switch. **So session state must not live in
+module scope** — it goes in `RouterState`. (2) `saveConfig` writes the **whole merged
+snapshot**, so a project-layer value lands in the user file on a user-scope save
+(probe-confirmed). The profile path therefore has **no write call at all**; and the
+config-layer switch (write only changed keys) is the same work item, not a separate
+one. (3) The Judge reusing the Fast chain means swapping the Fast chain silently swaps
+the Judge — hence the `/router status` disclosure.
+
+**Open question, asked in the issue reply.** "Multiple sessions" is ambiguous: separate
+pi windows on one repo (each process → a per-process selection suffices) vs `/new`
+inside one window (needs the selection to survive the switch). The implementation
+covers the first reading; restoring a selection across `/resume` is the optional second
+phase, using pi's own per-session extension-state mechanism (`pi.appendEntry` custom
+entry on the session branch — the pattern pi's virtual-model router uses with
+`pi.virtual-model-state`), applied only when `session_start`'s reason is `resume`/`fork`.
+
+---
+
 ## 2026-11-13 — a dispatch is not a completion (orchestration accounting)
 
 **Decision.** A `subagent` spawn call is a **dispatch** (`spawned`, `rounds`,

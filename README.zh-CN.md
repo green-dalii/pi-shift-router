@@ -137,6 +137,37 @@ pi install npm:pi-shift-router   # 然后：/router config → /router status
 
 **三种判定模式（v1.7.0）。** 复用 Fast 档链（默认，无需额外配置）、独立的 Judge LLM 链（编辑方式与档位相同）、或决策模型——见 [决策模型](#决策模型作为判定器beta)。
 
+### 按会话的 profile
+
+Fast 档和 Smart 档的链写在配置文件里，而**同一个项目的所有会话共用同一个文件**。所以一个
+“Smart 档要用 Opus”的审查会话，没办法和一个“Smart 档用 Sonnet”的编码会话并排跑。
+
+**profile** 是一组命名的预设（一条 Fast 链和/或一条 Smart 链），定义一次，然后**按会话**
+选用：
+
+```text
+profiles:
+  review-heavy:
+    fast:  [ { provider: anthropic, model: claude-haiku-4-5, priority: 1 } ]
+    smart: [ { provider: anthropic, model: claude-opus-4-1,  priority: 1 } ]
+```
+
+```bash
+pi --shift-router-profile=review-heavy      # 启动时选一个
+```
+
+```text
+/router profile review-heavy                # 或在会话内切换
+/router profile off                          # 回到配置的链
+```
+
+选择只对**当前会话**生效，**绝不落盘**——定义写在你的用户级配置里（可跨项目复用），
+至于当前生效哪一个是会话状态。所以同一仓库开两个窗口，可以同时跑不同的 profile。
+
+profile 对它点名的链是**整体替换**而不是追加，没点名的链保持原配置。默认的 `fast-chain`
+判定模式下，判定链*就是* Fast 链，所以替换 Fast 也换掉了判定模型——`/router status`
+会同时显示两者。
+
 ### 当 Provider 挂掉时
 
 429 / 402 / 5xx / 配额 / Token 套餐耗尽 / Codex `usage limit` / 账户余额不足？pi 先重试（Provider ×3 + Agent ×3），仍失败就轮到路由器：
@@ -313,6 +344,7 @@ pi install npm:pi-subagents   # Smart CTO → Fast 子代理派发
 | `/router eco\|default\|sport` | 换挡经济预设（持久化）：**eco** → R=2（θ=0.5，更省——只有明确需要 smart 的轮才升级），**default** → R=3（θ≈0.33），**sport** → R=5（θ=0.2，更积极——只要有需要 Smart 的苗头就升级）。顶层命令词，pi 可直接 Tab 补齐；当前模式与预设表见 `/router status` |
 | `/router orchestrate auto` | 任务级编排（默认）：复杂任务 → Smart 档作为 CTO 派发给 Fast 子代理；简单任务仍走普通路由 |
 | `/router orchestrate off` | 关闭编排——仅基础两档路由 |
+| `/router profile <name>` | 选用按会话的 profile：一组命名的 Fast/Smart 链，只对当前会话生效（绝不落盘）。`/router profile off` 回到配置的链；单独 `/router profile` 列出全部 |
 | `/route-force <档位>` | 下一轮强制走某档 |
 | `/route-force <provider>/<model>` | 下一轮强制指定模型 |
 | `/route-force auto` | 清除手动覆盖 |

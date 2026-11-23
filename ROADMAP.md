@@ -65,6 +65,86 @@ Release history and planned work for **pi-shift-router**.
 | ~~Verbose logs to file~~ | ✅ done | `routerLogVerbose` now appends to `~/.pi/agent/logs/shift-router.log` via `src/log.ts` instead of stdout. stdout writes interleaved with pi's TUI frames and split assistant text mid-sentence (reported 2026-09-17 with a CTO summary). pi ships no logging channel, so a file is the sink; `PI_SHIFT_ROUTER_LOG` overrides the path. |
 | Coverage reporting | ✅ done | `vitest --coverage` in CI (v8 provider, thresholds ≥90% lines/functions/statements, ≥85% branches on `src/router.ts` + `src/failover.ts`). Current: router 100% / failover 95.5%. |
 
+### Per-session profiles — implementation sub-plan (SPEC §9.6, [#65](https://github.com/green-dalii/pi-shift-router/issues/65))
+
+**Goal.** A named preset (a Fast chain and/or a Smart chain) that can be selected **per
+session**, so two sessions on the same project can run different model chains without
+either rewriting a shared config file.
+
+**Design in one line.** A profile is a *definition* (persistent, in the user config);
+the *selection* is session state (`RouterState`), never written to disk. Contract:
+SPEC §9.6. Decision log: MEMORY 2026-11-15.
+
+**Open questions (defaults in brackets).** [1] "Multiple sessions" = separate pi windows
+[the issue says "on the same project"] or `/new` in one window [then the phase-2
+persistence below becomes required, not optional]? [2] Profile chain replaces or appends
+to the base chain [replaces]? [3] Profile definitions in the user file only, or also
+project scope [user file only — a profile is a personal preference]? The issue reply
+asked [1]; the defaults stand until answered.
+
+**Phase A — core.**
+
+- [ ] **① Types** (`types.ts`). `SessionProfile { fast?: ModelRef[]; smart?: ModelRef[] }`;
+      `ShiftRouterConfig.profiles?: Record<string, SessionProfile>` (no `profiles` key in
+      `DEFAULT_CONFIG` — absent means "none defined"); `RouterState.activeProfile:
+      string | null` (session state, **not** module scope — gotcha G1 below).
+- [ ] **② The one merge point** (`config.ts`). `applyProfile(base, name): ShiftRouterConfig`
+      — pure, never mutates `base`; null/unknown name → base unchanged; `fast`/`smart`
+      **replace** the tier chain wholesale; an omitted tier keeps the base chain.
+      Lives in `config.ts` (config resolution; the one-way dependency rule holds).
+- [ ] **③ Effective vs base config** (`index.ts`). Keep **two** variables: `baseConfig`
+      (as loaded from disk) and `config` (effective = `applyProfile(base, activeProfile)`).
+      `init()` and the `onConfigChanged` reload both recompute the effective config, and
+      a profile **survives a config reload**. A profile switch re-resolves the judge
+      endpoints (`resolveFastEndpoints` reads `config.tiers.fast.models` — gotcha G3).
+- [ ] **④ The launch flag** (`index.ts`). `pi.registerFlag("shift-router-profile", {
+      type: "string" })`, read via `pi.getFlag`. Verified against pi 1.6.0:
+      `dist/cli/args.js` puts `--name=value` in `unknownFlags`;
+      `dist/core/agent-session-services.js:8` `applyExtensionFlagValues` injects it;
+      `dist/core/extensions/loader.js:306` `getFlag` reads it. pi re-applies flag values
+      on **every** session start, so the flag is a process-level default like
+      `pi --model` (gotcha G4). An unregistered flag makes pi reject the option (G5).
+- [ ] **⑤ The command** (`commands.ts`). `/router profile` (list + active), `/router profile
+      <name>` (select), `/router profile off` (clear). An unknown name notifies and changes
+      **nothing**. The wizard edits and saves the **base** config; the router runs on the
+      effective one — the invariant that keeps a session's chains out of the user's global
+      file (G2). A wizard *row* is optional; the command is the required surface.
+- [ ] **⑥ Tests** (TDD, red first) — `tests/profiles.test.ts`: replace-not-append; omitted
+      fields keep the base; base is not mutated; unknown name is a no-op; the profile's
+      model is what `findBestModelForTier` / `findTierForModel` see; `/route-force` still
+      outranks the profile; `/router smart` resolves from the profile's chain; **selecting
+      a profile writes nothing to either config file**; the wizard's save writes the base;
+      `session_start` clears the selection on `startup`/`new`; a fresh `RouterState` has
+      `activeProfile: null` (guards G1).
+
+**Phase B — surface.** `/router status` shows the active profile (and, in `fast-chain`
+mode, that the Judge followed the Fast chain). `docs/CONFIG.md` ×2 and `README.md` ×2 are
+already written (schema, usage, command table) and need a post-implementation accuracy pass.
+
+**Phase C — e2e (live host, no mocks).** Build; **verify the runtime install source**
+(`~/.pi/agent/settings.json` → `packages` must point at this working copy, not
+`npm:pi-shift-router`, or the change is invisible); restart; `/router profile` lists;
+select; `/router status` shows it; a **second** pi window on the same project shows no
+profile and can select a different one without disturbing the first; byte-compare both
+config files afterwards.
+
+**Phase D (optional) — session-branch persistence.** Restore the selection across
+`/resume` using pi's own per-session extension-state mechanism: `pi.appendEntry(
+customType, data)` writes a `custom` entry to the session branch, read back via
+`ctx.sessionManager.getBranch()` — the pattern pi's virtual-model router uses
+(`pi.virtual-model-state`). Applies only when `session_start`'s reason is `resume`/`fork`.
+**Only build this if open question [1] resolves to "one window".**
+
+**Gotchas (verified, not assumed).** (G1) The merged config lives in a **module-level**
+cache (`config.ts:624`) and that module instance **survives** `/new` and `/resume` — pi
+reuses the cached extension factory when the cwd is unchanged. Session state must live in
+`RouterState`. (G2) `saveConfig` writes the **whole merged snapshot**, so a project-layer
+value lands in the user file (probe-confirmed) — the effective config must never reach it.
+(G3) The Judge reuses the Fast chain in `fast-chain` mode, so a profile that replaces Fast
+also changes the Judge. (G4) pi re-applies extension flag values on every session start.
+(G5) An unregistered flag makes pi reject the option. (G6) `/route-force` is cleared at
+the end of the turn and stays a one-turn override above the profile.
+
 ### Judge modes — implementation sub-plan (SPEC §8, v1.7.0)
 
 **Goal.** Keep the current LLM judge exactly as it is; add two more ways to run it — a dedicated Judge LLM chain, and a decision-model protocol (Jev and future System One-class models). Selecting a decision model must be done **inside the wizard** and must be validated before it is saved.

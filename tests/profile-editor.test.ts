@@ -273,6 +273,28 @@ describe("editProfiles", () => {
     expect(config.profiles!.p!.fast).toEqual([]);
   });
 
+  it("does not mistake a model whose name contains Clear for the clear option", async () => {
+    // The old check was `pick.includes("Clear")`, so a model called
+    // "Clearwater/sonnet" silently CLEARED the chain instead of picking that
+    // model. The clear option must be matched exactly.
+    const config = makeConfig();
+    config.profiles = { p: { fast: [ref("anthropic", "haiku")] } };
+    const ui = fakeUi({
+      selects: [
+        "○ p — fast 1 · smart 0",
+        "🦾 Fast chain — 1 model(s)",
+        "Clearwater/sonnet",
+        "✅ Back",
+        "✅ Back to configuration",
+      ],
+    });
+    await editProfiles(config, {
+      ...depsFor(ui),
+      allModels: () => [{ provider: "Clearwater", id: "sonnet" }],
+    });
+    expect(config.profiles!.p!.fast!.map((m) => m.model)).toEqual(["sonnet"]);
+  });
+
   it("leaves the config alone when the user backs out immediately", async () => {
     const config = makeConfig();
     const ui = fakeUi({ selects: ["✅ Back to configuration"] });

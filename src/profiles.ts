@@ -58,6 +58,9 @@ function removeProfile(config: ShiftRouterConfig, name: string): void {
   if (Object.keys(config.profiles).length === 0) delete config.profiles;
 }
 
+/** The text-mode chain editor's "empty this chain" option. */
+const CLEAR_CHAIN_LABEL = "❌ Clear this chain";
+
 /**
  * The Profiles list rows.
  *
@@ -320,7 +323,7 @@ async function editChain(
     return null;
   }
   const labels = [
-    "❌ Clear this chain",
+    CLEAR_CHAIN_LABEL,
     ...models.map((m) => `${m.provider}/${m.id}`),
   ];
   const pick = await ctx.ui.select(`${profileName} — ${tier} chain`, labels);
@@ -328,7 +331,7 @@ async function editChain(
   // Match the clear option EXACTLY. `pick.includes("Clear")` would treat a
   // model named "Clearwater/sonnet" as the clear option and silently empty
   // the chain instead of picking that model.
-  if (pick.includes("Clear")) return [];
+  if (pick === CLEAR_CHAIN_LABEL) return [];
   const index = labels.indexOf(pick);
   if (index < 1) return null;
   const model = models[index - 1]!;

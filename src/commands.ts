@@ -50,6 +50,7 @@ import { listDecisionChoices, classifierTimeoutFloor } from "./decision.js";
 import { StatusPanel, assembleStatusData, type StatusPanelInput } from "./tui/status-panel.js";
 import { createChainEditor } from "./tui/fallback-chain-editor.js";
 import { createModelPicker } from "./tui/model-picker.js";
+import { editProfiles, profileCount } from "./profiles.js";
 import {
   listAvailableModels,
   isModelAvailable,
@@ -73,7 +74,17 @@ import {
 
 // ─── `/route-config` wizard ──────────────────────────────────────
 
-type MenuChoice = "fast" | "smart" | "ux" | "cache" | "judge" | "orch" | "refresh" | "done" | "cancel";
+type MenuChoice =
+  | "fast"
+  | "smart"
+  | "ux"
+  | "cache"
+  | "judge"
+  | "orch"
+  | "profiles"
+  | "refresh"
+  | "done"
+  | "cancel";
 
 /**
  * Status label for the economics mode. A set preset wins; otherwise the
@@ -296,6 +307,9 @@ export function matchMenuChoice(label: string): MenuChoice {
   if (label.includes("Cache-aware")) return "cache";
   if (label.includes("Orchestration")) return "orch";
   if (label.includes("Judge")) return "judge";
+  // Before the tier checks: the Profiles row must not be swallowed by a
+  // "Fast"/"Smart" substring.
+  if (label.includes("Profiles")) return "profiles";
   if (label.includes("Fast")) return "fast";
   if (label.includes("Smart")) return "smart";
   if (label.includes("UX")) return "ux";
@@ -399,6 +413,7 @@ export async function routeConfigWizard(
   cwd: string,
   ctx: ExtensionCommandContext,
   catalogOverrides?: WizardCatalogOverrides,
+  activeProfile?: string | null,
 ): Promise<boolean> {
   const registry = (ctx as any).modelRegistry as ModelRegistryLike | undefined;
   const catalogStarted = Date.now();
@@ -431,7 +446,17 @@ export async function routeConfigWizard(
     return false;
   }
 
-  type MenuChoice = "fast" | "smart" | "ux" | "cache" | "judge" | "orch" | "refresh" | "done" | "cancel";
+  type MenuChoice =
+  | "fast"
+  | "smart"
+  | "ux"
+  | "cache"
+  | "judge"
+  | "orch"
+  | "profiles"
+  | "refresh"
+  | "done"
+  | "cancel";
   async function saveDestination(): Promise<"user" | "project" | null> {
     const choice = await ctx.ui.select("Save configuration to…", [
       "📁 Project — <cwd>/.pi/pi-shift-router.json (shareable with team)",
@@ -451,6 +476,7 @@ export async function routeConfigWizard(
       `🧠 Smart — ${config.tiers.smart.models.length} model(s)  (CTO: direction, review, hard problems)`,
       `🧭 Judge — ${judgeSummary(config, decisionModelsFor(registry, models).length)}`,
       `🪄 Orchestration — ${orchestrationSummary(config)}`,
+      `🗂 Profiles — ${profileCount(config)} defined`,
       "🎨 UX settings",
       "🔒 Cache-aware routing",
       `🔄 Model catalog — refresh now (${models.length} available)`,
@@ -855,6 +881,16 @@ export async function routeConfigWizard(
       await editJudge();
     } else if (choice === "orch") {
       await editOrchestration();
+    } else if (choice === "profiles") {
+      await editProfiles(
+        config,
+        {
+          ctx,
+          allModels: () => chatCapableModels(modelList()),
+          isAvailable: (provider, model) => isModelAvailable(modelSource(), provider, model),
+        },
+        activeProfile,
+      );
     } else if (choice === "refresh") {
       await refreshCatalog();
     }
@@ -1010,7 +1046,7 @@ export function registerCommands(
             "warning",
           );
         }
-        await routeConfigWizard(base, ctx.cwd, ctx);
+        await routeConfigWizard(base, ctx.cwd, ctx, undefined, state.activeProfile);
         await onConfigChanged();
         updateStatus(ctx.ui);
         // Show which layer is now authoritative — a wizard save may have
@@ -1208,7 +1244,11 @@ export function registerCommands(
 
       // Default: compact status
       ctx.ui.notify(
-        `${config.enabled ? "" : "⛔ "}${formatTierDisplay(state.currentTier, state.currentModelId)}${state.manualOverride.active ? " (manual)" : ""}`,
+        `${config.enabled ? "" : "⛔ "}${formatTierDisplay(state.currentTier, state.currentModelId)}` +
+          `${state.manualOverride.active ? " (manual)" : ""}` +
+          // Which chain set is running — the whole point of a profile is that
+          // it is invisible until you look (SPEC §9.6).
+          `${state.activeProfile ? ` · 🗂 ${state.activeProfile}` : ""}`,
         "info",
       );
     },

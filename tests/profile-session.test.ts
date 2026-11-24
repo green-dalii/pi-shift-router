@@ -252,6 +252,19 @@ describe("per-session profiles — session wiring", () => {
     expect(completions?.map((c: any) => c.label)).toEqual(["opus-heavy"]);
   });
 
+  it("shows the active profile in the compact status", async () => {
+    const { pi, handlers, commands } = makeFakePi();
+    slimRouterExtension(pi);
+    const { ctx, notices } = makeCtx(PROJECT_DIR);
+    await handlers.get("session_start")({ type: "session_start", reason: "startup" }, ctx);
+
+    // No profile yet — the compact line must not mention one.
+    expect(await runRouter(commands, ctx, notices, "")).not.toContain("🗂");
+
+    await runRouter(commands, ctx, notices, "profile opus-heavy");
+    expect(await runRouter(commands, ctx, notices, "")).toContain("🗂 opus-heavy");
+  });
+
   it("survives a config reload", async () => {
     const { pi, handlers, commands } = makeFakePi();
     slimRouterExtension(pi);

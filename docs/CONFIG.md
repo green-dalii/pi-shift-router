@@ -112,6 +112,10 @@ Select one for the session you are in:
 pi --shift-router-profile=review-heavy      # at launch
 ```
 
+> **`off` is reserved.** `/router profile off` clears the session's selection,
+> so no profile may be named `off` — the wizard refuses the name. Pick
+> `baseline`, `disabled`, or anything else.
+
 ```text
 /router profile review-heavy                # inside a session
 /router profile off                          # back to the configured chains

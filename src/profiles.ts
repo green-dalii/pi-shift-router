@@ -58,6 +58,9 @@ function removeProfile(config: ShiftRouterConfig, name: string): void {
   if (Object.keys(config.profiles).length === 0) delete config.profiles;
 }
 
+/** Words the command language owns — a profile cannot shadow them. */
+const RESERVED_PROFILE_NAMES = new Set(["off"]);
+
 /** The text-mode chain editor's "empty this chain" option. */
 const CLEAR_CHAIN_LABEL = "❌ Clear this chain";
 
@@ -122,6 +125,12 @@ export function profileLabel(
 export function validateProfileName(raw: string, existing: string[]): string | null {
   const name = raw.trim();
   if (!name) return "A profile name cannot be empty.";
+  // "off" is the command language's own word: "/router profile off" clears
+  // the session's selection. A profile named "off" would shadow it, and the
+  // user could then never turn that profile off by name.
+  if (RESERVED_PROFILE_NAMES.has(name.toLowerCase())) {
+    return `"${name}" is reserved — "/router profile off" clears the session's profile, so no profile can be named "off".`;
+  }
   if (existing.includes(name)) return `A profile named "${name}" already exists.`;
   return null;
 }

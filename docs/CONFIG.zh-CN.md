@@ -107,6 +107,10 @@ profiles:
 pi --shift-router-profile=review-heavy      # 启动时指定
 ```
 
+> **`off` 是保留名。** `/router profile off` 用来清除当前会话的选择，所以
+> 没有任何 profile 可以叫 `off` —— 向导会拒绝这个名字。用 `baseline`、
+> `disabled` 之类的名字代替。
+
 ```text
 /router profile review-heavy                # 会话内切换
 /router profile off                          # 回到配置的链

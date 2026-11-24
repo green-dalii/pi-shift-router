@@ -154,6 +154,16 @@ describe("validateProfileName", () => {
   it("accepts a fresh name and trims it", () => {
     expect(validateProfileName("  p  ", ["q"])).toBeNull();
   });
+
+  it("rejects the name the command language owns", () => {
+    // "/router profile off" clears the session's selection. A profile named
+    // "off" would shadow that word, and the user could then never turn that
+    // profile off by name.
+    expect(validateProfileName("off", [])).toContain("reserved");
+    expect(validateProfileName("OFF", [])).toContain("reserved");
+    // A name that merely CONTAINS it is fine.
+    expect(validateProfileName("offline", [])).toBeNull();
+  });
 });
 
 // ─── The editing flow ─────────────────────────────────────────────

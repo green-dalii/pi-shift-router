@@ -1497,6 +1497,11 @@ A profile that does not exist is a **no-op with one visible message** — never 
 fall-back to the base chains, because "my Opus profile did nothing" is the failure mode
 that wastes an afternoon.
 
+**Reserved names.** `off` is the command language's own word — `/router profile off`
+clears the session's selection — so a profile may not be named `off`. The wizard
+refuses the name. Without that rule a profile named `off` would shadow the word, and
+the user could never turn that profile off by name.
+
 **Where profiles are DEFINED.** The `profiles` map is part of the config file, so the
 wizard owns it: `/router config` → **📋 Profiles** creates a profile (seeded from the
 configured chains — "save what I have, then tweak it" is the workflow people actually

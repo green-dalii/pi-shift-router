@@ -431,7 +431,6 @@ A themed dashboard opens (q / Esc closes): your live tier and model, context-win
 | `/router status` | Open the status dashboard (TUI): live model, last decision, money, chains, health, config layer |
 | `/router on` / `/router off` | Enable / disable routing |
 | `/router config` | Launch the TUI configuration wizard |
-| `/router profile [name\|off]` | Select a per-session profile; no argument lists them |
 | `/router quiet` | Toggle inline toast notifications |
 | `/router verbose` | Toggle verbose logging |
 | `/router eco\|default\|sport` | Gear-shift economics presets (persisted): **eco** → R=2 (θ=0.5, cheaper — only clearly-needed turns run smart), **default** → R=3 (θ≈0.33), **sport** → R=5 (θ=0.2, eager — any real chance of needing Smart escalates). Top-level words so pi tab-completes them; `/router status` shows the current gear in plain language |

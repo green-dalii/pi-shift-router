@@ -220,6 +220,36 @@ describe("editProfiles", () => {
     expect(Object.keys(config.profiles!)).toEqual(["a"]);
   });
 
+  it("clears the session selection when the ACTIVE profile is deleted", async () => {
+    // Deleting the profile this session is running leaves the selection
+    // pointing at a preset that no longer exists. The message even says the
+    // configured chains are back in force — so the selection must actually
+    // be cleared, not merely reported.
+    const config = makeConfig();
+    config.profiles = { p: {} };
+    const selected: (string | null)[] = [];
+    const ui = fakeUi({ selects: ["● p — fast 0 · smart 0", "🚫 Delete this profile"] });
+    await editProfiles(
+      config,
+      { ...depsFor(ui), setActiveProfile: (n) => { selected.push(n); } },
+      "p",
+    );
+    expect(selected).toEqual([null]);
+  });
+
+  it("does not touch the selection when an INACTIVE profile is deleted", async () => {
+    const config = makeConfig();
+    config.profiles = { a: {}, b: {} };
+    const selected: (string | null)[] = [];
+    const ui = fakeUi({ selects: ["○ b — fast 0 · smart 0", "🚫 Delete this profile"] });
+    await editProfiles(
+      config,
+      { ...depsFor(ui), setActiveProfile: (n) => { selected.push(n); } },
+      "a",
+    );
+    expect(selected).toEqual([]);
+  });
+
   it("edits a profile's chain through the chain editor", async () => {
     const config = makeConfig();
     config.profiles = { p: { fast: [ref("anthropic", "haiku")] } };

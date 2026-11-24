@@ -234,6 +234,11 @@ async function editProfile(
       // Deleting the ACTIVE profile leaves the session running chains that
       // no longer exist as a preset — say so instead of silently falling back.
       if (isActive) {
+        // Clear the SELECTION too. Leaving it pointing at a preset that no
+        // longer exists means the session reports an active profile that
+        // cannot be re-selected, activated, or undone.
+        await deps.setActiveProfile?.(null);
+        setActive(null);
         ctx.ui.notify(
           `pi-shift-router: 🚫 Profile "${name}" deleted — it was active for this session, ` +
             `so the configured chains are back in force`,
@@ -320,6 +325,9 @@ async function editChain(
   ];
   const pick = await ctx.ui.select(`${profileName} — ${tier} chain`, labels);
   if (!pick) return null;
+  // Match the clear option EXACTLY. `pick.includes("Clear")` would treat a
+  // model named "Clearwater/sonnet" as the clear option and silently empty
+  // the chain instead of picking that model.
   if (pick.includes("Clear")) return [];
   const index = labels.indexOf(pick);
   if (index < 1) return null;

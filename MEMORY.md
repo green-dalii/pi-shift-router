@@ -35,9 +35,8 @@ between "no profiles" and "an empty set", and an empty map is noise in the file)
 **Second asymmetry, found the same way: the wizard could not TURN A PROFILE ON.** It
 managed the *definitions* (create / edit / delete) while the *selection* lived only in
 the `/router profile` command — so "actually, let me go back to the configured chains"
-meant leaving the wizard and typing `/router profile off`. The wizard now does both:
-a profile's own menu has "📋 Activate for this session", and the list offers
-"🚫 Disable" while one is active.
+meant leaving the wizard and typing `/router profile off`. The wizard now reaches the
+selection through the profile's own menu.
 
 **The rule behind both fixes.** A surface that manages a thing must also let you
 *turn that thing on and off* where the thing has an on/off state. Splitting
@@ -51,6 +50,26 @@ it. Two consequences worth remembering: activating a profile from inside the wiz
 says "this wizard still edits the SAVED config" (the wizard keeps editing the base
 while the session runs the profile), and deleting the ACTIVE profile says so too —
 the session falls back to the configured chains.
+
+**Third and fourth, same session: the menus were full of traps.** (a) The profiles
+list had a "🚫 Delete a profile" row that opened ANOTHER list to pick from — while
+every profile's own menu already had "🚫 Delete this profile". Duplicated entry
+points, so the user had to guess which one was real. (b) "🚫 Disable" and "🚫 Delete"
+were the SAME ICON on two different actions. (c) A profile that was already active
+still offered "📋 Activate for this session" — a button that does nothing.
+
+The rules that came out of it, now guarded by `tests/menu-glyph-width.test.ts`:
+
+- **The list is navigation, the item's own menu is action.** A row that duplicates
+  another row's action is a trap. Every action for a profile lives in that profile's
+  menu, once.
+- **One row per meaning, one glyph per meaning.** No two rows of one menu may open
+  with the same icon. Activate is 📋, Disable is ⛔ (the codebase's existing "off"
+  glyph — `⛔ Disabled`), Delete is 🚫 (the codebase's destructive glyph), Back is ✅.
+- **A toggle row says what picking it will DO.** It flips between "Activate" and
+  "Disable"; it is never a dead "Activate" on something already active.
+- **A destructive action asks first.** Deleting a profile is the only way to remove
+  one, so it confirms.
 
 **Gotcha.** The pack-isolation scanner reads the shape `from "…"` as an import
 specifier — a *comment* containing that shape makes it report a phantom external

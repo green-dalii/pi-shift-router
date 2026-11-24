@@ -1510,12 +1510,23 @@ immediately: the wizard could create and edit a preset but not turn one on, so
 "actually, let me go back to the configured chains" meant leaving the wizard and
 typing `/router profile off`.
 
-So the wizard does both:
+So the wizard reaches the selection too, through the profile's own menu.
 
-- the per-profile menu offers **📋 Activate for this session** (and shows
-  **✅ Active for this session** for the profile already in force);
-- the list offers **🚫 Disable "<name>" — use the configured chains** while a profile
-  is active.
+**The menu is navigation; the profile's menu is action.** The list offers only the
+presets (plus "New profile" and "Back") — a row that duplicates an action is a trap,
+because the user then has to guess which of two identical rows is the real one. Every
+action for a profile lives in that profile's own menu, and each row there does
+something different:
+
+| Row | Glyph | Meaning |
+|---|---|---|
+| Activate / Disable for this session | 📋 / ⛔ | **One toggle row**: it says what picking it will do. A profile that is already active offers "Disable", never a second "Activate" that does nothing. |
+| Fast chain | 🦾 | edit that tier's chain |
+| Smart chain | 🧠 | edit that tier's chain |
+| Delete this profile | 🚫 | remove the preset (asks first) |
+
+Deleting is only reachable from the profile's own menu — a list-level "Delete a
+profile" that opened a second list to pick from was pure duplication.
 
 The wizard does not own the selection — it asks the host to change it, through the
 same path `/router profile` uses. Activating a profile from inside the wizard says so

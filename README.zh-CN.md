@@ -162,12 +162,11 @@ pi --shift-router-profile=review-heavy      # 启动时选一个
 /router profile                              # 列出全部 profile 与当前生效的
 ```
 
-这份 YAML 不必手写：`/router config` → **📋 Profiles** 可以新建 profile（默认用你当前的
-链做底子——先从已在用的东西开始，再改），用和档位一样的编辑器改它的 Fast/Smart 链，也
-可以删掉。同一个菜单还能**启用/禁用**：单个 profile 的菜单里有「📋 Activate for this
-session」，列表里在有生效 profile 时会出现「🚫 Disable」——所以想切回配置的链，不用退出
-向导。当前生效的 profile 也会显示在 `/router` 的紧凑状态行里，不用打开仪表板就知道自己在
-跑哪套链。
+这份 YAML 不必手写：`/router config` → **📋 Profiles** 列出你的预设。点进某一个，
+它自己的菜单里就是关于它的一切：**📋 Activate for this session**（生效后就变成
+**⛔ Disable**）、Fast/Smart 链的编辑器、以及 **🚫 Delete this profile**。新建的
+profile 默认拿你当前的链做底子——先从已在用的东西开始，再改。当前生效的 profile 也会
+显示在 `/router` 的紧凑状态行里，不用打开仪表板就知道自己在跑哪套链。
 
 选择只对**当前会话**生效，**绝不落盘**——定义写在你的用户级配置里（可跨项目复用），
 至于当前生效哪一个是会话状态。所以同一仓库开两个窗口，可以同时跑不同的 profile。

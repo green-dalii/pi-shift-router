@@ -20,7 +20,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { profileLabel } from "../src/profiles.js";
+import { profileLabel, profileListOptions, profileActionOptions } from "../src/profiles.js";
+import { wizardMenuLabels } from "../src/commands.js";
+import { DEFAULT_CONFIG, type ShiftRouterConfig } from "../src/types.js";
 
 const SRC = join(import.meta.dirname, "..", "src");
 
@@ -123,5 +125,68 @@ describe("menu rows keep exactly one space after the glyph", () => {
     expect(row).toMatch(/^[●○] \S/);
     expect(profileLabel("sonnet", {}, "sonnet")).toMatch(/^● /);
     expect(profileLabel("sonnet", {}, "other")).toMatch(/^○ /);
+  });
+});
+
+// ─── One glyph per meaning ─────────────────────────────────────────
+
+describe("no two rows of one menu share a glyph", () => {
+  /**
+   * The leading glyph of a row, or null when the row starts with a radio
+   * marker (● ○). The markers are an exclusive-picker idiom — repetition
+   * is the POINT there, so they are not "the same icon".
+   */
+  function iconOf(row: string): string | null {
+    const glyph = String.fromCodePoint(row.codePointAt(0)!);
+    return glyph === "●" || glyph === "○" ? null : glyph;
+  }
+
+  function assertDistinctIcons(rows: string[], where: string) {
+    const icons = rows.map(iconOf).filter((g): g is string => g !== null);
+    const dupes = icons.filter((g, i) => icons.indexOf(g) !== i);
+    expect(
+      [...new Set(dupes)],
+      `${where}: the same icon opens more than one row, so they look like the same action`,
+    ).toEqual([]);
+  }
+
+  function configWithProfiles(): ShiftRouterConfig {
+    const config: ShiftRouterConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    config.profiles = { a: { fast: [] }, b: { smart: [] } };
+    return config;
+  }
+
+  it("the profiles list has one icon per row", () => {
+    assertDistinctIcons(profileListOptions(configWithProfiles(), "a"), "the profiles list");
+  });
+
+  it("the profile actions have one icon per row", () => {
+    const profile = { fast: [], smart: [] };
+    assertDistinctIcons(profileActionOptions(profile, false), "the profile actions (inactive)");
+    assertDistinctIcons(profileActionOptions(profile, true), "the profile actions (active)");
+  });
+
+  it("the wizard's main menu has one icon per row", () => {
+    assertDistinctIcons(wizardMenuLabels(configWithProfiles(), 42, 1), "the wizard's main menu");
+  });
+
+  it("the same icon never means two different things across the wizard", () => {
+    // Collect every icon the wizard uses, per menu, and check the PROFILE
+    // menus specifically: an icon reused across the profile menus for two
+    // different actions is the trap this guards.
+    const menus = [
+      profileListOptions(configWithProfiles(), null),
+      profileActionOptions({ fast: [], smart: [] }, false),
+      profileActionOptions({ fast: [], smart: [] }, true),
+    ];
+    for (const rows of menus) assertDistinctIcons(rows, "a profile menu");
+  });
+
+  it("the disable row and the delete row are different icons", () => {
+    // The trap the user hit: two rows, one icon, two very different actions.
+    const rows = profileActionOptions({ fast: [], smart: [] }, true);
+    const disable = rows.find((r) => r.includes("Disable"))!;
+    const del = rows.find((r) => r.includes("Delete"))!;
+    expect(iconOf(disable)).not.toBe(iconOf(del));
   });
 });

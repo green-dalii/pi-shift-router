@@ -38,7 +38,7 @@ function makeConfig(): ShiftRouterConfig {
  * A fake pi UI that answers a scripted list of selections (and inputs) and
  * records what it was asked.
  */
-function fakeUi(script: { selects?: string[]; inputs?: string[] }) {
+function fakeUi(script: { selects?: string[]; inputs?: string[]; confirm?: boolean }) {
   const selects = [...(script.selects ?? [])];
   const inputs = [...(script.inputs ?? [])];
   const asked: string[] = [];
@@ -61,6 +61,7 @@ function fakeUi(script: { selects?: string[]; inputs?: string[] }) {
           return next;
         },
         input: async () => inputs.shift(),
+        confirm: async () => script.confirm ?? true,
         notify: (message: string) => notified.push(message),
         setStatus: () => {},
         custom: async () => null,
@@ -111,7 +112,7 @@ describe("the wizard does not litter the file with an empty map", () => {
   it("removes the map again when the last profile is deleted", async () => {
     const config = makeConfig();
     config.profiles = { only: {} };
-    const ui = fakeUi({ selects: ["🚫 Delete a profile", "only"] });
+    const ui = fakeUi({ selects: ["○ only — fast 0 · smart 0", "🚫 Delete this profile"] });
     await editProfiles(config, depsFor(ui));
     expect("profiles" in config).toBe(false);
   });
@@ -203,12 +204,20 @@ describe("editProfiles", () => {
     expect(ui.notified.join("\n")).toContain("cannot be empty");
   });
 
-  it("deletes a profile", async () => {
+  it("deletes a profile from its own menu", async () => {
     const config = makeConfig();
     config.profiles = { a: {}, b: {} };
-    const ui = fakeUi({ selects: ["🚫 Delete a profile", "a"] });
+    const ui = fakeUi({ selects: ["○ a — fast 0 · smart 0", "🚫 Delete this profile"] });
     await editProfiles(config, depsFor(ui));
     expect(Object.keys(config.profiles!)).toEqual(["b"]);
+  });
+
+  it("asks before deleting, and keeps the profile when the answer is no", async () => {
+    const config = makeConfig();
+    config.profiles = { a: {} };
+    const ui = fakeUi({ selects: ["○ a — fast 0 · smart 0", "🚫 Delete this profile"], confirm: false });
+    await editProfiles(config, depsFor(ui));
+    expect(Object.keys(config.profiles!)).toEqual(["a"]);
   });
 
   it("edits a profile's chain through the chain editor", async () => {
@@ -267,20 +276,19 @@ describe("editProfiles — enabling and disabling", () => {
     expect(selected).toEqual(["p"]);
   });
 
-  it("does nothing when the profile is already active", async () => {
+  it("offers to DISABLE an active profile, not to activate it again", async () => {
     const config = makeConfig();
     config.profiles = { p: { fast: [ref("anthropic", "haiku")] } };
     const selected: (string | null)[] = [];
     const ui = fakeUi({
-      selects: ["● p — fast 1 · smart 0", "✅ Active for this session", "✅ Back", "✅ Back to configuration"],
+      selects: ["● p — fast 1 · smart 0", "⛔ Disable for this session", "✅ Back", "✅ Back to configuration"],
     });
     await editProfiles(
       config,
       { ...depsFor(ui), setActiveProfile: (n) => { selected.push(n); } },
       "p",
     );
-    expect(selected).toEqual([]);
-    expect(ui.notified.join("\n")).toContain("already active");
+    expect(selected).toEqual([null]);
   });
 
   it("offers a disable row only while a profile is active", async () => {
@@ -293,12 +301,12 @@ describe("editProfiles — enabling and disabling", () => {
     expect(ui.notified.join("\n")).not.toContain("disabled");
   });
 
-  it("disables the active profile", async () => {
+  it("disables the active profile from its own menu", async () => {
     const config = makeConfig();
     config.profiles = { p: {} };
     const selected: (string | null)[] = [];
     const ui = fakeUi({
-      selects: ['🚫 Disable "p" — use the configured chains', "✅ Back to configuration"],
+      selects: ["● p — fast 0 · smart 0", "⛔ Disable for this session", "✅ Back", "✅ Back to configuration"],
     });
     await editProfiles(
       config,
@@ -312,7 +320,7 @@ describe("editProfiles — enabling and disabling", () => {
   it("warns when the deleted profile was the active one", async () => {
     const config = makeConfig();
     config.profiles = { p: {} };
-    const ui = fakeUi({ selects: ["🚫 Delete a profile", "p"] });
+    const ui = fakeUi({ selects: ["● p — fast 0 · smart 0", "🚫 Delete this profile"] });
     await editProfiles(config, depsFor(ui), "p");
     expect(ui.notified.join("\n")).toContain("it was active for this session");
   });

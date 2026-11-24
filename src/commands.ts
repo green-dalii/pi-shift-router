@@ -318,6 +318,32 @@ export function matchMenuChoice(label: string): MenuChoice {
 }
 
 /**
+ * The configuration wizard's main-menu rows.
+ *
+ * Exported so the menu's glyph vocabulary can be guarded: two rows that
+ * open with the SAME icon look like the same action, and the user has to
+ * guess which of the two is the real one.
+ */
+export function wizardMenuLabels(
+  config: ShiftRouterConfig,
+  modelCount: number,
+  decisionCount: number,
+): string[] {
+  return [
+    `🦾 Fast — ${config.tiers.fast.models.length} model(s)  (engineer: execution, daily coding)`,
+    `🧠 Smart — ${config.tiers.smart.models.length} model(s)  (CTO: direction, review, hard problems)`,
+    `🧭 Judge — ${judgeSummary(config, decisionCount)}`,
+    `🪄 Orchestration — ${orchestrationSummary(config)}`,
+    `📋 Profiles — ${profileCount(config)} defined`,
+    "🎨 UX settings",
+    "🔒 Cache-aware routing",
+    `🔄 Model catalog — refresh now (${modelCount} available)`,
+    "💾 Save & exit",
+    "🚫 Discard & exit",
+  ];
+}
+
+/**
  * One line for the main menu: mode, budget, audit state.
  * Pure — the wizard re-renders it after every edit.
  */
@@ -476,18 +502,10 @@ export async function routeConfigWizard(
     // The counts reflect the snapshot as of this render — the background
     // refresh updates it, so reopening the menu shows what landed.
     const models = modelList();
-    const choice = await ctx.ui.select("pi-shift-router — Configuration", [
-      `🦾 Fast — ${config.tiers.fast.models.length} model(s)  (engineer: execution, daily coding)`,
-      `🧠 Smart — ${config.tiers.smart.models.length} model(s)  (CTO: direction, review, hard problems)`,
-      `🧭 Judge — ${judgeSummary(config, decisionModelsFor(registry, models).length)}`,
-      `🪄 Orchestration — ${orchestrationSummary(config)}`,
-      `📋 Profiles — ${profileCount(config)} defined`,
-      "🎨 UX settings",
-      "🔒 Cache-aware routing",
-      `🔄 Model catalog — refresh now (${models.length} available)`,
-      "💾 Save & exit",
-      "🚫 Discard & exit",
-    ]);
+    const choice = await ctx.ui.select(
+      "pi-shift-router — Configuration",
+      wizardMenuLabels(config, models.length, decisionModelsFor(registry, models).length),
+    );
 
     if (!choice) return "cancel";
     return matchMenuChoice(choice);

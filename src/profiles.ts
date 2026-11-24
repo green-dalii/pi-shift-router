@@ -59,6 +59,46 @@ function removeProfile(config: ShiftRouterConfig, name: string): void {
 }
 
 /**
+ * The Profiles list rows.
+ *
+ * The list is NAVIGATION, not a set of actions: each row opens that
+ * profile's own menu, where its actions live. A row that duplicates an
+ * action (a second "delete", a second "disable") is a trap — the user has
+ * to guess which of two identical rows is the real one.
+ *
+ * The profile rows carry the project's exclusive-picker marker (● current /
+ * ○ other) instead of an icon: every row here names a preset, and no preset
+ * has an icon of its own. The action rows (➕, ✅) carry icons, so the two
+ * kinds never read as the same thing.
+ */
+export function profileListOptions(config: ShiftRouterConfig, active: string | null): string[] {
+  const options = ["➕ New profile"];
+  for (const name of Object.keys(config.profiles ?? {})) {
+    options.push(profileLabel(name, config.profiles![name]!, active));
+  }
+  options.push("✅ Back to configuration");
+  return options;
+}
+
+/**
+ * The per-profile action rows.
+ *
+ * The first row is a TOGGLE: activating a profile and disabling it are the
+ * same decision seen from two sides, so they get one row that says what
+ * picking it will do — never an "Activate" button on a profile that is
+ * already active.
+ */
+export function profileActionOptions(profile: SessionProfile, isActive: boolean): string[] {
+  return [
+    isActive ? "⛔ Disable for this session" : "📋 Activate for this session",
+    `🦾 Fast chain — ${profile.fast?.length ?? 0} model(s)`,
+    `🧠 Smart chain — ${profile.smart?.length ?? 0} model(s)`,
+    "🚫 Delete this profile",
+    "✅ Back",
+  ];
+}
+
+/**
  * Menu label for one profile: its name and how much of each chain it sets.
  *
  * `●` marks the profile this session is running (SPEC §9.6's indicator
@@ -105,24 +145,9 @@ export async function editProfiles(
 
   for (;;) {
     const names = Object.keys(config.profiles ?? {});
-    const options: string[] = [];
-    const actions: Array<
-      { kind: "new" } | { kind: "edit"; name: string } | { kind: "activate"; name: string } | { kind: "disable" } | { kind: "delete" } | { kind: "back" }
-    > = [];
-
-    options.push("➕ New profile");
-    actions.push({ kind: "new" });
-    for (const name of names) {
-      options.push(profileLabel(name, config.profiles![name]!, active));
-      actions.push({ kind: "edit", name });
-    }
-    if (active !== null) {
-      options.push(`🚫 Disable "${active}" — use the configured chains`);
-      actions.push({ kind: "disable" });
-    }
-    options.push("🚫 Delete a profile");
-    actions.push({ kind: "delete" });
-    options.push("✅ Back to configuration");
+    const options = profileListOptions(config, active);
+    const actions: Array<{ kind: "new" } | { kind: "edit"; name: string } | { kind: "back" }> = [{ kind: "new" }];
+    for (const name of names) actions.push({ kind: "edit", name });
     actions.push({ kind: "back" });
 
     const choice = await ctx.ui.select("pi-shift-router — Profiles", options);
@@ -134,13 +159,6 @@ export async function editProfiles(
     const action = actions[index]!;
 
     if (action.kind === "back") return;
-
-    if (action.kind === "disable") {
-      await deps.setActiveProfile?.(null);
-      active = null;
-      ctx.ui.notify("pi-shift-router: 📋 Profile disabled — using the configured chains", "info");
-      continue;
-    }
 
     if (action.kind === "new") {
       const raw = await ctx.ui.input("Profile name", "e.g. review-heavy");
@@ -167,20 +185,20 @@ export async function editProfiles(
       continue;
     }
 
-    if (action.kind === "delete") {
-      await deleteProfile(config, deps, () => active);
-      continue;
+    if (action.kind === "edit") {
+      await editProfile(config, deps, action.name, () => active, (n) => {
+        active = n;
+      });
     }
-
-    await editProfile(config, deps, action.name, () => active, (n) => {
-      active = n;
-    });
   }
 }
 
 /**
- * The per-profile menu: activate it for this session, edit a chain, or
- * delete the profile.
+ * The per-profile menu: activate/disable it for this session, edit a chain,
+ * or delete the profile.
+ *
+ * This is the ONE place a profile's actions live — the list above is pure
+ * navigation, so there is never a second row that does the same thing.
  */
 async function editProfile(
   config: ShiftRouterConfig,
@@ -196,15 +214,7 @@ async function editProfile(
     const profile = profiles[name];
     if (!profile) return;
     const isActive = getActive() === name;
-    const options = [
-      // Enabling a profile means "use it for THIS session" — the selection is
-      // session state, so the wizard asks the host to change it.
-      isActive ? "✅ Active for this session" : "📋 Activate for this session",
-      `🦾 Fast chain — ${profile.fast?.length ?? 0} model(s)`,
-      `🧠 Smart chain — ${profile.smart?.length ?? 0} model(s)`,
-      "🚫 Delete this profile",
-      "✅ Back",
-    ];
+    const options = profileActionOptions(profile, isActive);
     const choice = await ctx.ui.select(`Profile "${name}"`, options);
     if (!choice) return;
     const index = options.indexOf(choice);
@@ -213,14 +223,34 @@ async function editProfile(
     if (index === 4) return;
 
     if (index === 3) {
+      // Deleting a profile destroys work the user may have spent a while
+      // assembling — and it is the only way to remove one, so it asks.
+      const confirmed = await ctx.ui.confirm(
+        `Delete the profile "${name}"?`,
+        "This removes the preset. The tier chains it holds are lost.",
+      );
+      if (!confirmed) continue;
       removeProfile(config, name);
-      ctx.ui.notify(`pi-shift-router: 🚫 Profile "${name}" deleted`, "info");
+      // Deleting the ACTIVE profile leaves the session running chains that
+      // no longer exist as a preset — say so instead of silently falling back.
+      if (isActive) {
+        ctx.ui.notify(
+          `pi-shift-router: 🚫 Profile "${name}" deleted — it was active for this session, ` +
+            `so the configured chains are back in force`,
+          "warning",
+        );
+      } else {
+        ctx.ui.notify(`pi-shift-router: 🚫 Profile "${name}" deleted`, "info");
+      }
       return;
     }
 
     if (index === 0) {
+      // One row, two meanings: it says what picking it will DO.
       if (isActive) {
-        ctx.ui.notify(`pi-shift-router: 📋 Profile "${name}" is already active`, "info");
+        await deps.setActiveProfile?.(null);
+        setActive(null);
+        ctx.ui.notify("pi-shift-router: ⛔ Profile disabled — using the configured chains", "info");
         continue;
       }
       await deps.setActiveProfile?.(name);
@@ -297,33 +327,3 @@ async function editChain(
   return [{ provider: model.provider, model: model.id, priority: 1 }];
 }
 
-/** Delete a profile, chosen from a list. */
-async function deleteProfile(
-  config: ShiftRouterConfig,
-  deps: ProfileEditorDeps,
-  getActive: () => string | null,
-): Promise<void> {
-  const { ctx } = deps;
-  const names = Object.keys(config.profiles ?? {});
-  if (names.length === 0) {
-    ctx.ui.notify("pi-shift-router: no profiles to delete", "info");
-    return;
-  }
-  const options = [...names, "✅ Back"];
-  const pick = await ctx.ui.select("Delete which profile?", options);
-  if (!pick) return;
-  const index = options.indexOf(pick);
-  if (index < 0 || index >= names.length) return;
-  const name = names[index]!;
-  removeProfile(config, name);
-  // Deleting the ACTIVE profile leaves the session running chains that no
-  // longer exist as a preset — say so instead of silently falling back.
-  if (getActive() === name) {
-    ctx.ui.notify(
-      `pi-shift-router: 🚫 Profile "${name}" deleted — it was active for this session, so the configured chains are back in force`,
-      "warning",
-    );
-    return;
-  }
-  ctx.ui.notify(`pi-shift-router: 🚫 Profile "${name}" deleted`, "info");
-}

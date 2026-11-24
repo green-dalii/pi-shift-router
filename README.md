@@ -194,7 +194,14 @@ pi --shift-router-profile=review-heavy      # pick one at launch
 ```text
 /router profile review-heavy                # or switch inside a session
 /router profile off                          # back to the configured chains
+/router profile                              # list the profiles + the active one
 ```
+
+You do not have to write that YAML by hand: `/router config` → **🗂 Profiles** creates a
+profile (seeded from your current chains, so you start from what you already use and
+tweak it), edits its Fast/Smart chains with the same editor the tiers use, and deletes
+one. The active profile also shows up in the compact `/router` line, so you can see
+which chain set you are running without opening the dashboard.
 
 The selection applies to that session only and is **never written to disk** — the
 definitions live in your user config (reusable across projects), while *which one is
@@ -422,6 +429,7 @@ A themed dashboard opens (q / Esc closes): your live tier and model, context-win
 | `/router status` | Open the status dashboard (TUI): live model, last decision, money, chains, health, config layer |
 | `/router on` / `/router off` | Enable / disable routing |
 | `/router config` | Launch the TUI configuration wizard |
+| `/router profile [name\|off]` | Select a per-session profile; no argument lists them |
 | `/router quiet` | Toggle inline toast notifications |
 | `/router verbose` | Toggle verbose logging |
 | `/router eco\|default\|sport` | Gear-shift economics presets (persisted): **eco** → R=2 (θ=0.5, cheaper — only clearly-needed turns run smart), **default** → R=3 (θ≈0.33), **sport** → R=5 (θ=0.2, eager — any real chance of needing Smart escalates). Top-level words so pi tab-completes them; `/router status` shows the current gear in plain language |

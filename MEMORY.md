@@ -10,6 +10,34 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-11-24 — a feature behind a hand-written config key is a feature nobody finds (#65)
+
+**Decision.** Per-session profiles get **two** discoverability surfaces beyond the
+command itself: `/router config` → **🗂 Profiles** (create / edit / delete, using the
+same chain editor as the tiers), and the active profile in the compact `/router` line
+(`🗂 <name>`).
+
+**Why.** The feature shipped correct but was invisible: `profiles` is a hand-written key
+in the config file, the command is a second-level subcommand (`/router profile`), and
+with no profiles defined the command replies "none defined". A user e2e-testing it
+could not find the entry point at all — the failure mode is not "the feature is broken"
+but "the feature does not exist". `/router config` is where tier chains are already
+edited, so the profile definitions belong there.
+
+**Decisions inside that.** A new profile is **seeded from the configured chains**
+("save what I have as a preset, then tweak it" is the workflow people want — starting
+from empty chains is a worse first experience). The wizard mutates the **base** config,
+so a definition is saved like any other setting. The `profiles` key is **not** in
+`DEFAULT_CONFIG`, and reading it never creates it: opening the wizard and saving
+without defining anything must not write an empty map (the key is the difference
+between "no profiles" and "an empty set", and an empty map is noise in the file).
+
+**Gotcha.** The pack-isolation scanner reads the shape `from "…"` as an import
+specifier — a *comment* containing that shape makes it report a phantom external
+import and fail the build. Reword the comment instead of relaxing the scanner.
+
+---
+
 ## 2026-11-23 — the base/effective config split makes the write invariant structural (#65)
 
 **Decision.** The extension keeps **two** config objects: `baseConfig` (what is on

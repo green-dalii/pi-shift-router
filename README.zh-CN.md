@@ -159,7 +159,13 @@ pi --shift-router-profile=review-heavy      # 启动时选一个
 ```text
 /router profile review-heavy                # 或在会话内切换
 /router profile off                          # 回到配置的链
+/router profile                              # 列出全部 profile 与当前生效的
 ```
+
+这份 YAML 不必手写：`/router config` → **🗂 Profiles** 可以新建 profile（默认用你当前的
+链做底子——先从已在用的东西开始，再改），用和档位一样的编辑器改它的 Fast/Smart 链，也
+可以删掉。当前生效的 profile 也会显示在 `/router` 的紧凑状态行里，不用打开仪表板就知道
+自己在跑哪套链。
 
 选择只对**当前会话**生效，**绝不落盘**——定义写在你的用户级配置里（可跨项目复用），
 至于当前生效哪一个是会话状态。所以同一仓库开两个窗口，可以同时跑不同的 profile。

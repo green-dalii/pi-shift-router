@@ -1497,6 +1497,23 @@ A profile that does not exist is a **no-op with one visible message** — never 
 fall-back to the base chains, because "my Opus profile did nothing" is the failure mode
 that wastes an afternoon.
 
+**Where profiles are DEFINED.** The `profiles` map is part of the config file, so the
+wizard owns it: `/router config` → **🗂 Profiles** creates a profile (seeded from the
+configured chains — "save what I have, then tweak it" is the workflow people actually
+want), edits its Fast/Smart chains with the **same chain editor the tiers use**, and
+deletes one. The wizard mutates the *base* config, so a profile definition is saved
+exactly like any other setting.
+
+> The `profiles` key is **not** part of `DEFAULT_CONFIG`: "no profiles defined" must stay
+> distinguishable from "an empty profile map", so the key appears only once the user
+> defines one. Opening the wizard and saving without defining anything must not write an
+> empty map.
+
+**Discoverability.** A feature that is only reachable through a hand-written config key is
+a feature nobody finds. Two additions make it visible: the wizard row above, and the
+active profile in the compact `/router` line (`🗂 <name>`) — so "which chain set am I
+running?" is answerable without opening the dashboard.
+
 > **The flag is a pi-level extension flag, so it must be registered before the session
 > starts, and it is only valid while the extension is loaded.** A process started with
 > `--shift-router-profile=x` while the extension is disabled or not installed is

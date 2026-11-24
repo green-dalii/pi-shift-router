@@ -48,8 +48,8 @@ describe("matchMenuChoice", () => {
   });
 
   it("routes the Profiles row to its own menu choice (SPEC §9.6)", () => {
-    expect(matchMenuChoice("🗂 Profiles — 3 defined")).toBe("profiles");
-    expect(matchMenuChoice("🗂 Profiles — 0 defined")).toBe("profiles");
+    expect(matchMenuChoice("📋 Profiles — 3 defined")).toBe("profiles");
+    expect(matchMenuChoice("📋 Profiles — 0 defined")).toBe("profiles");
   });
 });
 

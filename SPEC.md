@@ -1498,7 +1498,7 @@ fall-back to the base chains, because "my Opus profile did nothing" is the failu
 that wastes an afternoon.
 
 **Where profiles are DEFINED.** The `profiles` map is part of the config file, so the
-wizard owns it: `/router config` → **🗂 Profiles** creates a profile (seeded from the
+wizard owns it: `/router config` → **📋 Profiles** creates a profile (seeded from the
 configured chains — "save what I have, then tweak it" is the workflow people actually
 want), edits its Fast/Smart chains with the **same chain editor the tiers use**, and
 deletes one. The wizard mutates the *base* config, so a profile definition is saved
@@ -1511,7 +1511,7 @@ exactly like any other setting.
 
 **Discoverability.** A feature that is only reachable through a hand-written config key is
 a feature nobody finds. Two additions make it visible: the wizard row above, and the
-active profile in the compact `/router` line (`🗂 <name>`) — so "which chain set am I
+active profile in the compact `/router` line (`📋 <name>`) — so "which chain set am I
 running?" is answerable without opening the dashboard.
 
 > **The flag is a pi-level extension flag, so it must be registered before the session

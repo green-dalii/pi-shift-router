@@ -13,9 +13,9 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 ## 2026-11-24 — a feature behind a hand-written config key is a feature nobody finds (#65)
 
 **Decision.** Per-session profiles get **two** discoverability surfaces beyond the
-command itself: `/router config` → **🗂 Profiles** (create / edit / delete, using the
+command itself: `/router config` → **📋 Profiles** (create / edit / delete, using the
 same chain editor as the tiers), and the active profile in the compact `/router` line
-(`🗂 <name>`).
+(`📋 <name>`).
 
 **Why.** The feature shipped correct but was invisible: `profiles` is a hand-written key
 in the config file, the command is a second-level subcommand (`/router profile`), and
@@ -35,6 +35,19 @@ between "no profiles" and "an empty set", and an empty map is noise in the file)
 **Gotcha.** The pack-isolation scanner reads the shape `from "…"` as an import
 specifier — a *comment* containing that shape makes it report a phantom external
 import and fail the build. Reword the comment instead of relaxing the scanner.
+
+**Gotcha (the one that needed the Unicode tables).** A menu row's icon must have
+`Emoji_Presentation=Yes` — that is the property that decides the rendered width.
+`🗂` (card file cabinet), `🗑` (wastebasket) and `←` (an arrow, not even an emoji)
+all render at HALF width, so the single space after them does not read as a gap and
+the row looks like the text is glued to the icon. Note that `Extended_Pictographic`
+is the WRONG property to test: most wide emoji (🦾 🧠 📋 🚫) are *not*
+Extended_Pictographic. The project's existing width guard only caught ✅/➕/❌-style
+rows for exactly that reason — `tests/menu-glyph-width.test.ts` now checks
+`Emoji_Presentation` over the whole source, and the fix is to use the codebase's
+existing wide glyphs (`📋` for the profile marker, `🚫` for a destructive row, `✅`
+for Back) rather than adding a variation selector — the codebase uses no VS16, and
+terminal support for it is inconsistent.
 
 ---
 

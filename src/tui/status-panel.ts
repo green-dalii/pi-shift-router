@@ -274,10 +274,10 @@ export function assembleStatusData(input: StatusPanelInput): StatusPanelData {
       orchLine: `orchestration: 🪄 ${input.orchestration.mode}${input.orchestration.active ? `, ACTIVE${input.orchestration.detail ? ` (${input.orchestration.detail})` : ""}` : ", idle"}`,
       auditLine: `audit: ${input.orchestration.audit ?? "—"}`,
       profileLine: input.profile.name
-        ? `profile 🗂 ${input.profile.name} (this session only)` +
+        ? `profile 📋 ${input.profile.name} (this session only)` +
           (input.profile.defined ? "" : " ⚠ no longer defined — using the configured chains") +
           (input.profile.judgeFollowsFastChain ? " · judge follows this profile's Fast chain" : "")
-        : `profile 🗂 none (using the configured chains)`,
+        : `profile 📋 none (using the configured chains)`,
     },
     orchestrationSpendLine:
       input.orchestration.spend && input.orchestration.spend > 0

@@ -259,10 +259,10 @@ describe("per-session profiles — session wiring", () => {
     await handlers.get("session_start")({ type: "session_start", reason: "startup" }, ctx);
 
     // No profile yet — the compact line must not mention one.
-    expect(await runRouter(commands, ctx, notices, "")).not.toContain("🗂");
+    expect(await runRouter(commands, ctx, notices, "")).not.toContain("📋");
 
     await runRouter(commands, ctx, notices, "profile opus-heavy");
-    expect(await runRouter(commands, ctx, notices, "")).toContain("🗂 opus-heavy");
+    expect(await runRouter(commands, ctx, notices, "")).toContain("📋 opus-heavy");
   });
 
   it("survives a config reload", async () => {

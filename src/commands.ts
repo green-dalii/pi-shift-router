@@ -476,7 +476,7 @@ export async function routeConfigWizard(
       `🧠 Smart — ${config.tiers.smart.models.length} model(s)  (CTO: direction, review, hard problems)`,
       `🧭 Judge — ${judgeSummary(config, decisionModelsFor(registry, models).length)}`,
       `🪄 Orchestration — ${orchestrationSummary(config)}`,
-      `🗂 Profiles — ${profileCount(config)} defined`,
+      `📋 Profiles — ${profileCount(config)} defined`,
       "🎨 UX settings",
       "🔒 Cache-aware routing",
       `🔄 Model catalog — refresh now (${models.length} available)`,
@@ -958,7 +958,7 @@ export function registerCommands(
             ? profiles.map((n) => `${n === state.activeProfile ? "●" : "○"} ${n}`).join("   ")
             : "none defined — add a \"profiles\" map to your pi-shift-router.json";
           ctx.ui.notify(
-            `pi-shift-router: 🗂 Profiles: ${items}   — active: ${describeActiveProfile(state.activeProfile, profiles)}`,
+            `pi-shift-router: 📋 Profiles: ${items}   — active: ${describeActiveProfile(state.activeProfile, profiles)}`,
             "info",
           );
           return;
@@ -966,7 +966,7 @@ export function registerCommands(
         if (profiles.includes(rest)) {
           await onProfileChange(rest, ctx.ui);
           ctx.ui.notify(
-            `pi-shift-router: 🗂 Profile "${rest}" active for this session — ` +
+            `pi-shift-router: 📋 Profile "${rest}" active for this session — ` +
               // Re-read the config: the selection produced a NEW effective
               // config object, so the one captured at handler entry is stale.
               `Fast: ${chainSummary(getConfig(), "fast")} · Smart: ${chainSummary(getConfig(), "smart")}`,
@@ -976,7 +976,7 @@ export function registerCommands(
         }
         if (rest.toLowerCase() === "off") {
           await onProfileChange(null, ctx.ui);
-          ctx.ui.notify("pi-shift-router: 🗂 Profile cleared — using the configured tier chains", "info");
+          ctx.ui.notify("pi-shift-router: 📋 Profile cleared — using the configured tier chains", "info");
           return;
         }
         ctx.ui.notify(
@@ -1041,7 +1041,7 @@ export function registerCommands(
         // effective config, or a profile's chains would be written to disk.
         if (state.activeProfile) {
           ctx.ui.notify(
-            `pi-shift-router: 🗂 Profile "${state.activeProfile}" is active — this wizard edits the SAVED config; ` +
+            `pi-shift-router: 📋 Profile "${state.activeProfile}" is active — this wizard edits the SAVED config; ` +
               `the session keeps running the profile's chains until "/router profile off"`,
             "warning",
           );
@@ -1248,7 +1248,7 @@ export function registerCommands(
           `${state.manualOverride.active ? " (manual)" : ""}` +
           // Which chain set is running — the whole point of a profile is that
           // it is invisible until you look (SPEC §9.6).
-          `${state.activeProfile ? ` · 🗂 ${state.activeProfile}` : ""}`,
+          `${state.activeProfile ? ` · 📋 ${state.activeProfile}` : ""}`,
         "info",
       );
     },

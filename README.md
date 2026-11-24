@@ -197,7 +197,7 @@ pi --shift-router-profile=review-heavy      # pick one at launch
 /router profile                              # list the profiles + the active one
 ```
 
-You do not have to write that YAML by hand: `/router config` → **🗂 Profiles** creates a
+You do not have to write that YAML by hand: `/router config` → **📋 Profiles** creates a
 profile (seeded from your current chains, so you start from what you already use and
 tweak it), edits its Fast/Smart chains with the same editor the tiers use, and deletes
 one. The active profile also shows up in the compact `/router` line, so you can see

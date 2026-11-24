@@ -113,7 +113,7 @@ pi --shift-router-profile=review-heavy      # 启动时指定
 /router profile                              # 列出所有 profile 与当前生效的
 ```
 
-这份 YAML 不必手写：`/router config` → **🗂 Profiles** 可以新建 profile（默认用你当前
+这份 YAML 不必手写：`/router config` → **📋 Profiles** 可以新建 profile（默认用你当前
 的链做底子）、用和档位一样的编辑器改它的 Fast/Smart 链，也可以删掉。当前生效的 profile
 也会显示在 `/router` 的紧凑状态行里。
 

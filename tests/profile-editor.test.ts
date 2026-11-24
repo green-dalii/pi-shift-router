@@ -103,7 +103,7 @@ describe("profileMap", () => {
 describe("the wizard does not litter the file with an empty map", () => {
   it("leaves `profiles` absent when the user only browses", async () => {
     const config = makeConfig();
-    const ui = fakeUi({ selects: ["← Back to configuration"] });
+    const ui = fakeUi({ selects: ["✅ Back to configuration"] });
     await editProfiles(config, depsFor(ui));
     expect("profiles" in config).toBe(false);
   });
@@ -111,7 +111,7 @@ describe("the wizard does not litter the file with an empty map", () => {
   it("removes the map again when the last profile is deleted", async () => {
     const config = makeConfig();
     config.profiles = { only: {} };
-    const ui = fakeUi({ selects: ["🗑 Delete a profile", "only"] });
+    const ui = fakeUi({ selects: ["🚫 Delete a profile", "only"] });
     await editProfiles(config, depsFor(ui));
     expect("profiles" in config).toBe(false);
   });
@@ -163,7 +163,7 @@ describe("editProfiles", () => {
     // After "New profile" the flow lands in the new profile's editor (the
     // point is to set its chains right away), then back out twice.
     const ui = fakeUi({
-      selects: ["➕ New profile", "← Back", "← Back to configuration"],
+      selects: ["➕ New profile", "✅ Back", "✅ Back to configuration"],
       inputs: ["review"],
     });
     await editProfiles(config, depsFor(ui));
@@ -175,7 +175,7 @@ describe("editProfiles", () => {
   it("trims the profile name", async () => {
     const config = makeConfig();
     const ui = fakeUi({
-      selects: ["➕ New profile", "← Back", "← Back to configuration"],
+      selects: ["➕ New profile", "✅ Back", "✅ Back to configuration"],
       inputs: ["  review  "],
     });
     await editProfiles(config, depsFor(ui));
@@ -186,7 +186,7 @@ describe("editProfiles", () => {
     const config = makeConfig();
     config.profiles = { review: { fast: [ref("anthropic", "sonnet")] } };
     const ui = fakeUi({
-      selects: ["➕ New profile", "← Back to configuration"],
+      selects: ["➕ New profile", "✅ Back to configuration"],
       inputs: ["review"],
     });
     await editProfiles(config, depsFor(ui));
@@ -197,7 +197,7 @@ describe("editProfiles", () => {
 
   it("refuses an empty name", async () => {
     const config = makeConfig();
-    const ui = fakeUi({ selects: ["➕ New profile", "← Back to configuration"], inputs: ["   "] });
+    const ui = fakeUi({ selects: ["➕ New profile", "✅ Back to configuration"], inputs: ["   "] });
     await editProfiles(config, depsFor(ui));
     expect("profiles" in config).toBe(false);
     expect(ui.notified.join("\n")).toContain("cannot be empty");
@@ -206,7 +206,7 @@ describe("editProfiles", () => {
   it("deletes a profile", async () => {
     const config = makeConfig();
     config.profiles = { a: {}, b: {} };
-    const ui = fakeUi({ selects: ["🗑 Delete a profile", "a"] });
+    const ui = fakeUi({ selects: ["🚫 Delete a profile", "a"] });
     await editProfiles(config, depsFor(ui));
     expect(Object.keys(config.profiles!)).toEqual(["b"]);
   });
@@ -217,7 +217,7 @@ describe("editProfiles", () => {
     // The chain editor is a TUI component; in text mode the flow uses the
     // single-model fallback instead. Drive that: pick a model.
     const ui = fakeUi({
-      selects: ["○ p — fast 1 · smart 0", "🦾 Fast chain — 1 model(s)", "anthropic/sonnet", "← Back", "← Back to configuration"],
+      selects: ["○ p — fast 1 · smart 0", "🦾 Fast chain — 1 model(s)", "anthropic/sonnet", "✅ Back", "✅ Back to configuration"],
     });
     await editProfiles(config, depsFor(ui));
 
@@ -228,7 +228,7 @@ describe("editProfiles", () => {
     const config = makeConfig();
     config.profiles = { p: { fast: [ref("anthropic", "haiku")] } };
     const ui = fakeUi({
-      selects: ["○ p — fast 1 · smart 0", "🦾 Fast chain — 1 model(s)", "❌ Clear this chain", "← Back", "← Back to configuration"],
+      selects: ["○ p — fast 1 · smart 0", "🦾 Fast chain — 1 model(s)", "❌ Clear this chain", "✅ Back", "✅ Back to configuration"],
     });
     await editProfiles(config, depsFor(ui));
     expect(config.profiles!.p!.fast).toEqual([]);
@@ -236,7 +236,7 @@ describe("editProfiles", () => {
 
   it("leaves the config alone when the user backs out immediately", async () => {
     const config = makeConfig();
-    const ui = fakeUi({ selects: ["← Back to configuration"] });
+    const ui = fakeUi({ selects: ["✅ Back to configuration"] });
     await editProfiles(config, depsFor(ui));
     expect("profiles" in config).toBe(false);
   });

@@ -102,9 +102,9 @@ export async function editProfiles(
       options.push(profileLabel(name, config.profiles![name]!, activeProfile));
       actions.push({ kind: "edit", name });
     }
-    options.push("🗑 Delete a profile");
+    options.push("🚫 Delete a profile");
     actions.push({ kind: "delete" });
-    options.push("← Back to configuration");
+    options.push("✅ Back to configuration");
     actions.push({ kind: "back" });
 
     const choice = await ctx.ui.select("pi-shift-router — Profiles", options);
@@ -133,7 +133,7 @@ export async function editProfiles(
         smart: config.tiers.smart.models.map((m) => ({ ...m })),
       };
       ctx.ui.notify(
-        `pi-shift-router: 🗂 Profile "${name}" created from the current chains — set its chains now`,
+        `pi-shift-router: 📋 Profile "${name}" created from the current chains — set its chains now`,
         "info",
       );
       await editProfile(config, deps, name, activeProfile);
@@ -165,8 +165,8 @@ async function editProfile(
     const options = [
       `🦾 Fast chain — ${profile.fast?.length ?? 0} model(s)`,
       `🧠 Smart chain — ${profile.smart?.length ?? 0} model(s)`,
-      "🗑 Delete this profile",
-      "← Back",
+      "🚫 Delete this profile",
+      "✅ Back",
     ];
     const choice = await ctx.ui.select(
       `Profile "${name}"${name === activeProfile ? " (active this session)" : ""}`,
@@ -180,7 +180,7 @@ async function editProfile(
 
     if (index === 2) {
       removeProfile(config, name);
-      ctx.ui.notify(`pi-shift-router: 🗑 Profile "${name}" deleted`, "info");
+      ctx.ui.notify(`pi-shift-router: 🚫 Profile "${name}" deleted`, "info");
       return;
     }
 
@@ -190,7 +190,7 @@ async function editProfile(
       if (tier === "fast") profile.fast = updated;
       else profile.smart = updated;
       ctx.ui.notify(
-        `pi-shift-router: 🗂 Profile "${name}" — ${tier} chain set to ${updated.length} model(s)`,
+        `pi-shift-router: 📋 Profile "${name}" — ${tier} chain set to ${updated.length} model(s)`,
         "info",
       );
     }
@@ -256,12 +256,12 @@ async function deleteProfile(config: ShiftRouterConfig, deps: ProfileEditorDeps)
     ctx.ui.notify("pi-shift-router: no profiles to delete", "info");
     return;
   }
-  const options = [...names, "← Back"];
+  const options = [...names, "✅ Back"];
   const pick = await ctx.ui.select("Delete which profile?", options);
   if (!pick) return;
   const index = options.indexOf(pick);
   if (index < 0 || index >= names.length) return;
   const name = names[index]!;
   removeProfile(config, name);
-  ctx.ui.notify(`pi-shift-router: 🗑 Profile "${name}" deleted`, "info");
+  ctx.ui.notify(`pi-shift-router: 🚫 Profile "${name}" deleted`, "info");
 }

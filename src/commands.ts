@@ -477,17 +477,6 @@ export async function routeConfigWizard(
     return false;
   }
 
-  type MenuChoice =
-  | "fast"
-  | "smart"
-  | "ux"
-  | "cache"
-  | "judge"
-  | "orch"
-  | "profiles"
-  | "refresh"
-  | "done"
-  | "cancel";
   async function saveDestination(): Promise<"user" | "project" | null> {
     const choice = await ctx.ui.select("Save configuration to…", [
       "📁 Project — <cwd>/.pi/pi-shift-router.json (shareable with team)",

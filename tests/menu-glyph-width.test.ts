@@ -190,3 +190,19 @@ describe("no two rows of one menu share a glyph", () => {
     expect(iconOf(disable)).not.toBe(iconOf(del));
   });
 });
+
+// ─── No shadowed type declarations ────────────────────────────────
+
+describe("a type is declared once", () => {
+  it("commands.ts declares MenuChoice once", () => {
+    // An inner `type MenuChoice` shadows the module-level one. The two were
+    // identical, but a shadow means the outer one can drift and nobody
+    // notices — the compiler never complains.
+    const src = readFileSync("src/commands.ts", "utf8");
+    const declarations = [...src.matchAll(/^\s*type MenuChoice\b/gm)];
+    expect(
+      declarations.length,
+      `MenuChoice is declared ${declarations.length} times — the inner one shadows the outer`,
+    ).toBe(1);
+  });
+});

@@ -32,6 +32,26 @@ so a definition is saved like any other setting. The `profiles` key is **not** i
 without defining anything must not write an empty map (the key is the difference
 between "no profiles" and "an empty set", and an empty map is noise in the file).
 
+**Second asymmetry, found the same way: the wizard could not TURN A PROFILE ON.** It
+managed the *definitions* (create / edit / delete) while the *selection* lived only in
+the `/router profile` command — so "actually, let me go back to the configured chains"
+meant leaving the wizard and typing `/router profile off`. The wizard now does both:
+a profile's own menu has "📋 Activate for this session", and the list offers
+"🚫 Disable" while one is active.
+
+**The rule behind both fixes.** A surface that manages a thing must also let you
+*turn that thing on and off* where the thing has an on/off state. Splitting
+"definition" from "selection" is right — but the surface that owns the definitions
+still has to reach the selection, or the user has to go somewhere else to switch.
+
+The wizard does not OWN the selection: it asks the host to change it, through the
+same path `/router profile` uses (`setActiveProfile` in the editor deps). The
+selection stays session state; the wizard only borrows the host's ability to change
+it. Two consequences worth remembering: activating a profile from inside the wizard
+says "this wizard still edits the SAVED config" (the wizard keeps editing the base
+while the session runs the profile), and deleting the ACTIVE profile says so too —
+the session falls back to the configured chains.
+
 **Gotcha.** The pack-isolation scanner reads the shape `from "…"` as an import
 specifier — a *comment* containing that shape makes it report a phantom external
 import and fail the build. Reword the comment instead of relaxing the scanner.

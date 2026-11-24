@@ -1504,6 +1504,25 @@ want), edits its Fast/Smart chains with the **same chain editor the tiers use**,
 deletes one. The wizard mutates the *base* config, so a profile definition is saved
 exactly like any other setting.
 
+**Enabling and disabling.** The wizard manages the *definitions*; the *selection* is
+session state. Leaving the two in different places was an asymmetry a user hit
+immediately: the wizard could create and edit a preset but not turn one on, so
+"actually, let me go back to the configured chains" meant leaving the wizard and
+typing `/router profile off`.
+
+So the wizard does both:
+
+- the per-profile menu offers **📋 Activate for this session** (and shows
+  **✅ Active for this session** for the profile already in force);
+- the list offers **🚫 Disable "<name>" — use the configured chains** while a profile
+  is active.
+
+The wizard does not own the selection — it asks the host to change it, through the
+same path `/router profile` uses. Activating a profile from inside the wizard says so
+("this wizard still edits the SAVED config"), because the wizard keeps editing the
+base while the session runs the profile. Deleting the profile that is active says so
+too: the session falls back to the configured chains.
+
 > The `profiles` key is **not** part of `DEFAULT_CONFIG`: "no profiles defined" must stay
 > distinguishable from "an empty profile map", so the key appears only once the user
 > defines one. Opening the wizard and saving without defining anything must not write an

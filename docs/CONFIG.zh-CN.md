@@ -114,8 +114,9 @@ pi --shift-router-profile=review-heavy      # 启动时指定
 ```
 
 这份 YAML 不必手写：`/router config` → **📋 Profiles** 可以新建 profile（默认用你当前
-的链做底子）、用和档位一样的编辑器改它的 Fast/Smart 链，也可以删掉。当前生效的 profile
-也会显示在 `/router` 的紧凑状态行里。
+的链做底子）、用和档位一样的编辑器改它的 Fast/Smart 链，也可以删掉。同一个菜单还能
+启用/禁用：单个 profile 的菜单里有「📋 Activate for this session」，列表里在有生效
+profile 时会出现「🚫 Disable」。当前生效的 profile 也会显示在 `/router` 的紧凑状态行里。
 
 profile 是**整体替换**而非追加——上面的 `review-heavy` 让 Fast 档*就是* Haiku，而不是
 “Haiku 加上原来配的那些”。profile 里没写的字段保持原配置值，所以只写 `smart` 的

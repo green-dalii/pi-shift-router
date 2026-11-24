@@ -200,8 +200,11 @@ pi --shift-router-profile=review-heavy      # pick one at launch
 You do not have to write that YAML by hand: `/router config` → **📋 Profiles** creates a
 profile (seeded from your current chains, so you start from what you already use and
 tweak it), edits its Fast/Smart chains with the same editor the tiers use, and deletes
-one. The active profile also shows up in the compact `/router` line, so you can see
-which chain set you are running without opening the dashboard.
+one. The same menu **enables and disables**: a profile's own menu has "📋 Activate for
+this session", and the list offers "🚫 Disable" while one is active — so you never have
+to leave the wizard to switch back to the configured chains. The active profile also
+shows up in the compact `/router` line, so you can see which chain set you are running
+without opening the dashboard.
 
 The selection applies to that session only and is **never written to disk** — the
 definitions live in your user config (reusable across projects), while *which one is

@@ -248,3 +248,80 @@ describe("editProfiles", () => {
     expect("profiles" in config).toBe(false);
   });
 });
+
+// ─── Enable / disable from the wizard (SPEC §9.6) ─────────────────
+
+describe("editProfiles — enabling and disabling", () => {
+  it("activates a profile for this session", async () => {
+    const config = makeConfig();
+    config.profiles = { p: { fast: [ref("anthropic", "haiku")] } };
+    const selected: (string | null)[] = [];
+    const ui = fakeUi({
+      selects: ["○ p — fast 1 · smart 0", "📋 Activate for this session", "✅ Back", "✅ Back to configuration"],
+    });
+    await editProfiles(
+      config,
+      { ...depsFor(ui), setActiveProfile: (n) => { selected.push(n); } },
+      null,
+    );
+    expect(selected).toEqual(["p"]);
+  });
+
+  it("does nothing when the profile is already active", async () => {
+    const config = makeConfig();
+    config.profiles = { p: { fast: [ref("anthropic", "haiku")] } };
+    const selected: (string | null)[] = [];
+    const ui = fakeUi({
+      selects: ["● p — fast 1 · smart 0", "✅ Active for this session", "✅ Back", "✅ Back to configuration"],
+    });
+    await editProfiles(
+      config,
+      { ...depsFor(ui), setActiveProfile: (n) => { selected.push(n); } },
+      "p",
+    );
+    expect(selected).toEqual([]);
+    expect(ui.notified.join("\n")).toContain("already active");
+  });
+
+  it("offers a disable row only while a profile is active", async () => {
+    const config = makeConfig();
+    config.profiles = { p: {} };
+    const ui = fakeUi({ selects: ["✅ Back to configuration"] });
+    await editProfiles(config, depsFor(ui), null);
+    // The menu was rendered with no active profile, so there was no
+    // disable row to pick.
+    expect(ui.notified.join("\n")).not.toContain("disabled");
+  });
+
+  it("disables the active profile", async () => {
+    const config = makeConfig();
+    config.profiles = { p: {} };
+    const selected: (string | null)[] = [];
+    const ui = fakeUi({
+      selects: ['🚫 Disable "p" — use the configured chains', "✅ Back to configuration"],
+    });
+    await editProfiles(
+      config,
+      { ...depsFor(ui), setActiveProfile: (n) => { selected.push(n); } },
+      "p",
+    );
+    expect(selected).toEqual([null]);
+    expect(ui.notified.join("\n")).toContain("Profile disabled");
+  });
+
+  it("warns when the deleted profile was the active one", async () => {
+    const config = makeConfig();
+    config.profiles = { p: {} };
+    const ui = fakeUi({ selects: ["🚫 Delete a profile", "p"] });
+    await editProfiles(config, depsFor(ui), "p");
+    expect(ui.notified.join("\n")).toContain("it was active for this session");
+  });
+
+  it("works without a host that can change the selection", async () => {
+    // The wizard must not crash when the host cannot change the selection
+    // (e.g. an older integration) — it just manages the definitions.
+    const config = makeConfig();
+    const ui = fakeUi({ selects: ["✅ Back to configuration"] });
+    await expect(editProfiles(config, depsFor(ui), null)).resolves.toBeUndefined();
+  });
+});

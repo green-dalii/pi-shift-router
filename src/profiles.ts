@@ -24,6 +24,14 @@ export interface ProfileEditorDeps {
   allModels: () => StoredModel[];
   /** Whether a model is currently usable (present + authenticated). */
   isAvailable: (provider: string, model: string) => boolean;
+  /**
+   * Activate a profile for this session — or clear the selection with null.
+   *
+   * The SELECTION is session state (SPEC §9.6), so the wizard cannot own it:
+   * it asks the host to change it, exactly as `/router profile` does.
+   * Optional — without it the wizard only manages the definitions.
+   */
+  setActiveProfile?: (name: string | null) => void | Promise<void>;
 }
 
 /**
@@ -90,17 +98,27 @@ export async function editProfiles(
   activeProfile?: string | null,
 ): Promise<void> {
   const { ctx } = deps;
+  // The selection can change while the wizard is open (the user may
+  // activate or disable a profile here), so read it from the host each time
+  // rather than from the value captured when the wizard opened.
+  let active = activeProfile ?? null;
 
   for (;;) {
     const names = Object.keys(config.profiles ?? {});
     const options: string[] = [];
-    const actions: Array<{ kind: "new" } | { kind: "edit"; name: string } | { kind: "delete" } | { kind: "back" }> = [];
+    const actions: Array<
+      { kind: "new" } | { kind: "edit"; name: string } | { kind: "activate"; name: string } | { kind: "disable" } | { kind: "delete" } | { kind: "back" }
+    > = [];
 
     options.push("➕ New profile");
     actions.push({ kind: "new" });
     for (const name of names) {
-      options.push(profileLabel(name, config.profiles![name]!, activeProfile));
+      options.push(profileLabel(name, config.profiles![name]!, active));
       actions.push({ kind: "edit", name });
+    }
+    if (active !== null) {
+      options.push(`🚫 Disable "${active}" — use the configured chains`);
+      actions.push({ kind: "disable" });
     }
     options.push("🚫 Delete a profile");
     actions.push({ kind: "delete" });
@@ -116,6 +134,13 @@ export async function editProfiles(
     const action = actions[index]!;
 
     if (action.kind === "back") return;
+
+    if (action.kind === "disable") {
+      await deps.setActiveProfile?.(null);
+      active = null;
+      ctx.ui.notify("pi-shift-router: 📋 Profile disabled — using the configured chains", "info");
+      continue;
+    }
 
     if (action.kind === "new") {
       const raw = await ctx.ui.input("Profile name", "e.g. review-heavy");
@@ -136,25 +161,33 @@ export async function editProfiles(
         `pi-shift-router: 📋 Profile "${name}" created from the current chains — set its chains now`,
         "info",
       );
-      await editProfile(config, deps, name, activeProfile);
+      await editProfile(config, deps, name, () => active, (n) => {
+        active = n;
+      });
       continue;
     }
 
     if (action.kind === "delete") {
-      await deleteProfile(config, deps);
+      await deleteProfile(config, deps, () => active);
       continue;
     }
 
-    await editProfile(config, deps, action.name, activeProfile);
+    await editProfile(config, deps, action.name, () => active, (n) => {
+      active = n;
+    });
   }
 }
 
-/** The per-profile menu: edit a chain, or delete the profile. */
+/**
+ * The per-profile menu: activate it for this session, edit a chain, or
+ * delete the profile.
+ */
 async function editProfile(
   config: ShiftRouterConfig,
   deps: ProfileEditorDeps,
   name: string,
-  activeProfile?: string | null,
+  getActive: () => string | null,
+  setActive: (name: string | null) => void,
 ): Promise<void> {
   const { ctx } = deps;
   const profiles = config.profiles ?? {};
@@ -162,29 +195,45 @@ async function editProfile(
   for (;;) {
     const profile = profiles[name];
     if (!profile) return;
+    const isActive = getActive() === name;
     const options = [
+      // Enabling a profile means "use it for THIS session" — the selection is
+      // session state, so the wizard asks the host to change it.
+      isActive ? "✅ Active for this session" : "📋 Activate for this session",
       `🦾 Fast chain — ${profile.fast?.length ?? 0} model(s)`,
       `🧠 Smart chain — ${profile.smart?.length ?? 0} model(s)`,
       "🚫 Delete this profile",
       "✅ Back",
     ];
-    const choice = await ctx.ui.select(
-      `Profile "${name}"${name === activeProfile ? " (active this session)" : ""}`,
-      options,
-    );
+    const choice = await ctx.ui.select(`Profile "${name}"`, options);
     if (!choice) return;
     const index = options.indexOf(choice);
     if (index < 0) return;
 
-    if (index === 3) return;
+    if (index === 4) return;
 
-    if (index === 2) {
+    if (index === 3) {
       removeProfile(config, name);
       ctx.ui.notify(`pi-shift-router: 🚫 Profile "${name}" deleted`, "info");
       return;
     }
 
-    const tier: Tier = index === 0 ? "fast" : "smart";
+    if (index === 0) {
+      if (isActive) {
+        ctx.ui.notify(`pi-shift-router: 📋 Profile "${name}" is already active`, "info");
+        continue;
+      }
+      await deps.setActiveProfile?.(name);
+      setActive(name);
+      ctx.ui.notify(
+        `pi-shift-router: 📋 Profile "${name}" active for this session — ` +
+          `this wizard still edits the SAVED config`,
+        "info",
+      );
+      continue;
+    }
+
+    const tier: Tier = index === 1 ? "fast" : "smart";
     const updated = await editChain(profile, tier, name, deps);
     if (updated) {
       if (tier === "fast") profile.fast = updated;
@@ -249,7 +298,11 @@ async function editChain(
 }
 
 /** Delete a profile, chosen from a list. */
-async function deleteProfile(config: ShiftRouterConfig, deps: ProfileEditorDeps): Promise<void> {
+async function deleteProfile(
+  config: ShiftRouterConfig,
+  deps: ProfileEditorDeps,
+  getActive: () => string | null,
+): Promise<void> {
   const { ctx } = deps;
   const names = Object.keys(config.profiles ?? {});
   if (names.length === 0) {
@@ -263,5 +316,14 @@ async function deleteProfile(config: ShiftRouterConfig, deps: ProfileEditorDeps)
   if (index < 0 || index >= names.length) return;
   const name = names[index]!;
   removeProfile(config, name);
+  // Deleting the ACTIVE profile leaves the session running chains that no
+  // longer exist as a preset — say so instead of silently falling back.
+  if (getActive() === name) {
+    ctx.ui.notify(
+      `pi-shift-router: 🚫 Profile "${name}" deleted — it was active for this session, so the configured chains are back in force`,
+      "warning",
+    );
+    return;
+  }
   ctx.ui.notify(`pi-shift-router: 🚫 Profile "${name}" deleted`, "info");
 }

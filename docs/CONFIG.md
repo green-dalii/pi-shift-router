@@ -120,8 +120,9 @@ pi --shift-router-profile=review-heavy      # at launch
 
 You do not have to hand-write that YAML: `/router config` → **📋 Profiles** creates a
 profile (seeded from your current chains), edits its Fast/Smart chains with the same
-editor the tiers use, and deletes one. The active profile also shows up in the compact
-`/router` line.
+editor the tiers use, and deletes one. The same menu enables and disables: a profile's
+own menu has "📋 Activate for this session", and the list offers "🚫 Disable" while one
+is active. The active profile also shows up in the compact `/router` line.
 
 A profile **replaces** the named chain outright — `review-heavy` above makes the Fast
 tier exactly Haiku, not "Haiku plus whatever else was configured". A field a profile

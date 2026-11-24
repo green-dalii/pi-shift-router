@@ -413,7 +413,12 @@ export async function routeConfigWizard(
   cwd: string,
   ctx: ExtensionCommandContext,
   catalogOverrides?: WizardCatalogOverrides,
-  activeProfile?: string | null,
+  session?: {
+    /** The profile currently active in this session. */
+    activeProfile?: string | null;
+    /** Activate a profile for this session — or clear the selection. */
+    onProfileChange?: (name: string | null) => void | Promise<void>;
+  },
 ): Promise<boolean> {
   const registry = (ctx as any).modelRegistry as ModelRegistryLike | undefined;
   const catalogStarted = Date.now();
@@ -888,8 +893,9 @@ export async function routeConfigWizard(
           ctx,
           allModels: () => chatCapableModels(modelList()),
           isAvailable: (provider, model) => isModelAvailable(modelSource(), provider, model),
+          setActiveProfile: session?.onProfileChange,
         },
-        activeProfile,
+        session?.activeProfile ?? null,
       );
     } else if (choice === "refresh") {
       await refreshCatalog();
@@ -1046,7 +1052,12 @@ export function registerCommands(
             "warning",
           );
         }
-        await routeConfigWizard(base, ctx.cwd, ctx, undefined, state.activeProfile);
+        await routeConfigWizard(base, ctx.cwd, ctx, undefined, {
+          activeProfile: state.activeProfile,
+          // Enabling/disabling a profile from inside the wizard is session
+          // state — the same path the `/router profile` command uses.
+          onProfileChange: (name) => onProfileChange(name, ctx.ui),
+        });
         await onConfigChanged();
         updateStatus(ctx.ui);
         // Show which layer is now authoritative — a wizard save may have

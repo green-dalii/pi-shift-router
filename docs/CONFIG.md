@@ -60,6 +60,10 @@ pi-shift-router.json
     ├── statusBar              show 🦾 / 🧠 badge; default true
     ├── inlineToast            model-switch toasts; default true
     └── routerLogVerbose       debug logging to ~/.pi/agent/logs/shift-router.log; default false
+├── profiles                  (SPEC §9.6; optional — named per-session presets)
+│   └── <name>                a preset you can select for one session
+│       ├── fast[]            replaces tiers.fast.models wholesale when present
+│       └── smart[]           replaces tiers.smart.models wholesale when present
 ├── orchestration             (SPEC §9.3, v1.0.0; all optional)
     ├── mode                   "auto" | "off"; default auto (opt-out via /router orchestrate off)
     ├── maxRounds              delegate→review rounds cap; default 6 (1–20)
@@ -90,6 +94,60 @@ tiers:
     - { provider: openai,     model: gpt-5.6-sol,       priority: 2 }
     - { provider: moonshotai, model: kimi-k3,           priority: 3 }
 ```
+
+**Per-session profiles** (SPEC §9.6) — the same chains, named, selectable per session:
+
+```text
+profiles:
+  review-heavy:
+    fast:  [ { provider: anthropic, model: claude-haiku-4-5, priority: 1 } ]
+    smart: [ { provider: anthropic, model: claude-opus-4-1,  priority: 1 } ]
+  cheap-local:
+    fast:  [ { provider: ollama,    model: qwen3-coder,     priority: 1 } ]
+```
+
+Select one for the session you are in:
+
+```bash
+pi --shift-router-profile=review-heavy      # at launch
+```
+
+> **`off` is reserved.** `/router profile off` clears the session's selection,
+> so no profile may be named `off` — the wizard refuses the name. Pick
+> `baseline`, `disabled`, or anything else.
+
+```text
+/router profile review-heavy                # inside a session
+/router profile off                          # back to the configured chains
+/router profile                              # list profiles + the active one
+```
+
+You do not have to hand-write that YAML: `/router config` → **📋 Profiles** lists your
+presets. Open one and its own menu has everything about it: "📋 Activate for this
+session" (which becomes "⛔ Disable" once it is active), the Fast/Smart chain editors,
+and "🚫 Delete this profile". A new profile starts from your current chains. The active
+profile also shows up in the compact `/router` line.
+
+A profile **replaces** the named chain outright — `review-heavy` above makes the Fast
+tier exactly Haiku, not "Haiku plus whatever else was configured". A field a profile
+omits keeps the configured value, so a profile naming only `smart` leaves Fast alone.
+
+The selection applies to **this session only** and is never written to disk. The
+definitions live in the user file, so they are reusable across projects; the choice of
+which one is active is session state. Two windows on the same repo can therefore run
+different profiles at the same time.
+
+The launch flag behaves like `pi --model`: it is a **process-level default**, so it
+re-applies after `/new` inside the same window. It needs pi 1.0.0 or newer (older hosts
+have no extension-flag API — the `/router profile` command still works there). `/router
+config` always edits the **saved** config, never the session's live chains; with a
+profile active the wizard says so.
+
+**Two things worth knowing.** In the default `fast-chain` Judge mode the Judge chain
+*is* the Fast chain, so a profile that replaces Fast also changes which model judges —
+`/router status` shows the active profile and its Judge. And a profile that does not
+exist changes nothing and says so, rather than silently falling back to the configured
+chains.
 
 ### Field-by-field defaults
 

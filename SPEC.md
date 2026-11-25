@@ -292,6 +292,14 @@ Two mechanisms handle failure, both specified in one place elsewhere:
 
 **Load order:** defaults ← user ← project (project wins on conflict).
 
+**Known defect — the whole merged snapshot is written.** `saveConfig` writes the entire
+merged object to the chosen file, so saving to the user scope copies the project
+layer's values into the user file, and vice versa. The fix (write only the keys the
+user changed, per layer) is tracked in ROADMAP under "Config-layer switch (§5)". Until
+it lands, anything that must **not** reach a config file must not be passed to
+`saveConfig` at all — this is why a per-session profile (§9.6) is applied as an
+in-memory *effective config* and never travels the save path.
+
 ### 5.2 Config Structure
 
 ```typescript
@@ -329,8 +337,17 @@ interface ShiftRouterConfig {
     inlineToast: boolean;
     routerLogVerbose: boolean;
   };
+  profiles?: {                       // §9.6, optional; named per-session presets
+    [name: string]: {
+      fast?: ModelRef[];             // replaces tiers.fast.models wholesale
+      smart?: ModelRef[];            // replaces tiers.smart.models wholesale
+    };
+  };
 }
 ```
+
+**Profiles are definitions, not state.** The `profiles` map holds *named presets*; which
+one (if any) is active is session state and is never stored in this file. See §9.6.
 
 ### 5.3 Validation
 
@@ -414,6 +431,7 @@ The cheapest-fallback pool includes **all providers** that have a valid API key 
 | `/router config` | Open the interactive configuration wizard (TUI) |
 | `/router quiet` | Toggle inline toast notifications |
 | `/router verbose` | Toggle verbose logging to console (for advanced debugging) |
+| `/router profile [name\|off]` | Select a per-session profile (§9.6); no argument lists the available profiles and the active one |
 | `/route-force <tier\|model>` | Manually override the next turn's model |
 
 ### 6.2 `/router status` Output (TUI dashboard)
@@ -572,6 +590,7 @@ cannot invent a third style, and tests assert the two idioms stay separate.
 | Slogan + CTO/Engineer terminology unification | ✅ | v0.9.1 | Docs, SPEC, judge prompt, tests |
 | **Coverage reporting (≥90% on router/failover)** | ✅ | v0.9.x (dev) | `vitest --coverage` in CI; router 100% / failover 95.5% |
 | **Cache-aware routing** | ✅ | v0.10.0 | §9.2: same-family threshold raise + warm-cache downgrade suppression |
+| **Per-session profiles** | ✅ | v1.10.0 | §9.6: named tier-chain preset, session-scoped selection (launch flag + `/router profile`), never written to disk |
 
 ### 8.5 Runtime Failover (Exponential Backoff)
 
@@ -1381,3 +1400,200 @@ the cost curve is measured.
 **Out of scope.** No effort × tier matrix; no dynamic `xhigh`/`max`; no heuristic trigger
 (message length, token counts and tool counts are forbidden inputs, exactly as the Judge
 forbids keyword rules); no change to θ, `minConfidence`, or cache-aware behaviour.
+
+### 9.6 Per-session profiles (implemented — pending release)
+
+**The gap.** The configuration system has two file scopes (§5.1): user
+(`~/.pi/agent/pi-shift-router.json`) and project (`<cwd>/.pi/pi-shift-router.json`).
+Both are *files*, so both are shared by every session on that project. A user running
+several pi sessions on one repository — a review session that wants Opus on the Smart
+tier next to a coding session that wants Sonnet — cannot express that: the two sessions
+read the same file, and the only in-session escape hatches (`/route-force`,
+`/router smart|fast`) pin a tier or a *single* model for at most one turn
+(`/route-force` is cleared at the end of the turn, `src/index.ts`). What is missing is
+the ability to say "in *this* session, the Fast chain is X and the Smart chain is Y".
+
+**Two scopes, deliberately separated.**
+
+| Thing | Where it lives | Lifetime | Written by the router? |
+|---|---|---|---|
+| **Profile definition** | `profiles` in the user config file (§5.2) | Persistent, reusable across projects | No — user-authored, hand-edited |
+| **Profile selection** | Session state | The session | **Never** — see *No disk writes* |
+
+The split is the whole design. A profile is a *named preset* — static, shareable, worth
+keeping — while the *selection* is a runtime fact about one session. Mixing them (e.g.
+"the active profile" stored in the config file) would make two concurrent sessions
+fight over one value, which is precisely the problem being solved.
+
+**Profile shape.** A profile carries **tier chains only**:
+
+```typescript
+interface SessionProfile {
+  /** Replaces tiers.fast.models wholesale when present. */
+  fast?: ModelRef[];
+  /** Replaces tiers.smart.models wholesale when present. */
+  smart?: ModelRef[];
+}
+```
+
+Tier chains are what the request is about (different Opus/Sonnet/Haiku per tier). The
+profile deliberately does **not** carry `routing`, `ux`, or `orchestration`: those are
+global behaviour, not a per-session model preference, and widening the scope would make
+"which profile am I in?" answer questions the user did not ask.
+
+**Override semantics — replace, not append.** A profile's `fast` **replaces**
+`tiers.fast.models`; it does not extend it. The user's mental model is "this session's
+Fast tier *is* Haiku", and an appending profile would leave them unable to tell which
+models are live. A field the profile omits keeps the base config value, so a profile
+naming only `smart` leaves the configured Fast chain alone.
+
+**Effective config.** The router reads one config object everywhere
+(`findBestModelForTier(tier, config, …)`, `findTierForModel(config, …)`,
+`resolveFastEndpoints(config, …)`). A profile therefore works by producing an
+*effective config* — base merged with the selected profile — and passing that object
+wherever the base was passed before. There is exactly **one** merge point; no consumer
+re-applies the profile itself.
+
+**No disk writes.** The effective config is **never** passed to `saveConfig`. This is
+load-bearing, not a nicety: `saveConfig` writes the whole merged snapshot
+(`src/config.ts`), so an effective config that carried a profile's chains into a
+user-scope save would write that session's models into the user's global file. The
+config-layer write defect is tracked separately (§5.1, ROADMAP "Config-layer switch");
+until it is fixed, the invariant is enforced structurally: the profile path has no write
+call in it at all.
+
+**Judge coupling — stated, not hidden.** In `fast-chain` mode (the default) the Judge
+chain *is* the Fast tier chain (`resolveFastEndpoints`, `src/config.ts`), so replacing
+the Fast chain replaces the Judge. A profile cannot override the Judge chain
+independently; a user who wants a Judge unaffected by the Fast chain is already in
+`custom` mode with its own `routing.judge.models`. This coupling is surfaced in
+`/router status` rather than left to be discovered.
+
+**Precedence.**
+
+| Layer | Priority | Rationale |
+|---|---|---|
+| Profile chain | Highest | The most specific statement of intent for this session |
+| `/route-force <provider/model>` | Above profile | An explicit, one-turn instruction ("use *this* model now") |
+| `/router smart` / `/router fast` | Above profile | Forces a *tier*; the model is still resolved from the profile's chain for that tier |
+| User / project config | Base | The default the profile overrides |
+
+`/route-force` stays a **one-turn** override (it is cleared at the end of the turn
+today, `src/index.ts`) — a profile does not extend its lifetime.
+
+**Selection surfaces.** Two, because the two readings of "session" differ (a window vs
+a `/new` inside a window):
+
+1. **Launch flag** — `pi --shift-router-profile=<name>`. A pi extension flag
+   (`pi.registerFlag(name, { type: "string" })`), read at startup. This is the
+   multi-window case: each pi process selects its own profile, and nothing is shared.
+   pi re-applies the flag on **every** session start inside that process (the flag
+   values are re-injected when the runtime is rebuilt), so it behaves like `pi --model`:
+   a process-level default that survives `/new`.
+2. **Command** — `/router profile <name>` / `/router profile off` / `/router profile`
+   (list). Switches the current session's profile at runtime.
+
+A profile that does not exist is a **no-op with one visible message** — never a silent
+fall-back to the base chains, because "my Opus profile did nothing" is the failure mode
+that wastes an afternoon.
+
+**Reserved names.** `off` is the command language's own word — `/router profile off`
+clears the session's selection — so a profile may not be named `off`. The wizard
+refuses the name. Without that rule a profile named `off` would shadow the word, and
+the user could never turn that profile off by name.
+
+**Where profiles are DEFINED.** The `profiles` map is part of the config file, so the
+wizard owns it: `/router config` → **📋 Profiles** creates a profile (seeded from the
+configured chains — "save what I have, then tweak it" is the workflow people actually
+want), edits its Fast/Smart chains with the **same chain editor the tiers use**, and
+deletes one. The wizard mutates the *base* config, so a profile definition is saved
+exactly like any other setting.
+
+**Enabling and disabling.** The wizard manages the *definitions*; the *selection* is
+session state. Leaving the two in different places was an asymmetry a user hit
+immediately: the wizard could create and edit a preset but not turn one on, so
+"actually, let me go back to the configured chains" meant leaving the wizard and
+typing `/router profile off`.
+
+So the wizard reaches the selection too, through the profile's own menu.
+
+**The menu is navigation; the profile's menu is action.** The list offers only the
+presets (plus "New profile" and "Back") — a row that duplicates an action is a trap,
+because the user then has to guess which of two identical rows is the real one. Every
+action for a profile lives in that profile's own menu, and each row there does
+something different:
+
+| Row | Glyph | Meaning |
+|---|---|---|
+| Activate / Disable for this session | 📋 / ⛔ | **One toggle row**: it says what picking it will do. A profile that is already active offers "Disable", never a second "Activate" that does nothing. |
+| Fast chain | 🦾 | edit that tier's chain |
+| Smart chain | 🧠 | edit that tier's chain |
+| Delete this profile | 🚫 | remove the preset (asks first) |
+
+Deleting is only reachable from the profile's own menu — a list-level "Delete a
+profile" that opened a second list to pick from was pure duplication.
+
+The wizard does not own the selection — it asks the host to change it, through the
+same path `/router profile` uses. Activating a profile from inside the wizard says so
+("this wizard still edits the SAVED config"), because the wizard keeps editing the
+base while the session runs the profile. Deleting the profile that is active says so
+too: the session falls back to the configured chains.
+
+> The `profiles` key is **not** part of `DEFAULT_CONFIG`: "no profiles defined" must stay
+> distinguishable from "an empty profile map", so the key appears only once the user
+> defines one. Opening the wizard and saving without defining anything must not write an
+> empty map.
+
+**Discoverability.** A feature that is only reachable through a hand-written config key is
+a feature nobody finds. Two additions make it visible: the wizard row above, and the
+active profile in the compact `/router` line (`📋 <name>`) — so "which chain set am I
+running?" is answerable without opening the dashboard.
+
+> **The flag is a pi-level extension flag, so it must be registered before the session
+> starts, and it is only valid while the extension is loaded.** A process started with
+> `--shift-router-profile=x` while the extension is disabled or not installed is
+> rejected by pi as an unknown option. That is pi's extension-flag contract, not a
+> router behaviour.
+
+**Session lifecycle.** The selection is session state (`RouterState`), not a module-level
+variable: `src/config.ts` caches the merged config in a module-level `_config`, and that
+module instance *survives* a `/new` or `/resume` (pi reuses the cached extension factory
+when the cwd is unchanged), so module-level state would leak a profile into the next
+session. On `session_start` the selection is set as follows:
+
+| Situation | Resulting selection |
+|---|---|
+| Launch flag present | The flag's profile — a process-level default, re-applied on every session start in that process |
+| No flag, `session_start` reason `resume` or `fork`, and the session branch carries a profile entry | That profile (see *Persistence*) |
+| No flag, any other reason | None — a `new` or `startup` session starts clean |
+
+**Persistence (optional, second phase).** A resumed session can restore its selection
+via pi's own per-session extension-state mechanism: `pi.appendEntry(customType, data)`
+writes a `custom` entry to the session branch (not the LLM context), and the extension
+reads it back from `ctx.sessionManager.getBranch()`. pi's own virtual-model router uses
+exactly this (`pi.virtual-model-state`). Restoration applies only when `session_start`'s
+reason is `resume` or `fork` — a `new` or `startup` session starts clean. This phase is
+**optional**: the profile feature is complete without it, and it is only worth building
+if the multi-window reading turns out to be wrong.
+
+**`session_start` stays read-only.** Selecting a profile changes *configuration*, not
+the current model. No `setModel` call happens at `session_start`; the first real model
+switch remains in `before_agent_start` (§2.4). A profile therefore takes effect on the
+next turn, exactly like any other config change.
+
+**Invariants.**
+
+1. A profile never changes the Judge algorithm, θ, `minConfidence`, cache-aware
+   behaviour, or the orchestration contract — only which models the tiers resolve to.
+2. A profile never writes to disk.
+3. A profile never crosses a session boundary implicitly: a `new` session starts with no
+   profile (unless it was resumed/forked from one that had one).
+4. An unknown profile name changes nothing and says so.
+5. `/route-force` remains a one-turn override and outranks the profile.
+6. With no profile selected, behaviour is byte-identical to today.
+
+**Out of scope.** Project-scoped profile definitions (a team-shared preset library) —
+profiles are a personal preference, and the user scope already serves that; per-turn
+profile switching (the selection changes only between turns); profiles that override the
+Judge chain, `routing`, `ux`, or `orchestration`; a profile that is itself a full
+`ShiftRouterConfig`.

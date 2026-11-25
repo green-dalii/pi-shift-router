@@ -46,6 +46,11 @@ describe("matchMenuChoice", () => {
     expect(matchMenuChoice("🧠 Smart — 0 model(s)")).toBe("smart");
     expect(matchMenuChoice("🔒 Cache-aware routing")).toBe("cache");
   });
+
+  it("routes the Profiles row to its own menu choice (SPEC §9.6)", () => {
+    expect(matchMenuChoice("📋 Profiles — 3 defined")).toBe("profiles");
+    expect(matchMenuChoice("📋 Profiles — 0 defined")).toBe("profiles");
+  });
 });
 
 describe("matchSaveScope", () => {

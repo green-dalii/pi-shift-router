@@ -55,6 +55,10 @@ pi-shift-router.json
     ├── statusBar              显示 🦾 / 🧠 徽章；默认 true
     ├── inlineToast            模型切换提示；默认 true
     └── routerLogVerbose       调试日志写入 ~/.pi/agent/logs/shift-router.log；默认 false
+├── profiles                 （SPEC §9.6；可选——按会话选择的预设）
+│   └── <name>               一个预设，可在单个会话里选用
+│       ├── fast[]           存在时整体替换 tiers.fast.models
+│       └── smart[]          存在时整体替换 tiers.smart.models
 ├── orchestration            （SPEC §9.3，v1.0.0；全部可选）
     ├── mode                   "auto" | "off"；默认 auto（/router orchestrate off 关闭）
     ├── maxRounds              每任务 delegate→review 轮数上限；默认 6（1–20）
@@ -85,6 +89,54 @@ tiers:
     - { provider: openai,     model: gpt-5.6-sol,       priority: 2 }
     - { provider: moonshotai, model: kimi-k3,           priority: 3 }
 ```
+
+**按会话的 profile**（SPEC §9.6）——同样的链，起个名字，按会话选用：
+
+```text
+profiles:
+  review-heavy:
+    fast:  [ { provider: anthropic, model: claude-haiku-4-5, priority: 1 } ]
+    smart: [ { provider: anthropic, model: claude-opus-4-1,  priority: 1 } ]
+  cheap-local:
+    fast:  [ { provider: ollama,    model: qwen3-coder,     priority: 1 } ]
+```
+
+在当前会话里选用：
+
+```bash
+pi --shift-router-profile=review-heavy      # 启动时指定
+```
+
+> **`off` 是保留名。** `/router profile off` 用来清除当前会话的选择，所以
+> 没有任何 profile 可以叫 `off` —— 向导会拒绝这个名字。用 `baseline`、
+> `disabled` 之类的名字代替。
+
+```text
+/router profile review-heavy                # 会话内切换
+/router profile off                          # 回到配置的链
+/router profile                              # 列出所有 profile 与当前生效的
+```
+
+这份 YAML 不必手写：`/router config` → **📋 Profiles** 列出你的预设。点进某一个，它
+自己的菜单里就是关于它的一切：「📋 Activate for this session」（生效后就变成
+「⛔ Disable」）、Fast/Smart 链的编辑器、以及「🚫 Delete this profile」。新建的 profile
+默认拿你当前的链做底子。当前生效的 profile 也会显示在 `/router` 的紧凑状态行里。
+
+profile 是**整体替换**而非追加——上面的 `review-heavy` 让 Fast 档*就是* Haiku，而不是
+“Haiku 加上原来配的那些”。profile 里没写的字段保持原配置值，所以只写 `smart` 的
+profile 不会动 Fast 档。
+
+选择只对**当前会话**生效，绝不落盘。定义写在用户级文件里，可以跨项目复用；至于当前
+生效哪一个，是会话状态。所以同一仓库开两个窗口，可以同时跑不同的 profile。
+
+启动参数的行为跟 `pi --model` 一样：它是**进程级默认值**，所以同一窗口里 `/new`
+之后依然生效。它需要 pi 1.0.0 或更新（更老的宿主没有扩展参数 API，`/router profile`
+命令仍然可用）。`/router config` 改的永远是**保存的配置**，不是本会话实际跑的链——
+profile 生效时，向导会明确提示这一点。
+
+**两点值得知道**：默认的 `fast-chain` Judge 模式下，Judge 链*就是* Fast 链——所以替换
+了 Fast 档的 profile 也换掉了判分的模型，`/router status` 会显示当前 profile 及其
+Judge。另外，不存在的 profile 不会改变任何东西，只会明确告诉你，不会静默退回原配置。
 
 ### 逐字段默认值
 

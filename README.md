@@ -171,6 +171,50 @@ holds the current tier rather than guessing.
 dedicated Judge LLM chain you edit like a tier, or a decision model — see
 [decision models](#decision-models-as-the-judge-beta).
 
+### Per-session profiles
+
+Your Fast and Smart chains live in a config file, and a file is shared by every session
+on that project. So a review session that wants Opus on Smart cannot sit next to a coding
+session that wants Sonnet — they read the same file.
+
+A **profile** is a named preset (a Fast chain and/or a Smart chain) you define once, and
+you select it **per session**:
+
+```text
+profiles:
+  review-heavy:
+    fast:  [ { provider: anthropic, model: claude-haiku-4-5, priority: 1 } ]
+    smart: [ { provider: anthropic, model: claude-opus-4-1,  priority: 1 } ]
+```
+
+```bash
+pi --shift-router-profile=review-heavy      # pick one at launch
+```
+
+```text
+/router profile review-heavy                # or switch inside a session
+/router profile off                          # back to the configured chains
+/router profile                              # list the profiles + the active one
+```
+
+You do not have to write that YAML by hand: `/router config` → **📋 Profiles** lists
+your presets. Open one and its own menu has everything about it: **📋 Activate for this
+session** (which becomes **⛔ Disable** once it is active), the Fast/Smart chain
+editors, and **🚫 Delete this profile**. A new profile starts from your current chains,
+so you begin from what you already use and tweak it. The active profile also shows up
+in the compact `/router` line, so you can see which chain set you are running without
+opening the dashboard.
+
+The selection applies to that session only and is **never written to disk** — the
+definitions live in your user config (reusable across projects), while *which one is
+active* is session state. Two windows on the same repo can run different profiles at the
+same time.
+
+A profile **replaces** the chain it names rather than adding to it, and a chain it does
+not name keeps the configured value. In the default `fast-chain` Judge mode the Judge
+chain *is* the Fast chain, so replacing Fast also changes the Judge — `/router status`
+shows both.
+
 ### When a provider goes down
 
 429 / 402 / 5xx / quota / token-plan exhausted / Codex `usage limit` / account balance empty? pi retries first (3× provider, 3× agent); if it still fails, the router takes over:
@@ -392,6 +436,7 @@ A themed dashboard opens (q / Esc closes): your live tier and model, context-win
 | `/router eco\|default\|sport` | Gear-shift economics presets (persisted): **eco** → R=2 (θ=0.5, cheaper — only clearly-needed turns run smart), **default** → R=3 (θ≈0.33), **sport** → R=5 (θ=0.2, eager — any real chance of needing Smart escalates). Top-level words so pi tab-completes them; `/router status` shows the current gear in plain language |
 | `/router orchestrate auto` | Task-level orchestration (default): complex tasks → Smart CTO delegates to Fast subagents; simple tasks stay on the plain router |
 | `/router orchestrate off` | Disable orchestration — plain two-tier routing only |
+| `/router profile <name>` | Select a per-session profile: named Fast/Smart chains that apply to this session only (never written to disk). `/router profile off` returns to the configured chains; `/router profile` alone lists them |
 | `/route-force <tier>` | Pin a tier for the next turn |
 | `/route-force <provider>/<model>` | Pin a specific model for the next turn |
 | `/route-force auto` | Clear manual override |

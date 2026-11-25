@@ -175,6 +175,30 @@ export interface ShiftRouterConfig {
   ux: UXConfig;
   /** Task-level orchestration (SPEC §9.3, planned v1.0.0). Default off — opt-in. */
   orchestration: OrchestrationConfig;
+  /**
+   * Named per-session presets (SPEC §9.6). A profile is a *definition* — a
+   * static, reusable set of tier chains. The *selection* is session state
+   * (`RouterState.activeProfile`) and is never written here.
+   *
+   * Absent means "no profiles defined" — the key is deliberately not present
+   * in DEFAULT_CONFIG, so an untouched config file stays untouched.
+   */
+  profiles?: Record<string, SessionProfile>;
+}
+
+/**
+ * A named preset of tier chains (SPEC §9.6).
+ *
+ * Tier chains only: a profile says "in this session, the Fast tier is X and
+ * the Smart tier is Y". It deliberately does NOT carry `routing`, `ux` or
+ * `orchestration` — those are global behaviour, not a per-session model
+ * preference.
+ */
+export interface SessionProfile {
+  /** Replaces `tiers.fast.models` wholesale when present. */
+  fast?: ModelRef[];
+  /** Replaces `tiers.smart.models` wholesale when present. */
+  smart?: ModelRef[];
 }
 
 /**
@@ -524,6 +548,17 @@ export interface RouterState {
   currentTier: Tier;
   currentModelId: string | null;
   currentProvider: string | null;
+  /**
+   * The active per-session profile (SPEC §9.6) — the name of a preset in
+   * `config.profiles`, or null when none is selected.
+   *
+   * This is **session state, not module state**. `src/config.ts` caches the
+   * merged config in a module-level `_config`, and that module instance
+   * survives a `/new` or `/resume` (pi reuses the cached extension factory
+   * when the cwd is unchanged) — so a module-level selection would leak into
+   * the next session.
+   */
+  activeProfile: string | null;
   /**
    * The model the user was running when the session started (captured once, in
    * `session_start`, before any switch). This is what "as if the plugin were not

@@ -10,6 +10,187 @@ alternatives, gotchas. Detail belongs in SPEC.md / ROADMAP.md; link them.
 
 ---
 
+## 2026-11-24 — a feature behind a hand-written config key is a feature nobody finds (#65)
+
+**Decision.** Per-session profiles get **two** discoverability surfaces beyond the
+command itself: `/router config` → **📋 Profiles** (create / edit / delete, using the
+same chain editor as the tiers), and the active profile in the compact `/router` line
+(`📋 <name>`).
+
+**Why.** The feature shipped correct but was invisible: `profiles` is a hand-written key
+in the config file, the command is a second-level subcommand (`/router profile`), and
+with no profiles defined the command replies "none defined". A user e2e-testing it
+could not find the entry point at all — the failure mode is not "the feature is broken"
+but "the feature does not exist". `/router config` is where tier chains are already
+edited, so the profile definitions belong there.
+
+**Decisions inside that.** A new profile is **seeded from the configured chains**
+("save what I have as a preset, then tweak it" is the workflow people want — starting
+from empty chains is a worse first experience). The wizard mutates the **base** config,
+so a definition is saved like any other setting. The `profiles` key is **not** in
+`DEFAULT_CONFIG`, and reading it never creates it: opening the wizard and saving
+without defining anything must not write an empty map (the key is the difference
+between "no profiles" and "an empty set", and an empty map is noise in the file).
+
+**Second asymmetry, found the same way: the wizard could not TURN A PROFILE ON.** It
+managed the *definitions* (create / edit / delete) while the *selection* lived only in
+the `/router profile` command — so "actually, let me go back to the configured chains"
+meant leaving the wizard and typing `/router profile off`. The wizard now reaches the
+selection through the profile's own menu.
+
+**The rule behind both fixes.** A surface that manages a thing must also let you
+*turn that thing on and off* where the thing has an on/off state. Splitting
+"definition" from "selection" is right — but the surface that owns the definitions
+still has to reach the selection, or the user has to go somewhere else to switch.
+
+The wizard does not OWN the selection: it asks the host to change it, through the
+same path `/router profile` uses (`setActiveProfile` in the editor deps). The
+selection stays session state; the wizard only borrows the host's ability to change
+it. Two consequences worth remembering: activating a profile from inside the wizard
+says "this wizard still edits the SAVED config" (the wizard keeps editing the base
+while the session runs the profile), and deleting the ACTIVE profile says so too —
+the session falls back to the configured chains.
+
+**Third and fourth, same session: the menus were full of traps.** (a) The profiles
+list had a "🚫 Delete a profile" row that opened ANOTHER list to pick from — while
+every profile's own menu already had "🚫 Delete this profile". Duplicated entry
+points, so the user had to guess which one was real. (b) "🚫 Disable" and "🚫 Delete"
+were the SAME ICON on two different actions. (c) A profile that was already active
+still offered "📋 Activate for this session" — a button that does nothing.
+
+The rules that came out of it, now guarded by `tests/menu-glyph-width.test.ts`:
+
+- **The list is navigation, the item's own menu is action.** A row that duplicates
+  another row's action is a trap. Every action for a profile lives in that profile's
+  menu, once.
+- **One row per meaning, one glyph per meaning.** No two rows of one menu may open
+  with the same icon. Activate is 📋, Disable is ⛔ (the codebase's existing "off"
+  glyph — `⛔ Disabled`), Delete is 🚫 (the codebase's destructive glyph), Back is ✅.
+- **A toggle row says what picking it will DO.** It flips between "Activate" and
+  "Disable"; it is never a dead "Activate" on something already active.
+- **A destructive action asks first.** Deleting a profile is the only way to remove
+  one, so it confirms.
+
+**Gotcha.** The pack-isolation scanner reads the shape `from "…"` as an import
+specifier — a *comment* containing that shape makes it report a phantom external
+import and fail the build. Reword the comment instead of relaxing the scanner.
+
+**Gotcha (the one that needed the Unicode tables).** A menu row's icon must have
+`Emoji_Presentation=Yes` — that is the property that decides the rendered width.
+`🗂` (card file cabinet), `🗑` (wastebasket) and `←` (an arrow, not even an emoji)
+all render at HALF width, so the single space after them does not read as a gap and
+the row looks like the text is glued to the icon. Note that `Extended_Pictographic`
+is the WRONG property to test: most wide emoji (🦾 🧠 📋 🚫) are *not*
+Extended_Pictographic. The project's existing width guard only caught ✅/➕/❌-style
+rows for exactly that reason — `tests/menu-glyph-width.test.ts` now checks
+`Emoji_Presentation` over the whole source, and the fix is to use the codebase's
+existing wide glyphs (`📋` for the profile marker, `🚫` for a destructive row, `✅`
+for Back) rather than adding a variation selector — the codebase uses no VS16, and
+terminal support for it is inconsistent.
+
+---
+
+## 2026-11-23 — the base/effective config split makes the write invariant structural (#65)
+
+**Decision.** The extension keeps **two** config objects: `baseConfig` (what is on
+disk: defaults ← user ← project) and `config` (the **effective** config = base merged
+with the selected profile). Everything that reads the router's behaviour uses the
+effective one; **everything that mutates or saves uses the base**. `saveConfig` writes
+the whole merged snapshot, so handing it an effective config would put the session's
+profile chains into the user's global file — the one thing the feature must never do.
+
+**Why.** The alternative designs all failed the same test. (a) *One config object,
+mutated in place:* the wizard and the `/router on|off|quiet|verbose|eco` commands all
+mutate-then-save, so a profile's chains would ride along into the file. (b) *Effective
+config threaded through every call site:* ~15 places in `index.ts` would have to switch
+to `effectiveConfig()`, each one a chance to forget one — and a forgotten one is a
+silent bug, not a compile error. (c) *Strip profile chains inside `saveConfig`:*
+`saveConfig` cannot know which chains came from a profile. Splitting the object once,
+at the top of the extension, makes the invariant hold by construction: the profile
+path has **no write call in it at all**.
+
+**Consequences to remember.** `registerCommands` now takes **both** configs
+(`getConfig` = effective, for display; `getBaseConfig` = base, for mutate+save), and
+the wizard receives the base. The status panel and `/router status` show the
+**effective** chains (that is what actually ran), while `/router config` edits the
+**saved** ones — with a profile active the wizard warns, because "I edited the chain
+and nothing happened" is the failure mode to avoid.
+
+**Gotcha (cost one debugging cycle).** The command handler captures `config` once at
+entry. A profile selection produces a **new** effective object, so the captured one is
+stale — anything read after the change must re-read `getConfig()`.
+
+**Gotcha.** `pi.registerFlag` / `pi.getFlag` exist only from **pi 1.0.0** (verified:
+absent in 0.80.0, present in 1.0.0 and 1.6.0). The repo's devDependency floor is
+0.80.0, so both calls are guarded with a `typeof` check — an older host must still
+load the extension; only the launch flag is unavailable there.
+
+**Rejected: shipping profiles with the config-layer switch.** They were planned as one
+work item because the whole-snapshot write was the profiles feature's only technical
+blocker. The base/effective split removed the blocker, so the layer switch became a
+pure hygiene item (it still fixes the pre-existing cross-layer leak for ordinary
+settings) and the two shipped apart.
+
+---
+
+## 2026-11-15 — a profile is a preset; the *selection* is session state (#65)
+
+**Decision.** A **profile** is a named preset holding tier chains only
+(`{ fast?: ModelRef[]; smart?: ModelRef[] }`), defined in the **user** config under
+`profiles`. The **selection** of a profile is **session state** (`RouterState`), never
+written to disk, selected by `pi --shift-router-profile=<name>` (extension flag) or
+`/router profile <name>`. A profile's chain **replaces** the base chain wholesale
+(never appends); an omitted field keeps the base value. `/route-force` stays a one-turn
+override and outranks the profile; `/router smart|fast` forces a tier but still
+resolves the model from the profile's chain for that tier. SPEC §9.6.
+
+**Why.** The request ([#65](https://github.com/green-dalii/pi-shift-router/issues/65))
+was for a third config scope, because the two file scopes are shared by every session
+on a project: a review session wanting Opus-on-Smart cannot coexist with a coding
+session wanting Sonnet. The existing escapes (`/route-force`, `/router smart|fast`)
+pin a tier or a *single* model, and `/route-force` is cleared at the end of the turn —
+so "this session's Fast chain is Haiku and its Smart chain is Opus" was inexpressible.
+
+The definition/selection split is the load-bearing part, not a detail: "which profile is
+active" is a fact about **one** session, so putting it in a file would make concurrent
+sessions overwrite each other — the exact bug being fixed. And a preset is static,
+reusable and worth keeping, so it belongs next to the rest of the personal config.
+
+**Replace, not append.** The user's mental model is "this session's Fast tier *is*
+Haiku"; an appending profile would leave them unable to tell which models are live.
+
+**Rejected.** (a) *A third config file* (`<session>.json`) — needs a stable session id,
+survives restarts, needs cleanup, and reintroduces the shared-state problem; a session
+selection belongs in session state. (b) *Storing the active profile in the config
+file* — two concurrent sessions would fight over one value. (c) *Overriding the whole
+`ShiftRouterConfig`* — `routing`/`ux`/`orchestration` are global behaviour, not a
+per-session model preference. (d) *A profile that overrides the Judge chain* — in
+`fast-chain` mode the Judge **is** the Fast chain (`resolveFastEndpoints`), so the
+coupling is inherent; a user who wants an independent Judge is already in `custom` mode
+with `routing.judge.models`. The coupling is surfaced in `/router status`, not hidden.
+
+**Gotchas (verified, not assumed).** (1) `src/config.ts` caches the merged config in a
+**module-level** `_config`, and that module instance **survives** `/new` and `/resume`
+— pi reuses the cached extension factory when the cwd is unchanged
+(`dist/core/extensions/loader.js`, `moduleCache:false` + `extensionCache` hit). A probe
+confirmed a stale config across a session switch. **So session state must not live in
+module scope** — it goes in `RouterState`. (2) `saveConfig` writes the **whole merged
+snapshot**, so a project-layer value lands in the user file on a user-scope save
+(probe-confirmed). The profile path therefore has **no write call at all**; and the
+config-layer switch (write only changed keys) is the same work item, not a separate
+one. (3) The Judge reusing the Fast chain means swapping the Fast chain silently swaps
+the Judge — hence the `/router status` disclosure.
+
+**Open question, asked in the issue reply.** "Multiple sessions" is ambiguous: separate
+pi windows on one repo (each process → a per-process selection suffices) vs `/new`
+inside one window (needs the selection to survive the switch). The implementation
+covers the first reading; restoring a selection across `/resume` is the optional second
+phase, using pi's own per-session extension-state mechanism (`pi.appendEntry` custom
+entry on the session branch — the pattern pi's virtual-model router uses with
+`pi.virtual-model-state`), applied only when `session_start`'s reason is `resume`/`fork`.
+
+---
+
 ## 2026-11-13 — a dispatch is not a completion (orchestration accounting)
 
 **Decision.** A `subagent` spawn call is a **dispatch** (`spawned`, `rounds`,

@@ -58,6 +58,7 @@ function baseInput(overrides: Partial<StatusPanelInput> = {}): StatusPanelInput 
     windowGlyphs: ["smart", "smart", "fast", "fast", "smart"] as Tier[],
     orchestration: { mode: "auto", active: false, audit: "clean (LLM pass)" },
     configSource: { source: "project", path: "/proj/.pi/pi-shift-router.json", userLayerExists: true },
+    profile: { name: null, judgeFollowsFastChain: false, defined: true },
     now: 1_000_000,
     ...overrides,
   };
@@ -205,5 +206,35 @@ describe("assembleStatusData", () => {
       configSource: { source: "default", path: null, userLayerExists: false },
     }));
     expect(n.configLine).toContain("defaults");
+  });
+
+  // ── Profile row (SPEC §9.6) ─────────────────────────────────────
+  it("says so when no profile is selected", () => {
+    const line = assembleStatusData(baseInput()).health.profileLine;
+    expect(line).toContain("none");
+    expect(line).toContain("configured chains");
+  });
+
+  it("names the active profile and marks it session-only", () => {
+    const line = assembleStatusData(baseInput({
+      profile: { name: "opus-heavy", judgeFollowsFastChain: false, defined: true },
+    })).health.profileLine;
+    expect(line).toContain("opus-heavy");
+    expect(line).toContain("session only");
+  });
+
+  it("discloses the Judge coupling when the profile replaced the Fast chain", () => {
+    const line = assembleStatusData(baseInput({
+      profile: { name: "opus-heavy", judgeFollowsFastChain: true, defined: true },
+    })).health.profileLine;
+    expect(line).toContain("judge follows");
+    expect(line).toContain("Fast chain");
+  });
+
+  it("marks an active profile that is no longer defined", () => {
+    const line = assembleStatusData(baseInput({
+      profile: { name: "gone", judgeFollowsFastChain: false, defined: false },
+    })).health.profileLine;
+    expect(line).toContain("no longer defined");
   });
 });

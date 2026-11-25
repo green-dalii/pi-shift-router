@@ -17,6 +17,7 @@ export function createRouterState(): RouterState {
     currentTier: "fast",
     currentModelId: null,
     currentProvider: null,
+    activeProfile: null,
     window: [],
     manualOverride: { active: false },
     modelCooldowns: createCooldowns(),

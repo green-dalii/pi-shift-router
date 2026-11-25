@@ -40,10 +40,11 @@ Release history and planned work for **pi-shift-router**.
 | v1.7.1 | Session-aware provider calls; zero runtime dependencies | ✅ |
 | v1.7.2 | Config wizard opens instantly (lazy catalog, background refresh) | ✅ |
 | v1.8.0 | Decision judges run on pi's classifier layer (53 models, deprecated fallback) | ✅ |
+| v1.9.0 | Orchestration accounting fix (dispatch vs completion), budget 3 → 6, wizard Orchestration panel | ✅ |
 
 ## Planned
 
-**Priority order:** orchestration correctness (#57/#58) → effort control **static pins** (SPEC §9.5) → routing asymmetry (§2.3) → config-layer switch (§5) → Phase 3 breadth. Orchestration goes first because it ships on by default and its accounting was wrong: a background launch receipt was scored as a completed worker, so 152 of 157 orchestrated turns reported no delegation and 4 of the 5 that did reported `$0.0000`. Effort control ships without touching θ: it is additive and opt-in; its **dynamic** half was shelved by G3. The routing-asymmetry revision must **not** be folded into either — θ stays untouched until real confidence data exists.
+**Priority order:** orchestration correctness (#57/#58) → effort control **static pins** (SPEC §9.5) → routing asymmetry (§2.3) → **per-session profiles (#65)** → config-layer switch (§5) → Phase 3 breadth. Orchestration goes first because it ships on by default and its accounting was wrong: a background launch receipt was scored as a completed worker, so 152 of 157 orchestrated turns reported no delegation and 4 of the 5 that did reported `$0.0000`. Effort control ships without touching θ: it is additive and opt-in; its **dynamic** half was shelved by G3. The routing-asymmetry revision must **not** be folded into either — θ stays untouched until real confidence data exists. Per-session profiles and the config-layer switch were planned as **one work item** (the whole-snapshot write was the profiles feature's only technical blocker); they were separated once the base/effective-config split made the invariant structural — the profile path has no write call at all, so a session's chains can no longer reach any file. The layer switch stays, as a pure hygiene item for ordinary settings.
 
 | Feature | Version | Notes |
 |---------|---------|-------|
@@ -51,7 +52,8 @@ Release history and planned work for **pi-shift-router**.
 | **Judge modes: fast-chain / dedicated LLM / decision model** | v1.7.0 ✅ shipped | SPEC §8. Additive: the LLM judge is retained. `routing.judge.mode` with `fast-chain` (default), `custom`, `decision`. |
 | **Effort control (thinking level)** — static pins only; dynamic step shelved by G3 | next | SPEC §9.5. Pin any supported level per tier (`off`…`max`), opt-in, off by default. Zero θ/cache change. Evidence: MEMORY 2026-09-23 and 2026-09-25 (G3). Tracking: [#43](https://github.com/green-dalii/pi-shift-router/issues/43). Sub-plan below. |
 | Routing asymmetry (§2.3) — directional θ, fast-band removal, hold semantics, cache gate | after effort | The upgrade-eager / downgrade-sticky fix: today any decisive `smart` verdict upgrades (θ always < minConfidence) while downgrades need conf > 0.78 **and** 2 consecutive verdicts **and** a 5-minute cache gate. Re-derive thresholds from measured confidence data. |
-| Config-layer switch (§5) — pick the layer the wizard edits, patch writes | later | Layer picker + provenance badges + override warning; write only changed keys so the other layer is never polluted (today `saveConfig` writes the whole merged snapshot). |
+| **Per-session profiles** (§9.6) | v1.10.0 ✅ done | Named presets (`profiles` in the user config) + a per-session selection (`pi --shift-router-profile=<name>`, `/router profile <name>`) that replaces the tier chains for this session only, never written to disk. Tracking: [#65](https://github.com/green-dalii/pi-shift-router/issues/65). The invariant is enforced **structurally**: the extension keeps two configs — the on-disk base and the effective one — and only the base ever reaches `saveConfig` (which writes the whole merged snapshot). |
+| Config-layer switch (§5) — pick the layer the wizard edits, patch writes | next | Layer picker + provenance badges + override warning; write only changed keys so the other layer is never polluted (today `saveConfig` writes the whole merged snapshot, so project values leak into the user file). **No longer blocks the profiles feature** — the profile path has no write call at all, and the base/effective split keeps a session's chains out of every file. This is now a pure hygiene item: it fixes the pre-existing cross-layer leak for ordinary settings. |
 | Examples directory | ongoing | Sample configs (frontend / ML / cross-provider cost-saving) for documentation. |
 | Pi model-registry alignment | v1.6.0 ✅ done | The wizard/Judge/telemetry now read pi's own model registry (`ctx.modelRegistry.getAvailable()` / `find()` / `getProviderAuthStatus()` / `getApiKeyForProvider()`) instead of re-deriving a catalog from `models-store.json`. Fixes the picker showing a different, smaller list than `/model` (measured drift: 5 providers/413 models vs 39/1354; env-var and `models_json_command` credentials were invisible). Store paths remain as fallback. `src/model-source.ts`. |
 | Cost attribution (per-worker) | v1.5.0 ✅ done | Bounded per-worker ledger (`recordWorkerSpend`, cap 20) + task-spend accumulation; `/router status` Money section shows `orchestration $X (N workers)`. Aggregate spend was already in the status bar since v1.1. |
@@ -62,6 +64,86 @@ Release history and planned work for **pi-shift-router**.
 | Tool-result classification | TBD | SPEC §9: classify tool calls (long shell output may indicate debugging, not a question). |
 | ~~Verbose logs to file~~ | ✅ done | `routerLogVerbose` now appends to `~/.pi/agent/logs/shift-router.log` via `src/log.ts` instead of stdout. stdout writes interleaved with pi's TUI frames and split assistant text mid-sentence (reported 2026-09-17 with a CTO summary). pi ships no logging channel, so a file is the sink; `PI_SHIFT_ROUTER_LOG` overrides the path. |
 | Coverage reporting | ✅ done | `vitest --coverage` in CI (v8 provider, thresholds ≥90% lines/functions/statements, ≥85% branches on `src/router.ts` + `src/failover.ts`). Current: router 100% / failover 95.5%. |
+
+### Per-session profiles — implementation sub-plan (SPEC §9.6, [#65](https://github.com/green-dalii/pi-shift-router/issues/65))
+
+**Goal.** A named preset (a Fast chain and/or a Smart chain) that can be selected **per
+session**, so two sessions on the same project can run different model chains without
+either rewriting a shared config file.
+
+**Design in one line.** A profile is a *definition* (persistent, in the user config);
+the *selection* is session state (`RouterState`), never written to disk. Contract:
+SPEC §9.6. Decision log: MEMORY 2026-11-15.
+
+**Open questions (defaults in brackets).** [1] "Multiple sessions" = separate pi windows
+[the issue says "on the same project"] or `/new` in one window [then the phase-2
+persistence below becomes required, not optional]? [2] Profile chain replaces or appends
+to the base chain [replaces]? [3] Profile definitions in the user file only, or also
+project scope [user file only — a profile is a personal preference]? The issue reply
+asked [1]; the defaults stand until answered.
+
+**Phase A — core.**
+
+- [ ] **① Types** (`types.ts`). `SessionProfile { fast?: ModelRef[]; smart?: ModelRef[] }`;
+      `ShiftRouterConfig.profiles?: Record<string, SessionProfile>` (no `profiles` key in
+      `DEFAULT_CONFIG` — absent means "none defined"); `RouterState.activeProfile:
+      string | null` (session state, **not** module scope — gotcha G1 below).
+- [ ] **② The one merge point** (`config.ts`). `applyProfile(base, name): ShiftRouterConfig`
+      — pure, never mutates `base`; null/unknown name → base unchanged; `fast`/`smart`
+      **replace** the tier chain wholesale; an omitted tier keeps the base chain.
+      Lives in `config.ts` (config resolution; the one-way dependency rule holds).
+- [ ] **③ Effective vs base config** (`index.ts`). Keep **two** variables: `baseConfig`
+      (as loaded from disk) and `config` (effective = `applyProfile(base, activeProfile)`).
+      `init()` and the `onConfigChanged` reload both recompute the effective config, and
+      a profile **survives a config reload**. A profile switch re-resolves the judge
+      endpoints (`resolveFastEndpoints` reads `config.tiers.fast.models` — gotcha G3).
+- [ ] **④ The launch flag** (`index.ts`). `pi.registerFlag("shift-router-profile", {
+      type: "string" })`, read via `pi.getFlag`. Verified against pi 1.6.0:
+      `dist/cli/args.js` puts `--name=value` in `unknownFlags`;
+      `dist/core/agent-session-services.js:8` `applyExtensionFlagValues` injects it;
+      `dist/core/extensions/loader.js:306` `getFlag` reads it. pi re-applies flag values
+      on **every** session start, so the flag is a process-level default like
+      `pi --model` (gotcha G4). An unregistered flag makes pi reject the option (G5).
+- [ ] **⑤ The command** (`commands.ts`). `/router profile` (list + active), `/router profile
+      <name>` (select), `/router profile off` (clear). An unknown name notifies and changes
+      **nothing**. The wizard edits and saves the **base** config; the router runs on the
+      effective one — the invariant that keeps a session's chains out of the user's global
+      file (G2). A wizard *row* is optional; the command is the required surface.
+- [ ] **⑥ Tests** (TDD, red first) — `tests/profiles.test.ts`: replace-not-append; omitted
+      fields keep the base; base is not mutated; unknown name is a no-op; the profile's
+      model is what `findBestModelForTier` / `findTierForModel` see; `/route-force` still
+      outranks the profile; `/router smart` resolves from the profile's chain; **selecting
+      a profile writes nothing to either config file**; the wizard's save writes the base;
+      `session_start` clears the selection on `startup`/`new`; a fresh `RouterState` has
+      `activeProfile: null` (guards G1).
+
+**Phase B — surface.** `/router status` shows the active profile (and, in `fast-chain`
+mode, that the Judge followed the Fast chain). `docs/CONFIG.md` ×2 and `README.md` ×2 are
+already written (schema, usage, command table) and need a post-implementation accuracy pass.
+
+**Phase C — e2e (live host, no mocks).** Build; **verify the runtime install source**
+(`~/.pi/agent/settings.json` → `packages` must point at this working copy, not
+`npm:pi-shift-router`, or the change is invisible); restart; `/router profile` lists;
+select; `/router status` shows it; a **second** pi window on the same project shows no
+profile and can select a different one without disturbing the first; byte-compare both
+config files afterwards.
+
+**Phase D (optional) — session-branch persistence.** Restore the selection across
+`/resume` using pi's own per-session extension-state mechanism: `pi.appendEntry(
+customType, data)` writes a `custom` entry to the session branch, read back via
+`ctx.sessionManager.getBranch()` — the pattern pi's virtual-model router uses
+(`pi.virtual-model-state`). Applies only when `session_start`'s reason is `resume`/`fork`.
+**Only build this if open question [1] resolves to "one window".**
+
+**Gotchas (verified, not assumed).** (G1) The merged config lives in a **module-level**
+cache (`config.ts:624`) and that module instance **survives** `/new` and `/resume` — pi
+reuses the cached extension factory when the cwd is unchanged. Session state must live in
+`RouterState`. (G2) `saveConfig` writes the **whole merged snapshot**, so a project-layer
+value lands in the user file (probe-confirmed) — the effective config must never reach it.
+(G3) The Judge reuses the Fast chain in `fast-chain` mode, so a profile that replaces Fast
+also changes the Judge. (G4) pi re-applies extension flag values on every session start.
+(G5) An unregistered flag makes pi reject the option. (G6) `/route-force` is cleared at
+the end of the turn and stays a one-turn override above the profile.
 
 ### Judge modes — implementation sub-plan (SPEC §8, v1.7.0)
 
@@ -264,7 +346,7 @@ These are deliberate non-goals, kept consistent with SPEC §0 ("Design Philosoph
 - **Keyword/custom rules** — would violate "LLM Judge is the sole classifier" principle.
 - **USD budget cap** — pi-shift-router is a routing layer, not a billing layer.
 - **Heuristic Judge fallback** — the LLM Judge either returns or holds position; no keyword/length heuristics substitute.
-- **Cross-session persistent state** — `session_start` is read-only by design; profile state stays session-scoped.
+- **Cross-session persistent routing state** — `session_start` is read-only by design. A session may *select* a named profile (SPEC §9.6, a static, user-defined tier-chain preset); the selection and the one-turn override are session-scoped. What is excluded is *learned* state — judge history, cooldowns, accumulated statistics — crossing session boundaries. (The clause previously read "Cross-session persistent state … profile state stays session-scoped", which excluded the very thing [#65](https://github.com/green-dalii/pi-shift-router/issues/65) asks for; it was reworded once "profile" acquired a concrete shape: a preset definition is persistent, a *selection* is session state.)
 - **Local ML / ONNX inference** — a different design space; `pi-smart-router` already occupies it.
 - **Runtime npm dependencies** — would violate "zero runtime deps" principle.
 

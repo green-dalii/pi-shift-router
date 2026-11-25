@@ -10,7 +10,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
 import type { Tier, ShiftRouterConfig, RouterState, ProviderEndpoint } from "./types.js";
 import { appendRouterLog } from "./log.js";
-import { loadConfig, resolveJudgeEndpoints } from "./config.js";
+import { loadConfig, resolveJudgeEndpoints, applyProfile } from "./config.js";
+
+/**
+ * The pi CLI flag that selects a per-session profile at launch:
+ * `pi --shift-router-profile=<name>` (SPEC §9.6).
+ */
+const PROFILE_FLAG = "shift-router-profile";
 import { findBestModelForTier, formatTierDisplay } from "./tier.js";
 import { formatStatusBarLabel } from "./status-bar.js";
 import { classify } from "./judge.js";
@@ -63,6 +69,31 @@ function allTiersIdentical(config: ShiftRouterConfig): boolean {
 }
 
 export default function slimRouterExtension(pi: ExtensionAPI) {
+  // Register the launch flag BEFORE the session starts — an unregistered
+  // pi flag makes the whole process refuse to start (SPEC §9.6).
+  //
+  // `registerFlag` exists from pi 1.0.0 onwards. On an older host the API
+  // is missing — the extension must still load (the `/router profile`
+  // command keeps working), so the flag is simply unavailable there.
+  if (typeof pi.registerFlag === "function") {
+    pi.registerFlag(PROFILE_FLAG, {
+      description: "pi-shift-router: select a per-session profile for this pi process (e.g. --shift-router-profile=opus-heavy)",
+      type: "string",
+    });
+  }
+
+  /**
+   * The config as it exists on disk (defaults ← user ← project). This is the
+   * ONLY object that may ever be written back.
+   */
+  let baseConfig: ShiftRouterConfig;
+  /**
+   * The EFFECTIVE config — what the router actually runs on: the base
+   * merged with the selected per-session profile (SPEC §9.6). Never written
+   * to disk: `saveConfig` writes the whole snapshot, so handing it an
+   * effective config would push this session's profile chains into the
+   * user's global file.
+   */
   let config: ShiftRouterConfig;
   let state: RouterState;
   let fastEndpoints: ProviderEndpoint[] = [];
@@ -120,7 +151,79 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
   let primarySpeedRecorded = false;
 
   const getConfig = () => config;
+  const getBaseConfig = () => baseConfig;
   const getState = () => state;
+
+  // ── Per-session profiles (SPEC §9.6) ────────────────────────────
+  //
+  // A profile is a named preset of tier chains (defined in the user
+  // config); the SELECTION is session state and is never written to disk.
+  //
+  // The launch flag is a pi extension flag: `pi --shift-router-profile=x`.
+  // pi re-injects flag values on every session start, so it behaves like
+  // `pi --model` — a process-level default that survives `/new`.
+
+  /** The profile named by the launch flag, or null when the flag is absent. */
+  function readLaunchProfile(): string | null {
+    // `getFlag` is missing on pi hosts older than 1.0.0 — no flag, no profile.
+    if (typeof pi.getFlag !== "function") return null;
+    const raw = pi.getFlag(PROFILE_FLAG);
+    if (typeof raw !== "string") return null;
+    const name = raw.trim();
+    return name.length > 0 ? name : null;
+  }
+
+  /**
+   * The launch flag's profile — but only when it is actually DEFINED.
+   * An unknown name selects nothing (the caller warns), so a typo in the
+   * flag can never leave the session in a half-applied state.
+   */
+  function resolveLaunchProfile(): string | null {
+    const name = readLaunchProfile();
+    if (name === null) return null;
+    return baseConfig.profiles?.[name] ? name : null;
+  }
+
+  /**
+   * Select a profile (or clear it with null) for THIS session.
+   *
+   * Recomputes the effective config and re-resolves the Judge endpoints —
+   * in `fast-chain` mode the Judge chain IS the Fast chain, so a profile
+   * that replaced Fast also replaced the Judge (SPEC §9.6).
+   */
+  async function setActiveProfile(name: string | null, ctx: { ui?: any; modelRegistry?: any }) {
+    // An unknown profile changes NOTHING: the selection stays as it is and
+    // the configured chains stay in force. The caller tells the user.
+    if (name !== null && !baseConfig.profiles?.[name]) {
+      appendRouterLog(`[ShiftRouter] profile "${name}" is not defined — selection unchanged`);
+      return;
+    }
+    if (state.activeProfile === name) return;
+    state.activeProfile = name;
+    config = applyProfile(baseConfig, name);
+    try {
+      fastEndpoints = await resolveJudgeEndpoints(
+        config,
+        undefined,
+        undefined,
+        process.env,
+        (ctx.modelRegistry ?? statusBarRegistry) as any,
+      );
+    } catch (error) {
+      // A failed resolution must not take the router down — the judge
+      // ladder falls back to the remaining rungs on its own.
+      appendRouterLog(
+        `[ShiftRouter] judge endpoints unresolved after profile change: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (config.ux.routerLogVerbose) {
+      appendRouterLog(
+        `[ShiftRouter] profile: ${name ?? "(none)"}` +
+          (name ? ` → fast=${config.tiers.fast.models.map((m) => m.model).join(",")}` : ""),
+      );
+    }
+    if (ctx.ui) updateBar(ctx.ui, config, state);
+  }
 
   /** Animate the status badge suffix until stopLoading is called. */
   function startLoading(ui: any, base: string) {
@@ -146,8 +249,13 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
 
   async function init(ctx: { cwd: string; ui?: any; modelRegistry?: any }) {
     if (initialized) return;
-    config = await loadConfig(ctx.cwd);
+    baseConfig = await loadConfig(ctx.cwd);
     state = createRouterState();
+    // The launch flag is the session's initial selection. It is a
+    // process-level default (pi re-injects flag values on every session
+    // start), so it applies to this session too — see session_start.
+    state.activeProfile = resolveLaunchProfile();
+    config = applyProfile(baseConfig, state.activeProfile);
     fastEndpoints = await resolveJudgeEndpoints(config, undefined, undefined, process.env, ctx.modelRegistry as any);
     initialized = true;
     // Startup banner: makes stale dist/ builds detectable at a glance.
@@ -178,6 +286,20 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     await init(ctx);
+    // Re-establish the profile selection for THIS session (SPEC §9.6).
+    // The launch flag wins — it is a process-level default that survives
+    // `/new` — and without it a new session starts with no profile, so a
+    // selection can never leak across a session boundary.
+    const launchProfile = readLaunchProfile();
+    if (launchProfile && !baseConfig.profiles?.[launchProfile]) {
+      // An unknown profile changes nothing and says so — never a silent
+      // fall-back, which is the failure mode that wastes an afternoon.
+      ctx.ui.notify(
+        `pi-shift-router: ⚠ --${PROFILE_FLAG}=${launchProfile}: no such profile — using the configured chains`,
+        "warning",
+      );
+    }
+    await setActiveProfile(resolveLaunchProfile(), ctx);
     // Bug B (v1.4.2): sync the ACTUAL session model into display state. The
     // router's state starts as a guess ("fast", null) and pi's session
     // default never emits model_select, so the badge could show a model that
@@ -1057,13 +1179,17 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
   registerCommands(
     pi,
     getConfig,
+    getBaseConfig,
     getState,
     async () => {
       const { loadConfig: reloadConfig, invalidateConfigCache: clearCache } =
         await import("./config.js");
       clearCache();
       try {
-        config = await reloadConfig(process.cwd());
+        baseConfig = await reloadConfig(process.cwd());
+        // The profile SURVIVES a config reload: the effective config is
+        // recomputed from the freshly loaded base with the same selection.
+        config = applyProfile(baseConfig, state.activeProfile);
       } catch {
         /* keep old config on reload failure */
       }
@@ -1080,6 +1206,10 @@ export default function slimRouterExtension(pi: ExtensionAPI) {
     },
     (tier: Tier) => setManualOverrideTier(state, tier),
     (ui: any) => updateBar(ui, config, state),
+    // Selecting a profile is session state — it never touches the disk.
+    async (name: string | null, ui: any) => {
+      await setActiveProfile(name, { ui });
+    },
   );
 }
 

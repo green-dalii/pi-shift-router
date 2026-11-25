@@ -1401,7 +1401,7 @@ the cost curve is measured.
 (message length, token counts and tool counts are forbidden inputs, exactly as the Judge
 forbids keyword rules); no change to θ, `minConfidence`, or cache-aware behaviour.
 
-### 9.6 Per-session profiles (implemented — pending release)
+### 9.6 Per-session profiles (shipped in v1.10.0)
 
 **The gap.** The configuration system has two file scopes (§5.1): user
 (`~/.pi/agent/pi-shift-router.json`) and project (`<cwd>/.pi/pi-shift-router.json`).

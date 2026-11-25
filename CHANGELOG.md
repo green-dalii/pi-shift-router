@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (0.1.0 – 0.3.1) were developed under the `pi-slim-router` working name and never
 > published to npm. The plugin was first published to npm as `pi-shift-router` at v0.4.0.
 
+## [1.10.0] — Per-session profiles
+
+### Added
+
+- **Per-session tier-chain profiles.** A named preset holds its own Fast/Smart model
+  chains; picking one applies it to the current session only. `pi --shift-router-profile=<name>`
+  selects one at launch, `/router profile <name>` inside a session, and `/router profile off`
+  returns to the configured chains.
+- **Profiles in the config wizard.** `/router config` → **📋 Profiles** lists the presets;
+  a new one starts from your current chains, and each profile's own menu edits its Fast/Smart
+  chains with the same editor the tiers use.
+- **Enable and disable from the wizard.** A profile's menu toggles it for the session — the
+  same path `/router profile` uses, so the wizard never owns the selection.
+- **The active profile in sight.** `/router` shows it in the compact status line, and
+  `/router status` discloses the Judge coupling — in `fast-chain` mode the Judge *is* the
+  Fast chain, so replacing Fast replaces the Judge.
+
+### Changed
+
+- **The config layer is split.** The base config (what is on disk) and the effective config
+  (base plus the active profile) are now separate. Only the base config is ever mutated or
+  saved, so a profile-adjusted config cannot reach disk — the guarantee is structural, not
+  a convention.
+- **The profiles menu is navigation; a profile's own menu is action.** Every action lives
+  in one place: a toggle row that says what picking it will do, the two chain editors, and
+  a delete that asks first.
+
+### Fixed
+
+- **A profile named `off` can no longer shadow the command.** `/router profile off` clears
+  the session's selection, so the wizard refuses that name.
+- **Deleting the active profile clears the selection** instead of leaving the session
+  pointing at a preset that no longer exists.
+- **A model whose name contains "Clear" is no longer mistaken for the clear-chain option**,
+  which used to empty the chain instead of picking that model.
+- **One row per meaning in the menus.** No two rows of one menu open with the same icon —
+  guarded by a test, not a convention.
+
 ## [1.9.0] — Orchestration you can trust and tune
 
 ### Added

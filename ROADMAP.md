@@ -75,6 +75,11 @@ either rewriting a shared config file.
 the *selection* is session state (`RouterState`), never written to disk. Contract:
 SPEC §9.6. Decision log: MEMORY 2026-11-15.
 
+**Status: shipped in v1.10.0** (PR [#66](https://github.com/green-dalii/pi-shift-router/pull/66)).
+Phases A–C are done: the types, the single merge point, the base/effective split, the launch
+flag, the command, the wizard surface, and the live-host e2e. Phase D remains **optional** —
+the issue author has not answered open question [1], and the defaults stand.
+
 **Open questions (defaults in brackets).** [1] "Multiple sessions" = separate pi windows
 [the issue says "on the same project"] or `/new` in one window [then the phase-2
 persistence below becomes required, not optional]? [2] Profile chain replaces or appends
@@ -84,32 +89,32 @@ asked [1]; the defaults stand until answered.
 
 **Phase A — core.**
 
-- [ ] **① Types** (`types.ts`). `SessionProfile { fast?: ModelRef[]; smart?: ModelRef[] }`;
+- [x] **① Types** (`types.ts`). `SessionProfile { fast?: ModelRef[]; smart?: ModelRef[] }`;
       `ShiftRouterConfig.profiles?: Record<string, SessionProfile>` (no `profiles` key in
       `DEFAULT_CONFIG` — absent means "none defined"); `RouterState.activeProfile:
       string | null` (session state, **not** module scope — gotcha G1 below).
-- [ ] **② The one merge point** (`config.ts`). `applyProfile(base, name): ShiftRouterConfig`
+- [x] **② The one merge point** (`config.ts`). `applyProfile(base, name): ShiftRouterConfig`
       — pure, never mutates `base`; null/unknown name → base unchanged; `fast`/`smart`
       **replace** the tier chain wholesale; an omitted tier keeps the base chain.
       Lives in `config.ts` (config resolution; the one-way dependency rule holds).
-- [ ] **③ Effective vs base config** (`index.ts`). Keep **two** variables: `baseConfig`
+- [x] **③ Effective vs base config** (`index.ts`). Keep **two** variables: `baseConfig`
       (as loaded from disk) and `config` (effective = `applyProfile(base, activeProfile)`).
       `init()` and the `onConfigChanged` reload both recompute the effective config, and
       a profile **survives a config reload**. A profile switch re-resolves the judge
       endpoints (`resolveFastEndpoints` reads `config.tiers.fast.models` — gotcha G3).
-- [ ] **④ The launch flag** (`index.ts`). `pi.registerFlag("shift-router-profile", {
+- [x] **④ The launch flag** (`index.ts`). `pi.registerFlag("shift-router-profile", {
       type: "string" })`, read via `pi.getFlag`. Verified against pi 1.6.0:
       `dist/cli/args.js` puts `--name=value` in `unknownFlags`;
       `dist/core/agent-session-services.js:8` `applyExtensionFlagValues` injects it;
       `dist/core/extensions/loader.js:306` `getFlag` reads it. pi re-applies flag values
       on **every** session start, so the flag is a process-level default like
       `pi --model` (gotcha G4). An unregistered flag makes pi reject the option (G5).
-- [ ] **⑤ The command** (`commands.ts`). `/router profile` (list + active), `/router profile
+- [x] **⑤ The command** (`commands.ts`). `/router profile` (list + active), `/router profile
       <name>` (select), `/router profile off` (clear). An unknown name notifies and changes
       **nothing**. The wizard edits and saves the **base** config; the router runs on the
       effective one — the invariant that keeps a session's chains out of the user's global
       file (G2). A wizard *row* is optional; the command is the required surface.
-- [ ] **⑥ Tests** (TDD, red first) — `tests/profiles.test.ts`: replace-not-append; omitted
+- [x] **⑥ Tests** (TDD, red first) — `tests/profiles.test.ts`: replace-not-append; omitted
       fields keep the base; base is not mutated; unknown name is a no-op; the profile's
       model is what `findBestModelForTier` / `findTierForModel` see; `/route-force` still
       outranks the profile; `/router smart` resolves from the profile's chain; **selecting
